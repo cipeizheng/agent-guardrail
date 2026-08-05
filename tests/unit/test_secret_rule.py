@@ -43,9 +43,7 @@ async def test_non_target_tool_and_non_applicable_event_are_allowed() -> None:
 
     other_tool = await engine.evaluate(tool_context(body=FAKE_SECRET, tool_name="save_draft"))
     wrong_phase = await engine.evaluate(tool_context(body=FAKE_SECRET, phase=Phase.POST_TOOL))
-    wrong_kind = await engine.evaluate(
-        tool_context(body=FAKE_SECRET, kind=EventKind.USER_MESSAGE)
-    )
+    wrong_kind = await engine.evaluate(tool_context(body=FAKE_SECRET, kind=EventKind.TOOL_RESULT))
 
     assert other_tool.action is Action.ALLOW
     assert wrong_phase.action is Action.ALLOW

@@ -10,7 +10,7 @@ from typing import Self
 from pydantic import BaseModel, ConfigDict, Field
 
 from agent_guardrail.core import DetectorRegistry, GuardrailEngine, RuleRegistry
-from agent_guardrail.models import Decision, GuardrailContext
+from agent_guardrail.models import Decision, GuardrailContext, PendingTrace
 from agent_guardrail.runtime.bootstrap import (
     build_engine_from_policy_file,
     build_engine_from_policy_yaml,
@@ -39,7 +39,7 @@ class PolicyInfo(BaseModel):
 
 
 class GuardrailRuntime:
-    """Own one configured engine and expose a stable DecisionEvaluator facade."""
+    """Own one configured engine and expose a stable PolicyAnalyzer facade."""
 
     def __init__(self, engine: GuardrailEngine) -> None:
         self._engine = engine
@@ -114,11 +114,18 @@ class GuardrailRuntime:
             self._state = RuntimeState.CLOSED
 
     async def evaluate(self, context: GuardrailContext) -> Decision:
-        """Delegate to the active engine only while the runtime is ready."""
+        """Compatibility bridge for the v0.1 single-event decision endpoint."""
 
         if not self.ready:
             raise RuntimeNotReadyError("guardrail runtime is not ready")
         return await self._engine.evaluate(context)
+
+    async def analyze_pending(self, pending: PendingTrace) -> Decision:
+        """Analyze an atomic pending event batch only while the runtime is ready."""
+
+        if not self.ready:
+            raise RuntimeNotReadyError("guardrail runtime is not ready")
+        return await self._engine.analyze_pending(pending)
 
     async def __aenter__(self) -> Self:
         await self.start()

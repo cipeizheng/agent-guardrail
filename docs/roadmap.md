@@ -49,24 +49,29 @@
 ## 阶段 2：规则、Detector 与模拟 Agent
 
 状态：进行中。已完成 Runtime、Session、GuardedLLMClient、GuardedToolExecutor、testing 迁移、
-Secret Detector、支持 post_llm/pre_tool 双重检查的 Secret 外发规则和 Email Agent 演示。其余
-内置规则继续按小切片实现。
+Secret Detector、基础 PII Detector、支持 post_llm/pre_tool 双重检查的 Secret/PII 外发规则、
+Tool Allowlist/Denylist、Trace 关系查询、类型化 `EventRelation` 可信来源追踪、`tool_result_flow`
+规则、Event 信任来源、Candidate batch、`PendingTrace → PolicyAnalyzer` 原子分析和 Email Agent
+演示。项目已根据 ADR-0007 转向 Invariant 风格事件分析；独立 Message/Input Normalizer 与表达式
+Policy 尚未实现。
 
 预计：4～6 个工作日。
 
 任务：
 
-- `DecisionEvaluator` Protocol 与 `GuardrailRuntime` 门面。
+- `PolicyAnalyzer` Protocol 与 `GuardrailRuntime` 门面。
 - `EnforcementSession`：统一 Event、Trace、脱敏 Decision Event 和 Audit。
 - `GuardedLLMClient`：共享 Session 的 pre/post LLM Enforcement。
 - `GuardedToolExecutor`：改为共享 Session，不再自行维护 Trace/Audit。
 - 将 ScriptedLLM、FakeToolExecutor、SimulatedAgent 迁到 `agent_guardrail.testing`。
 - SimulatedAgent 只依赖 LLMClient/ToolExecutor Protocol。
-- Tool allow/deny。
+- Tool allow/deny（已实现）。
+- 同一 Session 的来源边、直接/传递关系查询和 ToolResult 来源流向限制（已实现）。
 - 参数约束和外部域名。
 - 调用次数。
 - Secret Detector。
-- 基础 PII Detector。
+- 基础 PII Detector（已实现：邮箱、常见北美电话、美国 SSN、Luhn 银行卡号、中国大陆
+  18 位居民身份证号和大陆手机号形状）。
 - Email Agent 示例。
 
 验收：
@@ -74,9 +79,10 @@ Secret Detector、支持 post_llm/pre_tool 双重检查的 Secret 外发规则�
 - 无 API Key 可完成端到端演示。
 - pre_llm block 后 LLM 调用次数为零。
 - pre_tool block 后工具调用次数为零。
-- Secret 日志只有类型/指纹，无原值。
+- Secret/PII 日志只有类型、审计安全指纹或遮罩证据，无原值。
 - 固定 Trace fixtures 可复现所有规则。
-- Runtime、Inline LLM 与 Inline Tool 复用同一 DecisionEvaluator 契约。
+- 仅有时间顺序而没有显式来源边时，不得声称 ToolResult 流向 ToolCall。
+- Runtime、Inline LLM 与 Inline Tool 复用同一 PendingTrace/PolicyAnalyzer 契约。
 - block 的原始 Event 不进入 Trace，只留下脱敏 Decision Event。
 - 生产包不导入 testing，SimulatedAgent 不依赖具体 Guardrail Wrapper。
 
@@ -98,8 +104,27 @@ Secret Detector、支持 post_llm/pre_tool 双重检查的 Secret 外发规则�
 4. **2D：解耦模拟 Agent（已完成）**
    - Agent 构造函数只接收 Protocol。
    - 更新 demo 和端到端安全语义测试。
-5. **2E：结构化 Tool 规则**
-   - Tool allow/deny、参数 Schema/范围、外部域名和调用次数。
+5. **2E：结构化 Tool 规则（进行中）**
+   - Tool allow/deny（已完成）。
+   - 基础 PII 外发阻断（已完成）。
+   - Trace 来源边、关系查询和 `tool_result_flow`（已完成）。
+   - 参数 Schema/范围、外部域名和调用次数（未实现）。
+6. **2F：Event Graph 演进（进行中）**
+   - 类型化 `EventRelation` 与 Trace 图不变量（已完成）。
+   - `EventOrigin`、Candidate Relation、候选事件批量原子提交（已完成）。
+   - `PendingTrace`、Decision v2 Event identity 与 `PolicyAnalyzer`（已完成）。
+   - 独立 Message/Input Normalizer 与全量历史信任边界（未实现，ADR-0007 已接受）。
+   - 多模态 Content 与跨请求 TraceStore（未实现，分别需要专项安全设计）。
+7. **2G：Invariant 风格策略输入（下一步）**
+   - 定义独立 Message/ToolCall/ToolResult Event Schema 和封闭 TextContent。
+   - 为显式增量 Framework Adapter 与全量历史 Gateway 分别定义 Input Normalizer。
+   - 迁移 Built-in Rule 直接查询一等 ToolCall，确认边界 ModelRequest/ModelResponse EventKind 是否仍
+     有协议职责；无引用者删除，有降级职责者明确标记。
+   - 建立 CEL 与安全改造 Invariant Interpreter 的真实策略兼容性测试集。
+8. **2H：Sandboxed Expression Policy（2G 后）**
+   - 根据技术验证新增 Parser/AST/类型检查/有界 Interpreter。
+   - YAML 增加严格 expression entry；不允许 module path、动态 Python 或 I/O。
+   - 量词、变量绑定、Relation 查询和 Detector 调用必须覆盖正常、类型错误和资源耗尽测试。
 
 ## 阶段 3：Gateway v0.1
 
@@ -201,12 +226,17 @@ Secret Detector、支持 post_llm/pre_tool 双重检查的 Secret 外发规则�
 
 ## 暂不排期
 
-- 自定义 DSL。
 - 完整 Explorer UI。
 - 未审核的 LLM 策略生成。
 - 任意 Python Policy 上传。
 - 自动内容改写/Redact。
 - 精确跨系统污点追踪。
+
+## 已接受但待排期
+
+- Sandboxed Expression Policy；先完成阶段 2G 的 CEL/Invariant Interpreter 技术验证。
+- 认证后的跨请求 TraceStore 与 Guardrail Run Token。
+- 多模态 Content、媒体下载安全和 TransformationPlan。
 
 ## 推荐实施切片
 

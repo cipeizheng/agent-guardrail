@@ -14,18 +14,34 @@ from agent_guardrail.enforcement import (
     GuardrailBlocked,
     GuardrailUnavailable,
 )
-from agent_guardrail.models import Action, Decision, Event, EventKind, Phase, Trace
-from agent_guardrail.runtime import DecisionEvaluator, GuardrailRuntime
+from agent_guardrail.models import (
+    Action,
+    CandidateEvent,
+    CandidateRelation,
+    Decision,
+    Event,
+    EventKind,
+    EventOrigin,
+    EventRelation,
+    PendingTrace,
+    Phase,
+    RelationKind,
+    Trace,
+)
+from agent_guardrail.runtime import GuardrailRuntime, PolicyAnalyzer
 
 __version__ = "0.1.0"
 
 __all__ = [
     "Action",
+    "CandidateEvent",
+    "CandidateRelation",
     "Decision",
-    "DecisionEvaluator",
     "EnforcementSession",
     "Event",
     "EventKind",
+    "EventOrigin",
+    "EventRelation",
     "GuardrailEngine",
     "GuardedLLMClient",
     "GuardedToolExecutor",
@@ -33,6 +49,9 @@ __all__ = [
     "GuardrailRuntime",
     "GuardrailUnavailable",
     "Phase",
+    "PendingTrace",
+    "PolicyAnalyzer",
+    "RelationKind",
     "Trace",
     "create_default_detector_registry",
     "create_default_rule_registry",

@@ -1,7 +1,9 @@
 # ADR-0001：Python Rule + YAML Config
 
-- 状态：Accepted
+- 状态：Accepted（动态策略的排他性结论被 ADR-0007 部分替代）
 - 日期：2026-08-04
+- 替代范围：受信任 Python Rule 与严格 YAML 配置继续有效；“动态表达式继续暂缓”由 ADR-0007
+  的双轨 Policy 决策替代
 
 ## 背景
 

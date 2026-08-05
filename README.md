@@ -1,21 +1,34 @@
 # Agent Guardrail
 
-一个面向 AI Agent 的小型、可解释 Guardrail Runtime 与 Gateway。
+一个面向 AI Agent 的 Invariant 风格、可解释 Policy Analyzer 与 Enforcement Gateway。
 
-项目参考 Invariant 的规则建模和 Invariant Gateway 的代理分层，但刻意不实现自定义
-DSL。可信规则使用 Python 编写，YAML 只负责启用规则、配置参数和选择执行动作。
+项目采用一等 Event、显式关系、`past_events + pending_events` 增量分析和 Gateway Enforcement
+分层。当前策略仍由受信任 Python Rule 实现，YAML 负责启用规则、配置参数和选择动作；受限表达式
+Policy 是已接受的架构方向，但 Parser/Interpreter 尚未实现。
 
 ## 当前状态
 
 Core v0.1、OpenAI-compatible Gateway 与 MCP `2026-07-28` Streamable HTTP Gateway 已经跑通。
-两种 Gateway 复用同一个 Runtime 和 EnforcementSession：OpenAI 路径执行
+两种 Gateway 在同一进程复用一个 Runtime，并使用相同的 EnforcementSession 机制；每个 OpenAI
+Chat Completions 请求和每个 MCP `tools/call` 都创建独立 Session。OpenAI 路径执行
 `pre_llm → 固定上游 → post_llm`；MCP 路径在真实 `tools/call` 前后执行
 `pre_tool → 固定 MCP Server → post_tool`。MCP Client 和 Agent 只需修改 server URL，不导入
 本项目；被 `pre_tool` 阻断的调用不会到达 MCP Server。
 
-当前内置策略能力只有 Secret Detector 和 `secret_exfiltration` Rule。Dockerfile/Compose、Policy
-热加载、跨请求 Session Store、LLM 实时 Streaming、MCP 订阅以及具体 Agent Framework Adapter
-仍是后续工作。
+当前内置策略能力包括 Secret Detector、基础 PII Detector、`secret_exfiltration`、
+`pii_exfiltration`、支持 allowlist/denylist 的 `tool_access`，以及根据显式 Trace 来源边限制
+ToolResult 流向目标 Tool 的 `tool_result_flow` Rule。Trace 当前支持按 ID/类型/阶段/Tool/直接来源
+查询和传递祖先查询；来源边使用类型化 `EventRelation`，Inline 包装器会为能精确对应的模型与工具
+事件记录来源。PII 第一版只识别邮箱、
+常见北美格式电话、带分隔符的美国 SSN、通过 Luhn 校验的银行卡号、中国大陆 18 位居民身份证号
+和大陆手机号形状，不等价于完整 PII 合规扫描。Dockerfile/Compose、Policy 热加载、跨请求
+Session Store、LLM 实时 Streaming、MCP 订阅以及具体 Agent Framework Adapter 仍是后续工作。
+
+Core 的主分析边界已经迁移为 `PendingTrace → PolicyAnalyzer.analyze_pending`：一次检查可以包含
+多个同 Phase Candidate Event；allow/log 原子提交整个批次，block 丢弃全部原始 pending Event，
+只保留一个脱敏 Decision Event。Event 使用 `client_asserted/observed/derived` 区分信任来源，
+Decision v2 绑定完整 pending Event ID 集合。现有模型请求/响应仍以单个边界 Event 进入该批次
+主路径；独立 Message/Input Normalizer 尚未接入。
 
 ## 核心目标
 
@@ -23,13 +36,15 @@ Core v0.1、OpenAI-compatible Gateway 与 MCP `2026-07-28` Streamable HTTP Gatew
 - 保证 `pre_tool` 返回 `block` 时工具绝不执行。
 - 将 Detector、Rule、Decision 与 Enforcement 分离。
 - 使用统一 Event/Trace 模型隔离不同 Agent 和模型供应商格式。
+- 使用同一 Trace 内经过校验的来源边表达事件关系，不把时间先后当成数据流。
+- 原子分析本次新增的 pending Event，避免只匹配历史 Event 就重复阻断当前操作。
 - 同时提供内联 SDK、OpenAI HTTP Gateway 与 MCP HTTP Gateway。
 - 默认可完全本地运行，并为后续单容器 Docker 部署保持单进程拓扑。
-- 所有决策可解释、可测试、可审计。
+- Decision 结构可解释、可测试；包含 Violation 的 Decision 可通过可选 AuditSink 脱敏审计。
 
 ## 非目标
 
-- 自研 DSL、Parser 或 AST。
+- 当前版本交付 CEL 或 Invariant Policy Language；表达式引擎必须先完成真实样例和资源限制验证。
 - 第一版支持任意 Python 策略上传。
 - 第一版支持实时流式响应安全拦截；MCP 请求级 SSE 会完整、有界缓冲后再做 `post_tool`。
 - 第一版提供完整 Web UI、多租户或分布式控制平面。
@@ -92,7 +107,7 @@ uv run python examples/secret_email_demo.py
 runtime = GuardrailRuntime.from_policy_file("examples/policies/secret-email.yaml")
 
 async with runtime:
-    session = EnforcementSession(evaluator=runtime, trace=Trace(id="task-1"))
+    session = EnforcementSession(analyzer=runtime, trace=Trace(id="task-1"))
     llm = GuardedLLMClient(inner=provider, session=session)
     tools = GuardedToolExecutor(inner=tool_executor, session=session)
     agent = SomeAgent(llm=llm, tools=tools)

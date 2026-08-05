@@ -6,10 +6,12 @@
 定义框架无关协议和确定性测试 Agent，并实现 OpenAI-compatible Gateway 与 MCP `2026-07-28`
 Gateway；LangGraph 和 OpenAI Agents SDK 放在后续适配层。
 
-当前实现状态（2026-08-04）：`GuardrailRuntime`、共享 `EnforcementSession`、
+当前实现状态（2026-08-06）：`GuardrailRuntime`、共享 `EnforcementSession`、
 `GuardedLLMClient`、`GuardedToolExecutor` 以及 testing 中的 `ScriptedLLM`、
 `FakeToolExecutor`、`SimulatedAgent` 均已实现。模拟 Agent 只依赖普通 LLM/Tool Protocol；同一
-Session 确保 LLM 与 Tool 的四个检查点共享一条 Trace。OpenAI-compatible 非流式 Gateway 也已
+Session 确保 LLM 与 Tool 的四个检查点共享一条 Trace，并通过
+`PendingTrace → PolicyAnalyzer` 原子分析 Candidate batch。当前 Wrapper 仍使用单 Candidate 便利
+入口，独立 Message Framework Adapter 尚未实现。OpenAI-compatible 非流式 Gateway 也已
 实现，真实 Agent 不需要导入本项目，只需将 OpenAI SDK `base_url` 指向 `/v1/openai`，或将
 官方 MCP SDK 的 server URL 指向 `/v1/mcp`。
 
@@ -17,7 +19,7 @@ Session 确保 LLM 与 Tool 的四个检查点共享一条 Trace。OpenAI-compat
 
 已完成基础：
 
-1. `DecisionEvaluator`、`GuardrailRuntime` 与共享 `EnforcementSession`。
+1. `PolicyAnalyzer`、`GuardrailRuntime` 与共享 `EnforcementSession`。
 2. 通用 `LLMClient`/`ToolExecutor` Protocol 与 Inline Wrapper。
 3. testing 模拟 Agent：无 API Key、可重复、安全语义测试。
 
@@ -99,7 +101,7 @@ class ToolExecutor(Protocol):
 Guardrail 通过实现相同 Protocol 的装饰器对象接入，两个包装器必须共享任务级 Session：
 
 ```python
-session = EnforcementSession(evaluator=runtime, trace=Trace(id="trace-1"))
+session = EnforcementSession(analyzer=runtime, trace=Trace(id="trace-1"))
 llm: LLMClient = GuardedLLMClient(inner=provider, session=session)
 tools: ToolExecutor = GuardedToolExecutor(inner=executor, session=session)
 agent = SomeAgent(llm=llm, tools=tools)
@@ -107,8 +109,9 @@ agent = SomeAgent(llm=llm, tools=tools)
 
 Agent 只依赖 Protocol，不依赖 Guardrail Engine、Rule 或具体 Wrapper 类型。
 
-`EnforcementSession` 负责 Canonical Event、Trace 和脱敏审计，Wrapper 只控制副作用时机。这避免
-LLM 与 Tool 各自维护一份不一致的 Trace。
+`EnforcementSession` 负责 Candidate 验证、PendingTrace、Canonical Event、Trace 和脱敏审计，
+Wrapper 只控制副作用时机。这避免 LLM 与 Tool 各自维护一份不一致的 Trace。Provider 请求历史
+默认是 `client_asserted`；真实模型响应和工具结果由 Wrapper 标记为 `observed`。
 
 ## 4. 接入模式选择
 
@@ -125,9 +128,10 @@ LLM Gateway 拦截响应中的 ToolCall，只表示 Agent 没有收到该 ToolCa
 
 ## 5. Inline 检查点
 
-Wrapper 固定执行四个检查点，但实际是否命中取决于启用的 Rule。当前默认 Registry 中只有
-`secret_exfiltration`，它只支持 `post_llm` 和 `pre_tool`；下面列出的其他检查内容是这些阶段的
-扩展边界，不代表对应规则已经实现。
+Wrapper 固定执行四个检查点，但实际是否命中取决于启用的 Rule。当前默认 Registry 中的
+`secret_exfiltration`、`pii_exfiltration` 和 `tool_access` 都支持 `post_llm` 和 `pre_tool`；
+`tool_result_flow` 只支持 `pre_tool`。下面列出的其他检查内容是这些阶段的扩展边界，不代表对应
+规则已经实现。
 
 ### 5.1 pre_llm
 
@@ -184,8 +188,10 @@ Enforcement 是否真实发生。
 
 ## 7. 模拟 Agent 场景
 
-当前已经端到端覆盖安全请求和 Secret ToolCall 阻断：模型生成带 Secret 的 `send_email` 调用后，
-`post_llm` 阻断，工具执行次数为零。下面其余场景是后续规则集的验收目标，不是当前已实现能力。
+当前已经端到端覆盖安全工具循环、Secret ToolCall 阻断和基于来源链的
+`read_private_file → send_email` 阻断；PII 外发也已在 Inline LLM/Tool 和 Gateway 边界集成测试中
+覆盖。下面每个场景分别标明当前状态，不能把未实现的外部目的地、Prompt Injection 或调用次数规则
+当成现有能力。
 
 ### 场景 A：正常查询
 
@@ -210,8 +216,21 @@ read_file → "token=ghp_..." → send_email
 ```
 
 当前 Secret Detector/Rule 已实现；直接出现在 `send_email` ToolCall 参数中的 Secret 会在
-post_llm/pre_tool 阻断，日志不包含完整 token。跨 `read_file → send_email` 的来源追踪仍需更多
-Trace 规则。
+post_llm/pre_tool 阻断，日志不包含完整 token。当前 `tool_result_flow` 还能在任务级 Inline Session
+中，根据自动建立的 `ToolResult → ModelRequest → ModelResponse → ToolCall` 来源链阻断配置的
+`read_private_file → send_email` 路径，并保证 `send_email` 执行次数为零。它阻断配置的来源路径，
+并不证明两个 payload 包含相同 token；需要内容级判断时仍应结合 Secret/PII Rule。
+
+### 场景 C2：基础 PII 外发
+
+```text
+model → send_email(body="customer@example.test")
+```
+
+当前基础 PII Detector/Rule 已实现；配置选择的邮箱、常见北美格式电话、美国 SSN、通过 Luhn
+校验的银行卡号、中国大陆 18 位居民身份证号或大陆手机号形状直接出现在目标 ToolCall 参数中时，
+会在 post_llm/pre_tool 阻断。它不覆盖姓名、地址等上下文 PII，不验证证件真实签发或手机号当前
+分配，也不扫描 `post_tool` 输出。
 
 ### 场景 D：Prompt Injection
 
@@ -266,19 +285,17 @@ async with Client("http://127.0.0.1:8080/v1/mcp", cache=None) as client:
 验证安全调用和阻断调用。集成缝只有 server URL；MCP Gateway 保护的是经过它代理的
 `tools/call`，不覆盖 Agent 的本地函数、Shell 或绕过 Gateway 的直连请求。
 
-## 9. 协议与 Enforcement Adapter 契约
+## 9. 协议 Adapter 与 Enforcement 契约
 
-每个 Adapter 必须提供：
+协议 Adapter 只负责原始请求/响应与 Canonical Model 的转换和协议级结构校验。完整集成边界由
+Adapter 与 Inline Wrapper/Gateway 共同提供：
 
-- 原始请求到 Canonical Event 的转换。
-- Canonical Decision 到框架错误/拒绝结果的映射。
-- Trace ID 传播。
-- 不记录供应商 API Key。
-- 明确声明是否支持 streaming。
-- 契约测试和 Fake Provider 测试。
-- 说明 Session 是请求级、任务级还是协议 Session 级。
+- Enforcement Point 将 Canonical Decision 映射为框架异常或协议拒绝结果。
+- Enforcement/Gateway 传播 Trace ID，且不记录供应商 API Key。
+- 集成文档明确声明 streaming 支持范围以及 Session 是请求级、任务级还是协议 Session 级。
+- Adapter 与 Enforcement Point 都有契约测试和 Fake Provider 测试。
 
-Adapter 不允许：
+Adapter 和 Enforcement Point 都不允许：
 
 - 绕过 `pre_tool` 直接执行工具。
 - 将 Rule 逻辑写进格式转换代码。
@@ -308,3 +325,5 @@ Rule 检查该事件与 ToolCall 参数一致且未过期。模拟 Agent 应覆�
 - 同一策略可用于模拟 Agent、Inline Adapter 与 Gateway。
 - SimulatedAgent 不导入 GuardrailRuntime、Engine 或具体 Wrapper。
 - LLM 与 Tool Wrapper 使用同一个 Session/Trace。
+- Canonical 结构精确对应时，Trace 形成请求/响应、调用/结果及下一轮模型输入的来源链。
+- 仅有时间先后但没有来源边时，`tool_result_flow` 不得命中。

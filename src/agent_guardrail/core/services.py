@@ -26,7 +26,7 @@ class RuleServices:
         self._detectors = detectors
         self._policy_hash = policy_hash
         self._detector_timeout_seconds = detector_timeout_ms / 1_000
-        self._cache: dict[tuple[str, str, str, str], tuple[Detection, ...]] = {}
+        self._cache: dict[tuple[str, str, str, str, str, str], tuple[Detection, ...]] = {}
 
     @property
     def detector_cache_size(self) -> int:
@@ -46,7 +46,14 @@ class RuleServices:
 
         detector = self._detectors.get(detector_name)
         content_hash = sha256(text.encode("utf-8")).hexdigest()
-        cache_key = (self._policy_hash, detector.name, detector.version, content_hash)
+        cache_key = (
+            self._policy_hash,
+            detector.name,
+            detector.version,
+            content_hash,
+            context.event.id,
+            context.event.phase.value,
+        )
         detections = self._cache.get(cache_key)
         if detections is None:
             detection_context = DetectionContext(

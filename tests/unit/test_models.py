@@ -7,10 +7,17 @@ from pydantic import ValidationError
 
 from agent_guardrail.models import (
     Action,
+    CandidateEvent,
+    CandidateRelation,
     Decision,
     Event,
     EventKind,
+    EventOrigin,
+    EventRelation,
+    GuardrailContext,
+    PendingTrace,
     Phase,
+    RelationKind,
     Trace,
     Violation,
 )
@@ -21,10 +28,10 @@ def event(*, sequence: int, trace_id: str = "trace-1") -> Event:
         id=f"event-{sequence}",
         trace_id=trace_id,
         sequence=sequence,
-        kind=EventKind.USER_MESSAGE,
-        phase=Phase.PRE_LLM,
+        kind=EventKind.TOOL_CALL,
+        phase=Phase.PRE_TOOL,
         timestamp=datetime(2026, 8, 4, tzinfo=UTC),
-        payload={"content": "hello"},
+        payload={"call_id": f"call-{sequence}", "name": "safe", "arguments": {}},
     )
 
 
@@ -35,7 +42,106 @@ def test_trace_preserves_order_and_queries_history() -> None:
 
     assert trace.next_sequence == 2
     assert trace.previous() == trace.events[-1]
-    assert trace.count(kind=EventKind.USER_MESSAGE) == 2
+    assert trace.count(kind=EventKind.TOOL_CALL) == 2
+    assert trace.events[0].origin is EventOrigin.CLIENT_ASSERTED
+
+
+def test_trace_queries_direct_and_transitive_event_relationships() -> None:
+    root = event(sequence=0)
+    child = event(sequence=1).model_copy(
+        update={
+            "relations": (EventRelation(source_event_id=root.id),),
+        }
+    )
+    grandchild = event(sequence=2).model_copy(
+        update={
+            "relations": (EventRelation(source_event_id=child.id),),
+        }
+    )
+    trace = Trace(id="trace-1", events=(root, child, grandchild))
+
+    assert trace.by_id(child.id) == child
+    assert trace.by_id("missing") is None
+    assert trace.find(source_event_id=root.id) == (child,)
+    assert trace.sources_of(grandchild) == (child,)
+    assert trace.ancestors_of(grandchild) == (root, child)
+    assert trace.events_since(root.id) == (child, grandchild)
+    assert trace.events_since(child.id, inclusive=True) == (child, grandchild)
+    assert child.model_dump(mode="json")["relations"] == [
+        {"source_event_id": root.id, "kind": RelationKind.DERIVED_FROM.value}
+    ]
+
+
+@pytest.mark.parametrize(
+    "source_event_id",
+    [None, "", " event-0", "event-0 "],
+)
+def test_event_relation_rejects_invalid_source_event_id(source_event_id: object) -> None:
+    with pytest.raises(ValidationError, match="source_event_id"):
+        EventRelation(source_event_id=source_event_id)  # type: ignore[arg-type]
+
+
+def test_event_rejects_duplicate_relations_and_legacy_metadata() -> None:
+    relation = EventRelation(source_event_id="event-0")
+    with pytest.raises(ValidationError, match="relations must be unique"):
+        Event(
+            **event(sequence=1).model_dump(exclude={"relations"}),
+            relations=(relation, relation),
+        )
+
+    with pytest.raises(ValidationError, match="typed relations"):
+        Event(
+            **event(sequence=1).model_dump(exclude={"metadata"}),
+            metadata={"source_event_ids": ["event-0"]},
+        )
+
+
+def test_trace_rejects_missing_or_forward_source_events() -> None:
+    child = event(sequence=0).model_copy(
+        update={
+            "relations": (EventRelation(source_event_id="event-1"),),
+        }
+    )
+
+    with pytest.raises(ValidationError, match="earlier events"):
+        Trace(id="trace-1", events=(child, event(sequence=1)))
+
+    trace = Trace(id="trace-1")
+    with pytest.raises(ValueError, match="earlier events"):
+        trace.append(child)
+
+
+def test_event_cannot_cite_itself_as_a_source() -> None:
+    with pytest.raises(ValidationError, match="cite itself"):
+        Event(
+            **event(sequence=0).model_dump(exclude={"relations"}),
+            relations=(EventRelation(source_event_id="event-0"),),
+        )
+
+
+def test_trace_rejects_guardrail_decision_as_a_source() -> None:
+    decision = event(sequence=0).model_copy(update={"kind": EventKind.GUARDRAIL_DECISION})
+    derived = event(sequence=1).model_copy(
+        update={
+            "relations": (EventRelation(source_event_id=decision.id),),
+        }
+    )
+
+    with pytest.raises(ValidationError, match="decision events"):
+        Trace(id="trace-1", events=(decision, derived))
+
+
+def test_context_rejects_source_that_does_not_precede_current_event() -> None:
+    source = event(sequence=0)
+    current = event(sequence=0).model_copy(
+        update={
+            "id": "event-current",
+            "relations": (EventRelation(source_event_id=source.id),),
+        }
+    )
+
+    with pytest.raises(ValidationError, match="precede"):
+        GuardrailContext(event=current, trace=Trace(id="trace-1", events=(source,)))
 
 
 def test_trace_rejects_wrong_sequence_and_bounds() -> None:
@@ -79,6 +185,7 @@ def test_decision_requires_aggregated_action() -> None:
         phase=Phase.PRE_TOOL,
         message="matched",
         action=Action.BLOCK,
+        event_ids=("event-1",),
     )
 
     with pytest.raises(ValidationError, match="aggregate"):
@@ -86,8 +193,67 @@ def test_decision_requires_aggregated_action() -> None:
             action=Action.LOG,
             trace_id="trace-1",
             event_id="event-1",
+            pending_event_ids=("event-1",),
             phase=Phase.PRE_TOOL,
             policy_version=1,
             policy_hash="12345678",
             violations=(violation,),
         )
+
+
+def test_pending_trace_builds_prefix_contexts_for_each_event() -> None:
+    past = event(sequence=0)
+    first = event(sequence=1).model_copy(update={"id": "pending-1"})
+    second = event(sequence=2).model_copy(
+        update={
+            "id": "pending-2",
+            "relations": (EventRelation(source_event_id=first.id),),
+        }
+    )
+    pending = PendingTrace(
+        trace=Trace(id="trace-1", events=(past,)),
+        events=(first, second),
+        primary_event_id=second.id,
+    )
+
+    first_context = pending.context_for(first)
+    second_context = pending.context_for(second)
+
+    assert pending.event_ids == (first.id, second.id)
+    assert pending.primary_event == second
+    assert first_context.trace.events == (past,)
+    assert second_context.trace.events == (past, first)
+    assert second_context.trace.sources_of(second) == (first,)
+
+
+def test_pending_trace_rejects_mixed_phase_and_sequence_gap() -> None:
+    first = event(sequence=0)
+    wrong_phase = event(sequence=1).model_copy(update={"phase": Phase.POST_LLM})
+    with pytest.raises(ValidationError, match="same enforcement phase"):
+        PendingTrace(
+            trace=Trace(id="trace-1"),
+            events=(first, wrong_phase),
+            primary_event_id=wrong_phase.id,
+        )
+
+    with pytest.raises(ValidationError, match="continue the committed trace"):
+        PendingTrace(
+            trace=Trace(id="trace-1"),
+            events=(event(sequence=1),),
+            primary_event_id="event-1",
+        )
+
+
+def test_candidate_relation_requires_one_explicit_source() -> None:
+    with pytest.raises(ValidationError, match="exactly one"):
+        CandidateRelation()
+    with pytest.raises(ValidationError, match="exactly one"):
+        CandidateRelation(source_event_id="event-1", source_candidate_key="candidate-1")
+
+    candidate = CandidateEvent(
+        key="candidate-1",
+        kind=EventKind.TOOL_CALL,
+        phase=Phase.PRE_TOOL,
+        payload={"call_id": "call-1", "name": "safe", "arguments": {}},
+    )
+    assert candidate.origin is EventOrigin.CLIENT_ASSERTED

@@ -9,7 +9,7 @@ from pydantic import JsonValue
 from agent_guardrail.enforcement.exceptions import GuardrailBlocked
 from agent_guardrail.enforcement.protocols import LLMClient
 from agent_guardrail.enforcement.session import EnforcementSession
-from agent_guardrail.models import EventKind, ModelRequest, ModelResponse, Phase
+from agent_guardrail.models import EventKind, EventOrigin, ModelRequest, ModelResponse, Phase
 
 
 class GuardedLLMClient:
@@ -25,6 +25,7 @@ class GuardedLLMClient:
             phase=Phase.PRE_LLM,
             payload=cast(dict[str, JsonValue], request.model_dump(mode="json")),
             metadata={"adapter": "inline_llm"},
+            origin=EventOrigin.CLIENT_ASSERTED,
         )
         if pre_decision.blocked:
             raise GuardrailBlocked(pre_decision)
@@ -35,6 +36,8 @@ class GuardedLLMClient:
             phase=Phase.POST_LLM,
             payload=cast(dict[str, JsonValue], response.model_dump(mode="json")),
             metadata={"adapter": "inline_llm"},
+            source_event_ids=(pre_decision.event_id,),
+            origin=EventOrigin.OBSERVED,
         )
         if post_decision.blocked:
             raise GuardrailBlocked(post_decision)

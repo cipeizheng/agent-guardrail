@@ -30,14 +30,14 @@
 - I/O API async-first，纯计算可以同步。
 - Core 不导入 FastAPI、OpenAI SDK 或具体 Agent 框架。
 - Provider/Framework 代码位于 `adapters/`，HTTP composition 位于 `gateway/`。
-- Inline Enforcement 位于 `enforcement/`，且只依赖 `DecisionEvaluator`。
+- Inline Enforcement 位于 `enforcement/`，且只依赖 `PolicyAnalyzer`。
 - Fake 与 SimulatedAgent 位于 `testing/`，生产模块不得导入它们。
 - 配置模型 `extra="forbid"`。
 - 使用显式依赖注入，不使用不可控的全局单例。
 - 时间、ID、HTTP Client 和 Tool Executor 必须可替换以便测试。
 - 不使用 `eval`、`exec`、动态外部 import 或 pickle 策略。
 - 不把未知异常吞掉并返回 allow。
-- 不把 Secret、完整 prompt 或工具结果写入普通日志。
+- 不把 Secret、原始 PII、完整 prompt 或工具结果写入普通日志。
 
 ## 4. 测试模板
 
@@ -54,7 +54,8 @@
 
 - allow 时副作用执行一次。
 - log 时副作用执行一次且审计存在。
-- block 时副作用执行零次。
+- pre_llm/pre_tool block 时副作用执行零次。
+- post_llm/post_tool block 时底层副作用已经发生一次，但原始结果不得释放给调用方或进入 Trace。
 - 超时时符合 fail-open/fail-closed 配置。
 - 原始敏感内容未出现在错误或日志。
 
@@ -93,7 +94,7 @@ Gateway 测试统一使用 HTTP MockTransport/Fake Upstream，不允许单元测
 
 验收：
 - ...
-- block 时副作用计数必须为零
+- pre block 时副作用计数必须为零
 - pytest 和 ruff 通过
 ```
 
@@ -101,15 +102,19 @@ Gateway 测试统一使用 HTTP MockTransport/Fake Upstream，不允许单元测
 
 - 检查是否在 Policy Decision 前启动了副作用。
 - 检查错误是否被错误地当作 allow。
-- 检查 raw Secret 是否进入日志。
+- 检查 raw Secret/PII 是否进入日志。
 - 检查规则是否错误地依赖 Provider 原始格式。
 - 检查 YAML 是否能够指定任意 Python 对象。
-- 检查缓存 key 是否包含 policy/detector version。
+- 检查缓存 key 是否包含 policy/detector version；Detector evidence 依赖 Event Context 时还必须包含
+  event identity，不能在 pending batch 内错配证据。
 - 检查 Trace 是否有无限增长风险。
 - 检查拒绝响应是否泄露堆栈或完整策略。
-- 检查 block 是否真的阻止了工具/网络调用。
+- 检查 pre block 是否真的阻止工具/网络调用，以及 post block 是否隐藏原始结果。
 - 检查 LLM 与 Tool Wrapper 是否错误地创建了不同 Session/Trace。
 - 检查 block 的原始 Event 是否误入 Trace 或 Audit。
+- 检查 pending batch 是否同 Phase、有界并原子提交，Decision/Violation 是否绑定正确 Event ID。
+- 检查 Provider payload 是否能把 `client_asserted` 提升为 `observed/derived`。
+- 检查是否把 sequence/时间先后错误地当成 provenance。
 
 ## 8. 何时停止并请求设计决策
 
@@ -117,7 +122,7 @@ Gateway 测试统一使用 HTTP MockTransport/Fake Upstream，不允许单元测
 
 - 要新增 Action 或改变严重度顺序。
 - 要支持 streaming 并声称可阻断输出。
-- 要允许外部用户编写动态策略。
+- 要改变 ADR-0007 已接受的表达式策略安全边界，或在 CEL/Invariant Interpreter 之间作最终选择。
 - 要引入远程 Core、数据库或消息队列。
 - 要改变 Canonical Event 字段语义。
 - 要保存完整 prompt/工具结果。

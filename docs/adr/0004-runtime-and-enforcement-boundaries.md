@@ -1,7 +1,9 @@
 # ADR-0004：统一 Runtime 与 Enforcement 边界
 
-- 状态：Accepted
+- 状态：Accepted（单事件 Runtime 主边界被 ADR-0007 部分替代）
 - 日期：2026-08-04
+- 替代范围：Runtime/Enforcement 职责和副作用顺序继续有效；`GuardrailContext`/`DecisionEvaluator`
+  作为主评估边界的结论由 ADR-0007 的 `PendingTrace`/`PolicyAnalyzer` 替代
 
 ## 背景
 

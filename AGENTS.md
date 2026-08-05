@@ -18,19 +18,26 @@
 - OpenAI-compatible 非流式 `/v1/openai/chat/completions` Gateway。
 - MCP `2026-07-28` 无状态 `/v1/mcp` Gateway；只支持 `server/discover`、`ping`、
   `tools/list`、`tools/call`。
-- 当前内置规则只有 `secret_exfiltration`，当前内置 Detector 只有 `secrets`。
+- `Trace` 的受控关系查询、类型化 `EventRelation` 来源边和 Inline/Gateway 边界来源记录；
+  `source_event_ids` 只是从 Relation 计算的只读便捷属性和 Session 可信参数。
+- `EventOrigin`、`CandidateEvent`、批量原子提交的 `PendingTrace` 和 `PolicyAnalyzer`；现有单 Event
+  Session 入口已经委托 pending batch 主路径，Decision v2 绑定完整 pending Event ID 集合。
+- 当前内置规则为 `secret_exfiltration`、`pii_exfiltration`、`tool_access` 和
+  `tool_result_flow`；当前内置 Detector 为 `secrets` 和 `pii`。
 
-当前没有实现：Dockerfile/Compose、Policy 热加载、跨请求 Session Store、LLM 实时 Streaming、
-MCP `subscriptions/listen`、OpenAI Agents SDK/LangGraph Adapter、远程 Core、Sandbox 和更多规则集。
+当前没有实现：独立 Message Trace Event/Input Normalizer、表达式 Policy/CEL/Invariant DSL、
+Dockerfile/Compose、Policy 热加载、跨请求 Session Store、LLM 实时 Streaming、MCP
+`subscriptions/listen`、OpenAI Agents SDK/LangGraph Adapter、远程 Core、Sandbox 和更多规则集。
 文档和实现不得把这些规划项写成已交付能力。
 
 ## 不可破坏的约束
 
-- 不设计或引入自定义 DSL。
 - 不使用 Python `eval`/`exec` 执行配置或外部策略。
-- YAML 只能选择已注册规则并提供经过 Pydantic 校验的参数。
+- 当前 YAML 只能选择已注册规则并提供经过 Pydantic 校验的参数；表达式 Policy 必须按 ADR-0007
+  在 Event/Analyzer 稳定后通过受限 Parser、类型检查和有界 Interpreter 引入，不能生成 Python。
 - Core 只返回 Decision，不直接执行 Agent、LLM 或 Tool 副作用。
-- Runtime 只管理 Core 生命周期并实现 DecisionEvaluator，不解释 Provider 协议或执行 Enforcement。
+- Runtime 只管理 Core 生命周期并实现 `PolicyAnalyzer`，不解释 Provider 协议或执行 Enforcement；
+  `evaluate(GuardrailContext)` 只是直接 v0.1 API 的兼容桥，内部 Session 不得重新依赖它。
 - Enforcement 必须发生在 `enforcement/` 或 Gateway 层；协议 Adapter 只做转换和协议校验。
 - Inline LLM 与 Tool Wrapper 必须共享同一个 EnforcementSession/Trace。
 - `pre_llm` 检查完成前不得请求上游模型。
@@ -38,9 +45,16 @@ MCP `subscriptions/listen`、OpenAI Agents SDK/LangGraph Adapter、远程 Core�
 - 非流式响应完整通过 `post_llm` 后才能返回客户端。
 - MCP `tools/call` 必须为每个 HTTP 请求创建独立 Session，完整通过 `pre_tool/post_tool`；现代
   MCP 不得重新引入 `initialize`、`Mcp-Session-Id`、GET stream 或 DELETE session。
-- 任何日志和 Violation metadata 都不得包含完整 Secret/API Key。
+- 任何日志和 Violation metadata 都不得包含完整 Secret/API Key 或原始 PII。
 - 外部上传的 Python Rule 默认不受支持。
 - `block` 的原始 Event 不得提交到 Trace，只能提交脱敏 Decision Event。
+- Candidate batch 必须同 Trace、同 Phase、有界并原子提交；任一 pending Event 被 block 时，整个批次
+  的原始 Event 都不得提交。Violation 必须绑定至少一个 pending Event。
+- Event 信任来源默认 `client_asserted`；只有 Enforcement 层可以标记 `observed`/`derived`，Provider
+  payload 不得提升自身信任等级。
+- 来源关系只能保存在类型化 `Event.relations` 中；`metadata["source_event_ids"]` 必须拒绝。
+  Enforcement 调用方只能通过 Session 的 `source_event_ids` 专用参数提交，且只能指向同一 Trace
+  中更早、已允许/记录的非 Decision Event。时间先后不得冒充来源关系。
 - 生产模块不得导入 `agent_guardrail.testing`。
 - 新增行为必须包含正常、违规、边界与副作用未发生的测试。
 
@@ -74,5 +88,7 @@ uv build
 
 正确性和安全边界 > 可解释性 > 可测试性 > 性能 > 功能数量。
 
-不要因为参考 Invariant 而复制其 DSL、远程服务耦合或输入检查与上游请求并发的实现。
+参考 Invariant 时优先吸收一等事件、`past_events + pending_events`、Monitor 和 Policy/Enforcement
+分层；不要复制其自动顺序 dataflow、远程服务耦合或输入检查与上游请求并发的实现。策略语言必须
+先用真实样例评估 CEL 与安全改造 Invariant Interpreter，不能仅凭相似语法直接复制。
 不要因为参考 NeMo Guardrails 而复制 Colang、动态 `actions.py` 加载或完整对话编排运行时。

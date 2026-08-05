@@ -1,4 +1,4 @@
-"""Block configured outbound tools when selected arguments contain secrets."""
+"""Block configured outbound tools when selected arguments contain PII."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from typing import cast
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator
 
 from agent_guardrail.core.services import RuleServices
+from agent_guardrail.detectors.pii import PIIEntityType
 from agent_guardrail.models import (
     Detection,
     EventKind,
@@ -19,55 +20,49 @@ from agent_guardrail.models import (
 )
 
 
-class SecretExfiltrationConfig(BaseModel):
-    """Configuration accepted by the registered secret exfiltration rule."""
+class PIIExfiltrationConfig(BaseModel):
+    """Strict configuration for selected outbound PII checks."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     tools: tuple[str, ...] = Field(min_length=1)
     text_arguments: tuple[str, ...] = Field(min_length=1)
+    entities: tuple[PIIEntityType, ...] = Field(min_length=1)
 
-    @field_validator("tools")
+    @field_validator("tools", "text_arguments", "entities")
     @classmethod
-    def validate_tools(cls, tools: tuple[str, ...]) -> tuple[str, ...]:
-        if len(tools) != len(set(tools)):
-            raise ValueError("tool names must be unique")
-        if any(not tool.strip() for tool in tools):
-            raise ValueError("tool names cannot be blank")
-        return tools
-
-    @field_validator("text_arguments")
-    @classmethod
-    def validate_arguments(cls, arguments: tuple[str, ...]) -> tuple[str, ...]:
-        if len(arguments) != len(set(arguments)):
-            raise ValueError("text arguments must be unique")
-        if any(not argument.strip() for argument in arguments):
-            raise ValueError("text argument names cannot be blank")
-        return arguments
+    def validate_unique_values(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        if len(values) != len(set(values)):
+            raise ValueError("configured values must be unique")
+        if any(not value.strip() for value in values):
+            raise ValueError("configured values cannot be blank")
+        if any(value != value.strip() for value in values):
+            raise ValueError("configured values cannot contain surrounding whitespace")
+        return values
 
 
-class SecretExfiltrationRule:
-    """Use the secret detector only for configured outbound tool arguments."""
+class PIIExfiltrationRule:
+    """Use the PII detector only for configured outbound tool arguments."""
 
     def __init__(
         self,
         *,
         rule_id: str,
         phases: frozenset[Phase],
-        config: SecretExfiltrationConfig,
+        config: PIIExfiltrationConfig,
     ) -> None:
         self.id = rule_id
         self.phases = phases
         self.config = config
+        self._entities = frozenset(config.entities)
 
     async def evaluate(
         self,
         context: GuardrailContext,
         services: RuleServices,
     ) -> list[Violation]:
-        calls = self._extract_calls(context)
         violations: list[Violation] = []
-        for call_index, call in enumerate(calls):
+        for call_index, call in enumerate(self._extract_calls(context)):
             if call.name not in self.config.tools:
                 continue
 
@@ -76,29 +71,29 @@ class SecretExfiltrationRule:
             for argument_name in self.config.text_arguments:
                 if argument_name not in call.arguments:
                     continue
-                text = self._to_text(call.arguments[argument_name])
-                argument_detections = await services.detect(
-                    "secrets",
-                    text,
+                detected = await services.detect(
+                    "pii",
+                    self._to_text(call.arguments[argument_name]),
                     context=context,
                     path=self._argument_path(context.event.phase, call_index, argument_name),
                 )
-                if argument_detections:
+                selected = [detection for detection in detected if detection.type in self._entities]
+                if selected:
                     matched_arguments.append(argument_name)
-                    detections.extend(argument_detections)
+                    detections.extend(selected)
 
             if detections:
                 violations.append(
                     Violation(
                         rule_id=self.id,
-                        code="secret_exfiltration",
+                        code="pii_exfiltration",
                         phase=context.event.phase,
-                        message="A protected tool argument contains credential-like data.",
+                        message="A protected tool argument contains selected personal data.",
                         evidence=tuple(detections),
                         metadata={
                             "tool_name": call.name,
                             "argument_names": cast(JsonValue, matched_arguments),
-                            "secret_types": cast(
+                            "pii_types": cast(
                                 JsonValue,
                                 sorted({detection.type for detection in detections}),
                             ),

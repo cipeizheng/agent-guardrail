@@ -18,6 +18,7 @@ from agent_guardrail.models import (
     Detection,
     DetectionContext,
     GuardrailContext,
+    PendingTrace,
     Phase,
     Violation,
 )
@@ -83,6 +84,28 @@ async def test_engine_aggregates_all_rule_actions() -> None:
     assert [violation.action for violation in decision.violations] == [
         Action.LOG,
         Action.BLOCK,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_engine_analyzes_every_pending_event_and_binds_findings() -> None:
+    rule = StaticRule("batch-rule", frozenset({Phase.PRE_TOOL}), "batch_match")
+    engine = engine_for(RuleBinding(rule=rule, action=Action.LOG))
+    first_context = tool_context(body="first")
+    second = tool_context(body="second").event.model_copy(update={"id": "event-2", "sequence": 1})
+    pending = PendingTrace(
+        trace=first_context.trace,
+        events=(first_context.event, second),
+        primary_event_id=second.id,
+    )
+
+    decision = await engine.analyze_pending(pending)
+
+    assert decision.pending_event_ids == (first_context.event.id, second.id)
+    assert decision.event_id == second.id
+    assert [violation.event_ids for violation in decision.violations] == [
+        (first_context.event.id,),
+        (second.id,),
     ]
 
 
@@ -154,6 +177,46 @@ class DetectorRule:
         return []
 
 
+@dataclass
+class PreviousPendingRule:
+    id: str = "previous-pending-rule"
+    phases: frozenset[Phase] = frozenset({Phase.PRE_TOOL})
+
+    async def evaluate(
+        self,
+        context: GuardrailContext,
+        services: RuleServices,
+    ) -> list[Violation]:
+        del services
+        previous = context.trace.previous()
+        if previous is None:
+            return []
+        return [
+            Violation(
+                rule_id=self.id,
+                code="related_pending_events",
+                phase=context.event.phase,
+                message="Two pending events are related for this test.",
+                event_ids=(previous.id,),
+            )
+        ]
+
+
+@dataclass
+class MutatingRule:
+    id: str = "mutating-rule"
+    phases: frozenset[Phase] = frozenset({Phase.PRE_TOOL})
+
+    async def evaluate(
+        self,
+        context: GuardrailContext,
+        services: RuleServices,
+    ) -> list[Violation]:
+        del services
+        context.event.payload["arguments"] = {"changed": True}
+        return []
+
+
 @pytest.mark.asyncio
 async def test_detector_results_are_cached_within_one_evaluation() -> None:
     detector = CountingDetector()
@@ -168,6 +231,55 @@ async def test_detector_results_are_cached_within_one_evaluation() -> None:
 
     assert decision.action is Action.ALLOW
     assert detector.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_rule_can_bind_a_finding_to_multiple_pending_events() -> None:
+    engine = engine_for(
+        RuleBinding(rule=PreviousPendingRule(), action=Action.LOG),
+    )
+    first_context = tool_context(body="first")
+    second = tool_context(body="second").event.model_copy(update={"id": "event-2", "sequence": 1})
+    pending = PendingTrace(
+        trace=first_context.trace,
+        events=(first_context.event, second),
+        primary_event_id=second.id,
+    )
+
+    decision = await engine.analyze_pending(pending)
+
+    assert decision.violations[0].event_ids == (first_context.event.id, second.id)
+
+
+@pytest.mark.asyncio
+async def test_engine_rejects_rule_mutation_of_pending_trace() -> None:
+    engine = engine_for(RuleBinding(rule=MutatingRule(), action=Action.BLOCK))
+    pending = PendingTrace.from_context(tool_context(body="sensitive"))
+
+    with pytest.raises(RuntimeError, match="mutated the pending trace"):
+        await engine.analyze_pending(pending)
+
+
+@pytest.mark.asyncio
+async def test_detector_cache_does_not_reuse_event_scoped_evidence_across_batch() -> None:
+    detector = CountingDetector()
+    detectors = DetectorRegistry()
+    detectors.register(detector)
+    engine = engine_for(
+        RuleBinding(rule=DetectorRule(), action=Action.BLOCK),
+        detectors=detectors,
+    )
+    first_context = tool_context(body="first")
+    second = tool_context(body="second").event.model_copy(update={"id": "event-2", "sequence": 1})
+    pending = PendingTrace(
+        trace=first_context.trace,
+        events=(first_context.event, second),
+        primary_event_id=second.id,
+    )
+
+    await engine.analyze_pending(pending)
+
+    assert detector.call_count == 2
 
 
 @pytest.mark.asyncio

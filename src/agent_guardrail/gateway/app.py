@@ -29,7 +29,14 @@ from agent_guardrail.gateway.http import RequestReadError, read_json_body
 from agent_guardrail.gateway.mcp import MCPGateway
 from agent_guardrail.gateway.mcp_upstream import MCPUpstream
 from agent_guardrail.gateway.upstream import OpenAIUpstream, UpstreamError
-from agent_guardrail.models import Decision, EventKind, GuardrailContext, Phase, Trace
+from agent_guardrail.models import (
+    Decision,
+    EventKind,
+    EventOrigin,
+    GuardrailContext,
+    Phase,
+    Trace,
+)
 from agent_guardrail.runtime import GuardrailRuntime
 
 
@@ -209,7 +216,7 @@ def create_app(
             )
 
         session = EnforcementSession(
-            evaluator=services.runtime,
+            analyzer=services.runtime,
             trace=Trace(id=trace_id, max_events=settings.max_trace_events),
             audit=services.audit,
         )
@@ -222,6 +229,7 @@ def create_app(
                     canonical_request.model_dump(mode="json"),
                 ),
                 metadata={"adapter": "openai_gateway"},
+                origin=EventOrigin.CLIENT_ASSERTED,
             )
         except GuardrailUnavailable:
             return _unavailable_response(trace_id, Phase.PRE_LLM)
@@ -272,6 +280,8 @@ def create_app(
                     canonical_response.model_dump(mode="json"),
                 ),
                 metadata={"adapter": "openai_gateway"},
+                source_event_ids=(pre_decision.event_id,),
+                origin=EventOrigin.OBSERVED,
             )
         except GuardrailUnavailable:
             return _unavailable_response(trace_id, Phase.POST_LLM)

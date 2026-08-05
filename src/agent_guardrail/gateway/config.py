@@ -111,9 +111,7 @@ class GatewaySettings(BaseSettings):
                 self.mcp_upstream_auth_mode == "server_managed"
                 and self.mcp_upstream_api_key is None
             ):
-                raise ValueError(
-                    "mcp_upstream_api_key is required in MCP server_managed mode"
-                )
+                raise ValueError("mcp_upstream_api_key is required in MCP server_managed mode")
         return self
 
     @property

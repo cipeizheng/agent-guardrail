@@ -1,6 +1,6 @@
-"""Public runtime facade and decision protocol."""
+"""Public runtime facade and pending-analysis protocol."""
 
-from agent_guardrail.runtime.protocols import DecisionEvaluator
+from agent_guardrail.runtime.protocols import PolicyAnalyzer
 from agent_guardrail.runtime.runtime import (
     GuardrailRuntime,
     PolicyInfo,
@@ -9,8 +9,8 @@ from agent_guardrail.runtime.runtime import (
 )
 
 __all__ = [
-    "DecisionEvaluator",
     "GuardrailRuntime",
+    "PolicyAnalyzer",
     "PolicyInfo",
     "RuntimeNotReadyError",
     "RuntimeState",

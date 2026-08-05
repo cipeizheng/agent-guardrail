@@ -11,7 +11,13 @@ from agent_guardrail.models import Phase
 from agent_guardrail.runtime import GuardrailRuntime
 from tests.integration.test_gateway import POLICY_FILE, app_client
 from tests.integration.test_guarded_llm import engine_for_phase
-from tests.support import FAKE_SECRET
+from tests.support import (
+    FAKE_CN_MOBILE,
+    FAKE_PII,
+    FAKE_SECRET,
+    pii_engine,
+    tool_access_engine,
+)
 
 
 def mcp_settings(*, allowed_origins: tuple[str, ...] = ()) -> GatewaySettings:
@@ -102,6 +108,52 @@ async def test_post_tool_block_hides_raw_result_after_one_upstream_execution() -
     assert response.json()["error"]["data"]["phase"] == "post_tool"
     assert FAKE_SECRET not in response.text
     assert len(requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_tool_access_pre_tool_block_makes_zero_upstream_requests() -> None:
+    runtime = GuardrailRuntime(tool_access_engine())
+    async with app_client(
+        lambda request: httpx.Response(200, json=tool_response("must not execute")),
+        settings=mcp_settings(),
+        runtime=runtime,
+    ) as (client, requests):
+        response = await client.post(
+            "/v1/mcp",
+            headers=request_headers(),
+            json=request_payload(),
+        )
+
+    assert response.status_code == 200
+    assert response.json()["error"]["code"] == -32040
+    assert response.json()["error"]["data"]["phase"] == "pre_tool"
+    assert response.json()["error"]["data"]["violations"][0]["code"] == ("tool_access_denied")
+    assert requests == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sensitive_value", [FAKE_PII, FAKE_CN_MOBILE])
+async def test_pii_pre_tool_block_makes_zero_upstream_requests(
+    sensitive_value: str,
+) -> None:
+    runtime = GuardrailRuntime(pii_engine())
+    async with app_client(
+        lambda request: httpx.Response(200, json=tool_response("must not execute")),
+        settings=mcp_settings(),
+        runtime=runtime,
+    ) as (client, requests):
+        response = await client.post(
+            "/v1/mcp",
+            headers=request_headers(),
+            json=request_payload(body=sensitive_value),
+        )
+
+    assert response.status_code == 200
+    assert response.json()["error"]["code"] == -32040
+    assert response.json()["error"]["data"]["phase"] == "pre_tool"
+    assert response.json()["error"]["data"]["violations"][0]["code"] == ("pii_exfiltration")
+    assert sensitive_value not in response.text
+    assert requests == []
 
 
 @pytest.mark.asyncio

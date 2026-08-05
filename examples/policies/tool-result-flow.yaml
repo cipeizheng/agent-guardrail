@@ -1,0 +1,18 @@
+version: 1
+
+engine:
+  default_timeout_ms: 1000
+  detector_timeout_ms: 500
+  on_rule_error: block
+  on_detector_timeout: block
+  max_violations: 100
+
+rules:
+  - id: prevent-private-file-email
+    type: tool_result_flow
+    enabled: true
+    action: block
+    phases: [pre_tool]
+    config:
+      source_tools: [read_private_file]
+      destination_tools: [send_email]

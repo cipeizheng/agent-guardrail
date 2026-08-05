@@ -1,9 +1,9 @@
 # Gateway 设计
 
-当前状态（2026-08-04）：OpenAI 非流式 Gateway v0.1 与 MCP `2026-07-28` Streamable HTTP
-Gateway 已实现。两者共享应用工厂、Runtime lifespan、认证、固定上游、大小/超时限制和 JSONL
-Audit；分别执行 pre/post LLM 与 pre/post Tool Enforcement。Policy reload、LLM 实时 Streaming 和
-Docker 镜像仍未实现。
+当前状态（2026-08-06）：OpenAI 非流式 Gateway v0.1 与 MCP `2026-07-28` Streamable HTTP
+Gateway 已实现。两者共享应用工厂、Runtime lifespan、认证、固定上游、大小/超时限制和可选的
+JSONL AuditSink；分别执行 pre/post LLM 与 pre/post Tool Enforcement。Policy reload、LLM 实时
+Streaming 和 Docker 镜像仍未实现。
 
 ## 1. 定位
 
@@ -26,8 +26,8 @@ Gateway Route
       LLM Provider
 ```
 
-未来可把 Runtime 后面的 `DecisionEvaluator` 切换成远程 Decision Client，但行为和数据模型保持
-一致。MVP 不启动单独 Core 服务。
+未来可把 Runtime 后面的 `PolicyAnalyzer` 切换成远程 Analyzer Client，但 PendingTrace、Decision
+identity 和 fail-closed 语义必须保持一致。MVP 不启动单独 Core 服务。
 
 ## 2. 组件边界
 
@@ -71,7 +71,7 @@ OpenAI Adapter ── normalize ──► Canonical Event
 明确拒绝：
 
 - `stream=true`：当前返回明确的 400，不静默降级。
-- 未在 allowlist 的上游地址。
+- 配置了 host allowlist 时，与 allowlist 不匹配的固定上游地址。
 - 无法解析的消息或 ToolCall。
 - 超出请求体限制的输入。
 
@@ -99,7 +99,8 @@ client = OpenAI(
 )
 ```
 
-`POST /v1/evaluate` 请求体直接使用版本化 `GuardrailContext`，响应为版本化 `Decision`。该端点
+`POST /v1/evaluate` 请求体当前仍使用版本化 `GuardrailContext`，Runtime 将其适配成单 Event
+PendingTrace，响应为 Decision v2。该端点
 只做判断，不代理 LLM/Tool，也不执行 block 行为；调用方必须自行 Enforcement。它默认关闭，启用
 后与其他受保护端点共用 `AGENT_GUARDRAIL_GATEWAY_API_KEYS`。如果没有配置 Gateway Key，当前
 认证器会允许匿名访问，因此生产启用该端点时必须同时配置认证或通过外部网络边界限制访问。
@@ -135,10 +136,17 @@ LLM Gateway v0.1 每个 HTTP 请求创建一个新的 `EnforcementSession`：
 
 - Trace ID 由服务端产生，通过响应 Header 和错误体返回。
 - 请求携带的历史 messages 是本次 `model_request` 的不可信内容，不自动转换成可信审批事件。
+- Session 内部统一构造 `PendingTrace` 并调用 `PolicyAnalyzer.analyze_pending`；现有 Gateway
+  Adapter 尚未把 messages 拆成独立 Candidate，因此使用单 Candidate 便利入口。
 - 不接受客户端通过 Header 覆盖生产 Trace、Policy 或 tenant 属性。
 - 不维护跨 HTTP 请求 Session Store。
+- 同一请求内，post_llm Event 会通过类型化 Relation 引用本次 pre_llm Event；MCP `tools/call` 的
+  post_tool Event 同样引用本次 pre_tool Event。Gateway 不接受客户端通过 metadata 或协议字段
+  自报来源 Relation。
 - Tool 调用次数等跨请求规则在 LLM 或现代 MCP Gateway 中都不可依赖；当前只有任务级 Inline
   Session 能提供这类历史。
+- pre_llm/MCP 调用请求使用 `client_asserted` 来源，真实上游响应和 ToolResult 使用 `observed`；
+  客户端 JSON 中不能设置或提升该字段。
 
 未来若引入会话存储，必须用新 ADR 定义认证、并发、TTL、租户隔离和重放语义。
 
@@ -154,10 +162,11 @@ OpenAI Adapter 必须：
 - 拒绝重复 ToolCall ID、无法解析的 arguments 和非法 role/content 组合。
 - 验证响应中的工具名存在于请求声明的 tools 中。
 - 使用请求中声明的 JSON Schema 校验 ToolCall arguments。
-- 将 Provider 特有字段限制在有大小上限的 metadata，不允许 Rule 默认依赖。
+- 只把明确支持的 `ModelRequest`/`ModelResponse` 字段转换成 Canonical Model。其他受支持的 OpenAI
+  字段可以严格校验后代理，但不复制到 Event metadata，也不暴露给 Rule；未知字段直接拒绝。
 
-上述结构校验是协议完整性要求。生产 Policy 中的 Tool allow/deny、参数范围、Secret/PII 等仍由
-Rule 判断。
+上述结构校验是协议完整性要求。生产 Policy 中的 Tool allow/deny 已由 `tool_access` Rule 实现；
+Secret/PII 外发分别由 `secret_exfiltration`/`pii_exfiltration` 判断，参数范围仍未实现。
 
 ## 7. 严格请求生命周期
 
@@ -165,25 +174,27 @@ Rule 判断。
 1. 验证认证、Content-Type 和大小
 2. OpenAI Adapter 严格解析 Provider Request
 3. 转换 Canonical Events
-4. 创建请求级 Session，完整等待 Runtime 的 pre_llm Decision
+4. 创建请求级 Session，完整等待 Runtime 的 pre_llm Decision；含 Violation 时执行脱敏 Audit
 5. block → 返回拒绝；绝不创建上游请求
 6. allow/log → 构建并发送上游请求
 7. 完整读取非流式响应
 8. 严格解析响应并转换 Canonical Event
-9. 完整等待 Runtime 的 post_llm Decision
+9. 完整等待 Runtime 的 post_llm Decision；含 Violation 时执行脱敏 Audit
 10. block → 返回拒绝；不返回原响应
 11. allow/log → 返回兼容响应
-12. 写入脱敏 Audit Record
 ```
 
 不能为了“零额外延迟”并发执行步骤 4 和 6。
 
 ## 8. Event 提交与内容保留
 
-- pre/post Decision 为 `allow/log` 时，Session 才把当前 Event 追加到请求级 Trace。
-- Decision 为 `block` 时，丢弃当前原 Event，只追加包含 rule ID/code 的脱敏 Decision Event。
+- pre/post Decision 为 `allow/log` 时，Session 原子追加整个 pending batch；当前 Gateway batch 各含
+  一个边界 Event。
+- Decision 为 `block` 时，丢弃全部原始 pending Event，只追加包含 primary/pending Event ID、rule
+  ID/code 的脱敏 Decision Event。
 - post_llm block 后，Provider 原响应不得进入 Access Log、Audit Record 或返回体。
-- Request Trace 默认只存在于内存；JSONL Audit 只保存 Decision 摘要。
+- Request Trace 默认只存在于内存；配置 `AGENT_GUARDRAIL_AUDIT_PATH` 后，JSONL Audit 只保存含
+  Violation 的 Decision 摘要，普通 allow 不逐条持久化。
 
 ## 9. 拒绝响应
 
@@ -194,13 +205,14 @@ Gateway 自有错误结构：
   "error": {
     "type": "guardrail_violation",
     "code": "guardrail_blocked",
-    "message": "Request blocked by guardrail policy",
+    "message": "Request blocked by guardrail policy.",
     "trace_id": "trc_...",
-    "phase": "pre_llm",
+    "phase": "post_llm",
     "violations": [
       {
-        "rule_id": "secret-exfiltration",
-        "message": "Potential secret would be sent to the model"
+        "rule_id": "prevent-secret-email",
+        "code": "secret_exfiltration",
+        "message": "A protected tool argument contains credential-like data."
       }
     ]
   }
@@ -211,9 +223,12 @@ Gateway 自有错误结构：
 
 建议状态码：
 
-- 400：输入格式不受支持。
-- 401/403：Gateway 认证失败。
-- 422：请求可解析但 Guardrail 配置参数非法。
+- 400：JSON 或输入协议格式不受支持。
+- 401：Gateway 认证失败。
+- 403：MCP 请求 Origin 不在允许范围。
+- 413：请求体超过配置上限。
+- 415：请求 `Content-Type` 不是 `application/json`。
+- 422：`/v1/evaluate` 请求可解析，但 Canonical `GuardrailContext` 校验失败。
 - 429：未来实现 Guardrail/Gateway 速率限制后使用；当前没有 rate limiter。
 - 502：上游模型失败。
 - 503：策略未就绪或 Core 不可用。
@@ -223,7 +238,7 @@ Gateway 自有错误结构：
 
 | 情况 | HTTP | 是否调用上游 |
 |---|---:|---|
-| 输入协议非法 | 400/422 | 否 |
+| 输入协议非法 | 400/413/415/422 | 否 |
 | pre_llm block | 400 | 否 |
 | Runtime 未就绪/异常 | 503 | 否 |
 | 上游失败 | 502/504 | 已调用 |
@@ -258,7 +273,7 @@ MVP 两种模式二选一并通过配置声明：
 
 - Authorization 永不写日志。
 - 不允许请求动态指定任意 upstream URL。
-- Provider Host 使用 allowlist。
+- Provider Host 可配置 allowlist；非空时固定上游必须匹配。
 - 重定向默认关闭，防止 Key 被转发到非预期主机。
 - 错误响应不得包含请求头。
 
@@ -293,9 +308,12 @@ OpenAI Gateway 当前不支持 streaming。MCP Gateway 只接受请求级 SSE，
 - 最大 Violation 数。
 - HTTP Client 连接池。
 - 优雅关闭。
-- Readiness 在 Policy 加载失败时返回失败。
-- Gateway 启动时创建一个 Runtime，所有请求复用；每个请求只创建 Session。
-- FastAPI lifespan 负责 Runtime、HTTP Client 和 Audit Sink 的启动与关闭。
+- Readiness 只报告 `GuardrailRuntime.ready`；Policy、Registry 或固定上游配置失败会在应用构造时
+  阻止进程启动，不会产生一个可返回失败 Readiness 的运行中应用。
+- Gateway 启动时创建一个 Runtime，所有请求复用；每个 Chat Completions 或 MCP `tools/call` 创建
+  独立 Session，其他端点不创建 Session。
+- FastAPI lifespan 负责 Runtime 和 Gateway 自有 HTTP Client 的启动与关闭。当前 AuditSink 没有
+  独立生命周期接口。
 
 ## 15. MCP `2026-07-28` Gateway
 
@@ -308,8 +326,8 @@ OpenAI Gateway 当前不支持 streaming。MCP Gateway 只接受请求级 SSE，
   `MCP-Protocol-Version`、`Mcp-Method`、条件性 `Mcp-Name` Header 与 body 的一致性。
 - `tools/call` 转换成 Canonical ToolCall，执行 `pre_tool`；allow 后才请求固定 MCP Server。
 - 完整、有界读取 ToolResult，再执行 `post_tool`；block 时不释放原结果。
-- 上游只来自启动配置，host allowlist、redirect 关闭、Origin allowlist 和响应大小限制共同约束
-  代理边界。
+- 上游只来自启动配置；可选 host allowlist、redirect 关闭、Origin allowlist 和响应大小限制共同
+  约束代理边界。
 - 普通 JSON 与请求级 SSE 均可代理，但第一版缓冲完整响应；不支持订阅、长连接通知和实时
   progress。
 

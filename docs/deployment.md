@@ -1,6 +1,6 @@
 # Docker 与部署设计
 
-当前状态（2026-08-04）：Gateway 进程和环境配置已实现，可通过
+当前状态（2026-08-06）：Gateway 进程和环境配置已实现，可通过
 `python -m agent_guardrail.gateway` 启动；Dockerfile/Compose 仍属于下一阶段。
 
 ## 1. 部署目标
@@ -70,7 +70,7 @@ runtime
 
 ## 4. 配置
 
-计划环境变量：
+当前环境变量（以 `GatewaySettings` 为唯一事实来源）：
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
@@ -109,7 +109,8 @@ runtime
 
 ## 6. Audit 数据
 
-MVP 使用 append-only JSONL：
+配置 `AGENT_GUARDRAIL_AUDIT_PATH` 时，当前使用 append-only JSONL 保存含 Violation 的 Decision
+摘要；普通 allow 不逐条持久化：
 
 ```json
 {
@@ -117,7 +118,7 @@ MVP 使用 append-only JSONL：
   "trace_id": "trc_...",
   "phase": "pre_tool",
   "action": "block",
-  "rule_ids": ["secret-exfiltration"],
+  "rule_ids": ["prevent-secret-email"],
   "codes": ["secret_exfiltration"],
   "policy_version": 1,
   "policy_hash": "..."
@@ -140,12 +141,15 @@ Audit 路径可写性。
 
 未来 Policy 热加载失败时应保留上一个有效 Policy，并让 Readiness/Metric 反映配置错误；热加载
 当前尚未实现。
-Gateway 进程只创建一个 Runtime；每个 HTTP 请求创建独立 EnforcementSession，Session 不作为
-全局单例复用。
+Gateway 进程只创建一个 Runtime；每个 OpenAI Chat Completions 请求和 MCP `tools/call` 创建独立
+EnforcementSession，健康检查、Policy 查询及 MCP 非工具方法不创建 Session。
 
 ## 8. 可观测性
 
-结构化日志字段：
+当前只配置 Uvicorn 日志级别，并可选写入上述脱敏 JSONL Audit。仓库尚未实现结构化应用日志、
+Decision/Detector 耗时日志、Metrics 或 OpenTelemetry；不得把下面的字段和指标描述成已交付能力。
+
+计划结构化日志字段：
 
 - trace_id
 - request_id
@@ -167,16 +171,19 @@ Gateway 进程只创建一个 Runtime；每个 HTTP 请求创建独立 Enforceme
 - upstream_requests_total
 - upstream_request_duration_seconds
 
-第一版可以只提供日志，指标接口在 Gateway 稳定后加入。
-
 ## 9. 发布与兼容性
+
+当前约束：
 
 - Semantic Versioning。
 - `uv.lock` 必须提交。
-- CI 构建 wheel 和 Docker image。
-- 镜像标签至少包含版本和 Git SHA。
 - Policy YAML 带 `version: 1`。
 - Canonical Event 与 Decision API 的破坏性变更必须升级 API version。
+
+后续发布阶段要求：
+
+- CI 构建 wheel 和 Docker image。
+- 镜像标签至少包含版本和 Git SHA。
 
 ## 10. 后续多服务部署
 

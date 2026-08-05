@@ -141,8 +141,7 @@ class MCPAdapter:
             headers[name] = value
 
         accepted = {
-            part.partition(";")[0].strip().lower()
-            for part in headers.get("accept", "").split(",")
+            part.partition(";")[0].strip().lower() for part in headers.get("accept", "").split(",")
         }
         if not {"application/json", "text/event-stream"}.issubset(accepted):
             raise self.header_mismatch_error(request.envelope.id)
@@ -284,9 +283,7 @@ class MCPAdapter:
         final: JSONRPCResponse | None = None
         for event in text.split("\n\n"):
             data_lines = [
-                line[5:].lstrip()
-                for line in event.split("\n")
-                if line.startswith("data:")
+                line[5:].lstrip() for line in event.split("\n") if line.startswith("data:")
             ]
             if not data_lines:
                 continue

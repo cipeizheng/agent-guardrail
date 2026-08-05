@@ -19,14 +19,23 @@ from agent_guardrail.enforcement import (
 from agent_guardrail.models import (
     Action,
     EventKind,
+    EventOrigin,
     GuardrailContext,
     Phase,
+    RelationKind,
     ToolCall,
     Trace,
     Violation,
 )
 from agent_guardrail.testing import FakeToolExecutor
-from tests.support import FAKE_SECRET, secret_engine
+from tests.support import (
+    FAKE_CN_RESIDENT_ID,
+    FAKE_PII,
+    FAKE_SECRET,
+    pii_engine,
+    secret_engine,
+    tool_access_engine,
+)
 
 
 def empty_engine() -> GuardrailEngine:
@@ -52,7 +61,7 @@ def email_call(body: str) -> ToolCall:
 @pytest.mark.asyncio
 async def test_allow_executes_tool_exactly_once() -> None:
     fake = FakeToolExecutor({"send_email": lambda arguments: {"sent": True}})
-    session = EnforcementSession(evaluator=empty_engine(), trace=Trace(id="trace-1"))
+    session = EnforcementSession(analyzer=empty_engine(), trace=Trace(id="trace-1"))
     guarded = GuardedToolExecutor(inner=fake, session=session)
 
     result = await guarded.execute(email_call("safe body"))
@@ -63,6 +72,13 @@ async def test_allow_executes_tool_exactly_once() -> None:
         EventKind.TOOL_CALL,
         EventKind.TOOL_RESULT,
     ]
+    assert session.trace.events[1].source_event_ids == (session.trace.events[0].id,)
+    assert [event.origin for event in session.trace.events] == [
+        EventOrigin.OBSERVED,
+        EventOrigin.OBSERVED,
+    ]
+    assert session.trace.events[1].relations[0].kind is RelationKind.DERIVED_FROM
+    assert "source_event_ids" not in session.trace.events[1].metadata
 
 
 @pytest.mark.asyncio
@@ -70,7 +86,7 @@ async def test_log_records_audit_and_executes_tool_once() -> None:
     fake = FakeToolExecutor({"send_email": lambda arguments: {"sent": True}})
     audit = InMemoryAuditSink()
     session = EnforcementSession(
-        evaluator=secret_engine(action="log"),
+        analyzer=secret_engine(action="log"),
         trace=Trace(id="trace-1"),
         audit=audit,
     )
@@ -94,7 +110,7 @@ class BrokenAuditSink:
 async def test_audit_failure_is_safe_and_fail_open_for_log_action() -> None:
     fake = FakeToolExecutor({"send_email": lambda arguments: {"sent": True}})
     session = EnforcementSession(
-        evaluator=secret_engine(action="log"),
+        analyzer=secret_engine(action="log"),
         trace=Trace(id="trace-1"),
         audit=BrokenAuditSink(),
     )
@@ -113,7 +129,7 @@ async def test_block_prevents_tool_side_effect_and_leaks_no_secret() -> None:
     audit = InMemoryAuditSink()
     trace = Trace(id="trace-1")
     session = EnforcementSession(
-        evaluator=secret_engine(),
+        analyzer=secret_engine(),
         trace=trace,
         audit=audit,
     )
@@ -129,6 +145,50 @@ async def test_block_prevents_tool_side_effect_and_leaks_no_secret() -> None:
     assert len(audit.records) == 1
     assert [event.kind for event in trace.events] == [EventKind.GUARDRAIL_DECISION]
     assert FAKE_SECRET not in trace.model_dump_json()
+
+
+@pytest.mark.asyncio
+async def test_tool_access_block_prevents_tool_side_effect() -> None:
+    fake = FakeToolExecutor({"send_email": lambda arguments: {"sent": True}})
+    trace = Trace(id="trace-1")
+    session = EnforcementSession(
+        analyzer=tool_access_engine(mode="denylist", tools=("send_email",)),
+        trace=trace,
+    )
+    guarded = GuardedToolExecutor(inner=fake, session=session)
+
+    with pytest.raises(GuardrailBlocked) as blocked:
+        await guarded.execute(email_call("safe body"))
+
+    assert fake.call_count("send_email") == 0
+    assert blocked.value.decision.violations[0].code == "tool_access_denied"
+    assert [event.kind for event in trace.events] == [EventKind.GUARDRAIL_DECISION]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sensitive_value", [FAKE_PII, FAKE_CN_RESIDENT_ID])
+async def test_pii_block_prevents_tool_side_effect_and_keeps_audit_safe(
+    sensitive_value: str,
+) -> None:
+    fake = FakeToolExecutor({"send_email": lambda arguments: {"sent": True}})
+    audit = InMemoryAuditSink()
+    trace = Trace(id="trace-1")
+    session = EnforcementSession(
+        analyzer=pii_engine(),
+        trace=trace,
+        audit=audit,
+    )
+    guarded = GuardedToolExecutor(inner=fake, session=session)
+
+    with pytest.raises(GuardrailBlocked) as blocked:
+        await guarded.execute(email_call(sensitive_value))
+
+    assert fake.call_count("send_email") == 0
+    assert blocked.value.decision.violations[0].code == "pii_exfiltration"
+    assert sensitive_value not in blocked.value.decision.model_dump_json()
+    assert sensitive_value not in trace.model_dump_json()
+    assert sensitive_value not in audit.records[0].model_dump_json()
+    assert [event.kind for event in trace.events] == [EventKind.GUARDRAIL_DECISION]
 
 
 class BlockToolResultRule:
@@ -164,7 +224,7 @@ async def test_post_tool_block_does_not_append_raw_result() -> None:
     )
     fake = FakeToolExecutor({"send_email": lambda arguments: FAKE_SECRET})
     trace = Trace(id="trace-1")
-    session = EnforcementSession(evaluator=engine, trace=trace)
+    session = EnforcementSession(analyzer=engine, trace=trace)
     guarded = GuardedToolExecutor(inner=fake, session=session)
 
     with pytest.raises(GuardrailBlocked):

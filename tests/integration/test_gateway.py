@@ -21,7 +21,14 @@ from agent_guardrail.enforcement import InMemoryAuditSink
 from agent_guardrail.gateway import GatewaySettings, create_app
 from agent_guardrail.models import Action, GuardrailContext, Phase, Violation
 from agent_guardrail.runtime import GuardrailRuntime
-from tests.support import FAKE_SECRET, tool_context
+from tests.support import (
+    FAKE_CN_RESIDENT_ID,
+    FAKE_PII,
+    FAKE_SECRET,
+    pii_engine,
+    tool_access_engine,
+    tool_context,
+)
 
 POLICY_FILE = Path(__file__).parents[2] / "examples/policies/secret-email.yaml"
 
@@ -92,9 +99,7 @@ def tool_response(body: str) -> dict[str, object]:
                         "type": "function",
                         "function": {
                             "name": "send_email",
-                            "arguments": json.dumps(
-                                {"to": "outside@example.com", "body": body}
-                            ),
+                            "arguments": json.dumps({"to": "outside@example.com", "body": body}),
                         },
                     }
                 ],
@@ -180,6 +185,52 @@ async def test_post_llm_block_hides_response_and_records_sanitized_audit() -> No
     assert len(requests) == 1
     assert len(audit.records) == 1
     assert FAKE_SECRET not in audit.records[0].model_dump_json()
+
+
+@pytest.mark.asyncio
+async def test_tool_access_post_llm_block_hides_tool_call() -> None:
+    runtime = GuardrailRuntime(tool_access_engine())
+    async with app_client(
+        lambda request: httpx.Response(200, json=tool_response("safe")),
+        runtime=runtime,
+    ) as (client, requests):
+        response = await client.post(
+            "/v1/openai/chat/completions",
+            headers=auth_headers(),
+            json=request_payload(),
+        )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["phase"] == "post_llm"
+    assert response.json()["error"]["violations"][0]["code"] == "tool_access_denied"
+    assert "tool_calls" not in response.text
+    assert len(requests) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sensitive_value", [FAKE_PII, FAKE_CN_RESIDENT_ID])
+async def test_pii_post_llm_block_hides_tool_call_and_records_safe_audit(
+    sensitive_value: str,
+) -> None:
+    runtime = GuardrailRuntime(pii_engine())
+    audit = InMemoryAuditSink()
+    async with app_client(
+        lambda request: httpx.Response(200, json=tool_response(sensitive_value)),
+        runtime=runtime,
+        audit=audit,
+    ) as (client, requests):
+        response = await client.post(
+            "/v1/openai/chat/completions",
+            headers=auth_headers(),
+            json=request_payload(),
+        )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["phase"] == "post_llm"
+    assert response.json()["error"]["violations"][0]["code"] == "pii_exfiltration"
+    assert sensitive_value not in response.text
+    assert sensitive_value not in audit.records[0].model_dump_json()
+    assert len(requests) == 1
 
 
 class BlockPreLlmRule:

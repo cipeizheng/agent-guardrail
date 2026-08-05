@@ -5,11 +5,21 @@ from __future__ import annotations
 from pydantic import BaseModel
 
 from agent_guardrail.core.registry import DetectorRegistry, RuleRegistry
+from agent_guardrail.detectors.pii import PIIDetector
 from agent_guardrail.detectors.secrets import SecretDetector
 from agent_guardrail.models import Phase
+from agent_guardrail.rules.pii_exfiltration import (
+    PIIExfiltrationConfig,
+    PIIExfiltrationRule,
+)
 from agent_guardrail.rules.secret_exfiltration import (
     SecretExfiltrationConfig,
     SecretExfiltrationRule,
+)
+from agent_guardrail.rules.tool_access import ToolAccessConfig, ToolAccessRule
+from agent_guardrail.rules.tool_result_flow import (
+    ToolResultFlowConfig,
+    ToolResultFlowRule,
 )
 
 
@@ -33,6 +43,54 @@ def create_default_rule_registry() -> RuleRegistry:
         factory=build_secret_exfiltration,
         allowed_phases=frozenset({Phase.POST_LLM, Phase.PRE_TOOL}),
     )
+
+    def build_pii_exfiltration(
+        rule_id: str,
+        phases: frozenset[Phase],
+        config: BaseModel,
+    ) -> PIIExfiltrationRule:
+        if not isinstance(config, PIIExfiltrationConfig):
+            raise TypeError("pii_exfiltration received an unexpected config model")
+        return PIIExfiltrationRule(rule_id=rule_id, phases=phases, config=config)
+
+    registry.register(
+        "pii_exfiltration",
+        config_model=PIIExfiltrationConfig,
+        factory=build_pii_exfiltration,
+        allowed_phases=frozenset({Phase.POST_LLM, Phase.PRE_TOOL}),
+    )
+
+    def build_tool_access(
+        rule_id: str,
+        phases: frozenset[Phase],
+        config: BaseModel,
+    ) -> ToolAccessRule:
+        if not isinstance(config, ToolAccessConfig):
+            raise TypeError("tool_access received an unexpected config model")
+        return ToolAccessRule(rule_id=rule_id, phases=phases, config=config)
+
+    registry.register(
+        "tool_access",
+        config_model=ToolAccessConfig,
+        factory=build_tool_access,
+        allowed_phases=frozenset({Phase.POST_LLM, Phase.PRE_TOOL}),
+    )
+
+    def build_tool_result_flow(
+        rule_id: str,
+        phases: frozenset[Phase],
+        config: BaseModel,
+    ) -> ToolResultFlowRule:
+        if not isinstance(config, ToolResultFlowConfig):
+            raise TypeError("tool_result_flow received an unexpected config model")
+        return ToolResultFlowRule(rule_id=rule_id, phases=phases, config=config)
+
+    registry.register(
+        "tool_result_flow",
+        config_model=ToolResultFlowConfig,
+        factory=build_tool_result_flow,
+        allowed_phases=frozenset({Phase.PRE_TOOL}),
+    )
     return registry
 
 
@@ -40,5 +98,6 @@ def create_default_detector_registry() -> DetectorRegistry:
     """Create a new registry containing local deterministic detectors."""
 
     registry = DetectorRegistry()
+    registry.register(PIIDetector())
     registry.register(SecretDetector())
     return registry

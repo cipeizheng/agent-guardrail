@@ -9,7 +9,14 @@ from pydantic import JsonValue
 from agent_guardrail.core.policy import PolicySet, RuleBinding
 from agent_guardrail.core.registry import DetectorRegistry
 from agent_guardrail.core.services import DetectorTimeoutError, RuleServices
-from agent_guardrail.models import ACTION_PRIORITY, Action, Decision, GuardrailContext, Violation
+from agent_guardrail.models import (
+    ACTION_PRIORITY,
+    Action,
+    Decision,
+    GuardrailContext,
+    PendingTrace,
+    Violation,
+)
 
 
 class GuardrailEngine:
@@ -20,8 +27,14 @@ class GuardrailEngine:
         self.detectors = detectors
 
     async def evaluate(self, context: GuardrailContext) -> Decision:
-        """Evaluate applicable rules without performing an external side effect."""
+        """Adapt the v0.1 single-event context to the pending analyzer."""
 
+        return await self.analyze_pending(PendingTrace.from_context(context))
+
+    async def analyze_pending(self, pending: PendingTrace) -> Decision:
+        """Analyze an atomic pending batch without performing external side effects."""
+
+        pending_snapshot = pending.model_dump(mode="json")
         services = RuleServices(
             detectors=self.detectors,
             policy_hash=self.policy.content_hash,
@@ -29,14 +42,21 @@ class GuardrailEngine:
         )
         violations: list[Violation] = []
 
-        for binding in self.policy.rules:
-            if context.event.phase not in binding.rule.phases:
-                continue
-            rule_violations = await self._evaluate_rule(binding, context, services)
-            violations.extend(rule_violations)
+        for event in pending.events:
+            context = pending.context_for(event)
+            for binding in self.policy.rules:
+                if context.event.phase not in binding.rule.phases:
+                    continue
+                rule_violations = await self._evaluate_rule(binding, context, services)
+                violations.extend(rule_violations)
+                if len(violations) >= self.policy.engine.max_violations:
+                    violations = violations[: self.policy.engine.max_violations]
+                    break
             if len(violations) >= self.policy.engine.max_violations:
-                violations = violations[: self.policy.engine.max_violations]
                 break
+
+        if pending.model_dump(mode="json") != pending_snapshot:
+            raise RuntimeError("a policy rule mutated the pending trace")
 
         configured_actions = [
             action for violation in violations if (action := violation.action) is not None
@@ -46,11 +66,13 @@ class GuardrailEngine:
             key=lambda action: ACTION_PRIORITY[action],
             default=Action.ALLOW,
         )
+        primary = pending.primary_event
         return Decision(
             action=final_action,
-            trace_id=context.trace.id,
-            event_id=context.event.id,
-            phase=context.event.phase,
+            trace_id=pending.trace.id,
+            event_id=primary.id,
+            pending_event_ids=pending.event_ids,
+            phase=primary.phase,
             policy_version=self.policy.version,
             policy_hash=self.policy.content_hash,
             violations=tuple(violations),
@@ -104,6 +126,7 @@ class GuardrailEngine:
                     "rule_id": binding.rule.id,
                     "phase": context.event.phase,
                     "action": binding.action,
+                    "event_ids": tuple(dict.fromkeys((*violation.event_ids, context.event.id))),
                 }
             )
             for violation in matches
@@ -128,5 +151,6 @@ class GuardrailEngine:
             phase=context.event.phase,
             message=message,
             action=action,
+            event_ids=(context.event.id,),
             metadata=metadata,
         )

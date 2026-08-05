@@ -39,8 +39,8 @@ flowchart TB
     LLMGateway --> Session
     MCPGateway --> Session
 
-    Session -->|GuardrailContext| Evaluator[DecisionEvaluator Protocol]
-    Evaluator -. implemented by .-> Runtime[GuardrailRuntime]
+    Session -->|PendingTrace| Analyzer[PolicyAnalyzer Protocol]
+    Analyzer -. implemented by .-> Runtime[GuardrailRuntime]
     Runtime --> Engine[GuardrailEngine]
 
     Policy[PolicySet] --> Engine
@@ -58,7 +58,7 @@ flowchart TB
     classDef later fill:#eeeeee,stroke:#737373,color:#262626
 
     class Engine,Policy,Registry,Rules,Services,Detectors,Trace,GuardedLLM,GuardedTool,Session,Runtime,Audit,LLMGateway,MCPGateway done
-    class Agent,Evaluator,LLM,Tool,OpenAIClient,UpstreamLLM,MCPClient,MCPServer next
+    class Agent,Analyzer,LLM,Tool,OpenAIClient,UpstreamLLM,MCPClient,MCPServer next
 ```
 
 拦截器位于通信边上，不位于 Agent 内部：
@@ -75,7 +75,7 @@ Agent 是被保护的调用方，不是拦截点本身。
 Agent/Client
   → Enforcement Point
   → EnforcementSession
-  → DecisionEvaluator
+  → PendingTrace / PolicyAnalyzer
   → GuardrailRuntime
   → GuardrailEngine
   → Rule/Detector
@@ -93,38 +93,38 @@ Runtime 是 Core 的本地公共门面，相当于“已经装配好的 Guardrai
 - 管理启动、关闭和 Readiness。
 - 向调用方隐藏 Engine 的构造细节。
 - 暴露安全的 Policy version/hash。
-- 接收 Context 并返回 Decision。
+- 接收 PendingTrace 并返回 Decision v2。
 
 Runtime 不创建 Provider Event，不请求 LLM，不执行 Tool，也不决定 HTTP 状态码。
 
 ### 3.2 EnforcementSession
 
-Session 是“一次 Agent 任务或 Gateway 请求的安全上下文”。它负责：
+Session 是“一次 Agent 任务或受保护 Gateway 请求的安全上下文”。它负责：
 
 - 持有这次任务独占的 Trace。
-- 统一分配 Event ID、时间和 sequence。
-- 调用 DecisionEvaluator。
-- `allow/log` 时提交原 Event。
-- `block` 时丢弃可能敏感的原 Event，只提交脱敏 Decision Event。
+- 校验 Candidate key、信任来源和 Relation，统一分配 Event ID、时间和 sequence。
+- 构造 committed snapshot + pending batch，并调用 PolicyAnalyzer。
+- `allow/log` 时原子提交整个 pending batch。
+- `block` 时丢弃全部原始 pending Event，只提交一个脱敏 Decision Event。
 - 将含 Violation 的 Decision 发给 AuditSink。
 
 它解决了旧 `GuardedToolExecutor` 自己管理 Trace/Audit、LLM 与 Tool 可能重复实现状态管理的
 问题。两个 Wrapper 共享一个 Session，因而能看到同一条 Agent 历史。
 
-### 3.3 DecisionEvaluator
+### 3.3 PolicyAnalyzer
 
 它只是一个很小的接口：
 
 ```python
-class DecisionEvaluator(Protocol):
-    async def evaluate(self, context: GuardrailContext) -> Decision: ...
+class PolicyAnalyzer(Protocol):
+    async def analyze_pending(self, pending: PendingTrace) -> Decision: ...
 ```
 
 Session 依赖接口，不依赖具体 Engine：
 
 - MVP：`GuardrailRuntime` 实现它，所有判断都在本进程完成。
-- 测试：可注入 Fake Evaluator，精确返回 allow/log/block。
-- 未来：如果确实拆分 Core，Remote Client 也可以实现它。
+- 测试：可注入 Fake Analyzer，精确返回 allow/log/block。
+- 未来：如果确实拆分 Core，Remote Analyzer Client 也可以实现它。
 
 它不是新的服务，也不执行规则；作用是让 Enforcement 与具体判断实现解耦。
 
@@ -155,23 +155,30 @@ flowchart TD
     GuardedTools -->|allow only| Agent
 
     Engine --> SecretRule[rules/secret_exfiltration.py]
+    Engine --> PIIRule[rules/pii_exfiltration.py]
+    Engine --> ToolAccessRule[rules/tool_access.py]
+    Engine --> ToolResultFlowRule[rules/tool_result_flow.py]
     SecretRule --> Services[core/services.py]
+    PIIRule --> Services
     Services --> SecretDetector[detectors/secrets.py]
+    Services --> PIIDetector[detectors/pii.py]
     Engine -->|Decision| Session
     Session --> Trace[models/core.py Trace]
     Session --> Audit[enforcement/audit.py]
     Session -->|block| Blocked[GuardrailBlocked]
 
     classDef done fill:#d8f3dc,stroke:#2d6a4f,color:#081c15
-    class Demo,Runtime,Loader,Engine,Agent,FakeLLM,GuardedLLM,GuardedTools,Session,SecretRule,Services,SecretDetector,FakeTool,Blocked,Trace,Audit done
+    class Demo,Runtime,Loader,Engine,Agent,FakeLLM,GuardedLLM,GuardedTools,Session,SecretRule,PIIRule,ToolAccessRule,ToolResultFlowRule,Services,SecretDetector,PIIDetector,FakeTool,Blocked,Trace,Audit done
 ```
 
 当前关键事实：
 
 - `GuardedLLMClient` 在调用 Provider 前执行 pre_llm，在把响应交给 Agent 前执行 post_llm。
 - `GuardedToolExecutor` 在实际工具执行前执行 pre_tool，在结果交回 Agent 前执行 post_tool。
-- 两个 Wrapper 共享同一 EnforcementSession/Trace，并只依赖 DecisionEvaluator。
+- 两个 Wrapper 共享同一 EnforcementSession/Trace，并只依赖 PolicyAnalyzer。
 - `SimulatedAgent` 只依赖普通 LLMClient/ToolExecutor Protocol，不导入 Guardrail 实现。
+- `tool_access` 在 post_llm 阻止受限 ToolCall 到达 Agent，并在 pre_tool 阻止实际 Tool/MCP 调用。
+- `pii_exfiltration` 复用同一双阶段边界，只对 Policy 选择的 Tool、参数和 PII 类型生效。
 - Secret ToolCall 默认在 post_llm 阻断；只有实际执行也经过 `GuardedToolExecutor` 或 MCP Gateway
   时，pre_tool 才能继续保护工具副作用。
 - OpenAI Gateway 与现代 MCP Gateway 均已实现。
@@ -205,23 +212,29 @@ MCP Agent（官方 SDK，只改 server URL）
 `server/discover`、`ping` 和 `tools/list` 做严格校验后透传，不创建伪造的 Tool Event。现代 MCP
 没有 `initialize` 或协议 Session；每个 `tools/call` 都是独立安全边界。
 
-当前默认 Registry 只有 `secret_exfiltration` Rule 和 `secrets` Detector；图中的 Rule/Detector
-扩展点已经存在，但其他规则目录尚未实现。
+当前默认 Registry 注册 `secret_exfiltration`、`pii_exfiltration`、`tool_access`、
+`tool_result_flow` 四个 Rule 和 `secrets`、`pii` 两个 Detector；图中的扩展点已经存在，参数范围、
+外部域名和调用次数等规则尚未实现。
 
 ## 5. 当前代码模块
 
 | 当前文件 | 当前作用 | 状态 |
 |---|---|---|
-| `models/core.py` | Canonical Event/Trace/Decision | 已实现 |
-| `core/engine.py` | Runtime 内部的单次 Rule 评估与 Decision 聚合 | 已实现 |
+| `models/core.py` | Event/Origin/Relation、Candidate/PendingTrace、Decision v2 与图查询 | 已实现 |
+| `core/engine.py` | Runtime 内部的 pending batch Rule 分析与 Decision 聚合 | 已实现 |
 | `core/policy.py` | 严格配置与不可变 PolicySet | 已实现 |
 | `core/registry.py` | 由 Runtime bootstrap 使用的显式 Registry | 已实现 |
 | `core/services.py` | Detector 调用、超时和单次缓存 | 已实现 |
+| `detectors/pii.py` | 含中国大陆身份证/手机号的有限实体集 PII 检测与安全 evidence | 已实现 |
+| `rules/pii_exfiltration.py` | 目标 Tool 参数的 PII 类型过滤与双阶段判断 | 已实现 |
+| `rules/tool_access.py` | Tool allowlist/denylist 的 post_llm/pre_tool 双阶段判断 | 已实现 |
+| `rules/tool_result_flow.py` | 根据可信来源祖先阻断配置的 ToolResult → ToolCall 流向 | 已实现 |
 | `models/chat.py` | Provider-neutral LLM Request/Response | 已实现 |
 | `enforcement/protocols.py` | LLM/Tool/Audit 接口 | 已实现 |
 | `enforcement/inline_llm.py` | pre_llm/post_llm Wrapper | 已实现 |
 | `enforcement/inline_tools.py` | pre_tool/post_tool Wrapper | 已实现 |
-| `enforcement/session.py` | 共享 Trace、Decision 与脱敏提交 | 已实现 |
+| `enforcement/session.py` | Candidate 验证、PendingTrace、批次原子提交与脱敏 Decision | 已实现 |
+| `enforcement/provenance.py` | Canonical ToolCall/ToolResult 的保守结构化来源匹配 | 已实现 |
 | `runtime/runtime.py`、`bootstrap.py` | Runtime 门面与显式装配 | 已实现 |
 | `testing/fakes.py`、`simulated_agent.py` | Fake 和纯协议 Agent | 已实现 |
 | `adapters/openai/` | OpenAI 封闭模型、Canonical 转换与 Tool Schema 校验 | 已实现 |
@@ -231,23 +244,27 @@ MCP Agent（官方 SDK，只改 server URL）
 
 ## 6. 推荐按这个顺序读当前代码
 
-1. [`models/core.py`](../src/agent_guardrail/models/core.py)：理解 Event、Phase、Trace、Violation、Decision。
+1. [`models/core.py`](../src/agent_guardrail/models/core.py)：理解 EventOrigin、CandidateEvent、
+   PendingTrace、Trace、Violation 和 Decision v2。
 2. [`models/chat.py`](../src/agent_guardrail/models/chat.py)：理解 Agent 与 LLM 之间的数据。
 3. [`core/protocols.py`](../src/agent_guardrail/core/protocols.py)：理解 Rule 与 Detector 的职责边界。
 4. [`core/policy.py`](../src/agent_guardrail/core/policy.py) 和 [`core/registry.py`](../src/agent_guardrail/core/registry.py)：理解可信策略装配。
 5. [`core/engine.py`](../src/agent_guardrail/core/engine.py)：看 Rule 选择、错误处理和 Decision 聚合。
 6. [`rules/secret_exfiltration.py`](../src/agent_guardrail/rules/secret_exfiltration.py)：看 post_llm/pre_tool 双阶段规则。
-7. [`runtime/runtime.py`](../src/agent_guardrail/runtime/runtime.py)：看 Core 公共门面和生命周期。
-8. [`enforcement/session.py`](../src/agent_guardrail/enforcement/session.py)：看 Event 如何评估、提交和脱敏。
-9. [`enforcement/inline_llm.py`](../src/agent_guardrail/enforcement/inline_llm.py)：看 LLM 响应如何在 Agent 前被拦截。
-10. [`enforcement/inline_tools.py`](../src/agent_guardrail/enforcement/inline_tools.py)：看实际 Tool 副作用如何被拦截。
-11. [`testing/simulated_agent.py`](../src/agent_guardrail/testing/simulated_agent.py)：确认 Agent 只依赖普通 Protocol。
-12. [`gateway/app.py`](../src/agent_guardrail/gateway/app.py)：看 HTTP request-scoped Enforcement。
-13. [`adapters/openai/adapter.py`](../src/agent_guardrail/adapters/openai/adapter.py)：看协议转换和 ToolCall 校验。
-14. [`test_external_agent_base_url.py`](../tests/integration/test_external_agent_base_url.py)：看 Agent 只改 `base_url` 的黑盒证明。
-15. [`adapters/mcp/adapter.py`](../src/agent_guardrail/adapters/mcp/adapter.py)：看现代 MCP 请求、Header 和 ToolResult 的严格转换。
-16. [`gateway/mcp.py`](../src/agent_guardrail/gateway/mcp.py)：看 `tools/call` 的 pre/post Tool Enforcement。
-17. [`test_mcp_gateway_sdk.py`](../tests/integration/test_mcp_gateway_sdk.py)：看官方 MCP SDK v2 只改 URL 的黑盒证明。
+7. [`rules/pii_exfiltration.py`](../src/agent_guardrail/rules/pii_exfiltration.py) 和 [`detectors/pii.py`](../src/agent_guardrail/detectors/pii.py)：看 Detector/Policy 分离和审计安全 evidence。
+8. [`rules/tool_access.py`](../src/agent_guardrail/rules/tool_access.py)：看 allowlist/denylist 如何复用同一双阶段边界。
+9. [`rules/tool_result_flow.py`](../src/agent_guardrail/rules/tool_result_flow.py)：看 Rule 如何只依据传递来源祖先判断 Tool 流向。
+10. [`runtime/runtime.py`](../src/agent_guardrail/runtime/runtime.py)：看 Core 公共门面和生命周期。
+11. [`enforcement/session.py`](../src/agent_guardrail/enforcement/session.py) 与 [`enforcement/provenance.py`](../src/agent_guardrail/enforcement/provenance.py)：看 Event 如何评估、提交、脱敏并建立可信来源边。
+12. [`enforcement/inline_llm.py`](../src/agent_guardrail/enforcement/inline_llm.py)：看 LLM 响应如何在 Agent 前被拦截。
+13. [`enforcement/inline_tools.py`](../src/agent_guardrail/enforcement/inline_tools.py)：看实际 Tool 副作用如何被拦截。
+14. [`testing/simulated_agent.py`](../src/agent_guardrail/testing/simulated_agent.py)：确认 Agent 只依赖普通 Protocol。
+15. [`gateway/app.py`](../src/agent_guardrail/gateway/app.py)：看 HTTP request-scoped Enforcement。
+16. [`adapters/openai/adapter.py`](../src/agent_guardrail/adapters/openai/adapter.py)：看协议转换和 ToolCall 校验。
+17. [`test_external_agent_base_url.py`](../tests/integration/test_external_agent_base_url.py)：看 Agent 只改 `base_url` 的黑盒证明。
+18. [`adapters/mcp/adapter.py`](../src/agent_guardrail/adapters/mcp/adapter.py)：看现代 MCP 请求、Header 和 ToolResult 的严格转换。
+19. [`gateway/mcp.py`](../src/agent_guardrail/gateway/mcp.py)：看 `tools/call` 的 pre/post Tool Enforcement。
+20. [`test_mcp_gateway_sdk.py`](../tests/integration/test_mcp_gateway_sdk.py)：看官方 MCP SDK v2 只改 URL 的黑盒证明。
 
 读完后运行：
 
@@ -266,7 +283,7 @@ SimulatedAgent
                                          ▼
                               shared EnforcementSession
                                          │
-                                  DecisionEvaluator
+                                  PolicyAnalyzer
                                          │
                                   GuardrailRuntime
                                          │

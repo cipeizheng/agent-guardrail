@@ -38,7 +38,7 @@ async def main() -> None:
         ]
     )
     async with runtime:
-        session = EnforcementSession(evaluator=runtime, trace=Trace(id="demo-trace"))
+        session = EnforcementSession(analyzer=runtime, trace=Trace(id="demo-trace"))
         guarded_llm = GuardedLLMClient(inner=inner_llm, session=session)
         guarded_tools = GuardedToolExecutor(inner=fake_tools, session=session)
         agent = SimulatedAgent(llm=guarded_llm, tools=guarded_tools)

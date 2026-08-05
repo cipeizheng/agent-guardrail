@@ -1,13 +1,13 @@
-"""Stable decision boundary shared by local and future remote runtimes."""
+"""Stable pending-analysis boundary shared by local and future runtimes."""
 
 from __future__ import annotations
 
 from typing import Protocol
 
-from agent_guardrail.models import Decision, GuardrailContext
+from agent_guardrail.models import Decision, PendingTrace
 
 
-class DecisionEvaluator(Protocol):
-    """Evaluate one canonical context without performing the guarded side effect."""
+class PolicyAnalyzer(Protocol):
+    """Analyze one atomic pending batch without performing guarded side effects."""
 
-    async def evaluate(self, context: GuardrailContext) -> Decision: ...
+    async def analyze_pending(self, pending: PendingTrace) -> Decision: ...
