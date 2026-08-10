@@ -15,6 +15,8 @@ from agent_guardrail.enforcement.exceptions import GuardrailUnavailable
 from agent_guardrail.enforcement.protocols import AuditSink
 from agent_guardrail.enforcement.provenance import infer_source_event_ids
 from agent_guardrail.models import (
+    MAX_PENDING_EVENTS,
+    MAX_RELATIONS_PER_EVENT,
     CandidateEvent,
     CandidateRelation,
     Decision,
@@ -32,7 +34,7 @@ Clock = Callable[[], datetime]
 IdFactory = Callable[[], str]
 _LEGACY_SOURCE_EVENT_IDS_METADATA_KEY = "source_event_ids"
 
-_VALID_SINGLE_BOUNDARIES: frozenset[tuple[EventKind, Phase]] = frozenset(
+_COMPATIBLE_SINGLE_BOUNDARIES: frozenset[tuple[EventKind, Phase]] = frozenset(
     {
         (EventKind.MODEL_REQUEST, Phase.PRE_LLM),
         (EventKind.MODEL_RESPONSE, Phase.POST_LLM),
@@ -41,9 +43,24 @@ _VALID_SINGLE_BOUNDARIES: frozenset[tuple[EventKind, Phase]] = frozenset(
     }
 )
 
+_AGGREGATE_MODEL_EVENT_KINDS = frozenset(
+    {EventKind.MODEL_REQUEST, EventKind.MODEL_RESPONSE}
+)
+
+# Aggregate model kinds remain here only because the single-candidate API delegates
+# to evaluate_candidates. Multi-event production batches use independent kinds.
 _VALID_CANDIDATE_PHASES: dict[Phase, frozenset[EventKind]] = {
-    Phase.PRE_LLM: frozenset({EventKind.MODEL_REQUEST}),
-    Phase.POST_LLM: frozenset({EventKind.MODEL_RESPONSE, EventKind.TOOL_CALL}),
+    Phase.PRE_LLM: frozenset(
+        {
+            EventKind.MESSAGE,
+            EventKind.MODEL_REQUEST,
+            EventKind.TOOL_CALL,
+            EventKind.TOOL_RESULT,
+        }
+    ),
+    Phase.POST_LLM: frozenset(
+        {EventKind.MESSAGE, EventKind.MODEL_RESPONSE, EventKind.TOOL_CALL}
+    ),
     Phase.PRE_TOOL: frozenset({EventKind.TOOL_CALL}),
     Phase.POST_TOOL: frozenset({EventKind.TOOL_RESULT}),
 }
@@ -81,9 +98,9 @@ class EnforcementSession:
         source_event_ids: Sequence[str] = (),
         origin: EventOrigin = EventOrigin.CLIENT_ASSERTED,
     ) -> Decision:
-        """Evaluate one candidate through the atomic pending-batch path."""
+        """Evaluate one compatibility candidate through the atomic batch path."""
 
-        if (kind, phase) not in _VALID_SINGLE_BOUNDARIES:
+        if (kind, phase) not in _COMPATIBLE_SINGLE_BOUNDARIES:
             raise ValueError(f"invalid enforcement boundary: {kind.value}/{phase.value}")
         if metadata is not None and _LEGACY_SOURCE_EVENT_IDS_METADATA_KEY in metadata:
             raise ValueError(
@@ -127,11 +144,28 @@ class EnforcementSession:
 
         if isinstance(candidates, (str, bytes)):
             raise ValueError("candidates must be a sequence of CandidateEvent values")
+        if len(candidates) > MAX_PENDING_EVENTS:
+            raise ValueError(f"candidate batch cannot exceed {MAX_PENDING_EVENTS} events")
         candidate_batch = tuple(candidates)
         if not candidate_batch:
             raise ValueError("candidate batch must not be empty")
         if any(not isinstance(candidate, CandidateEvent) for candidate in candidate_batch):
             raise TypeError("candidate batch must contain only CandidateEvent values")
+        if len(candidate_batch) != 1 and any(
+            candidate.kind in _AGGREGATE_MODEL_EVENT_KINDS
+            for candidate in candidate_batch
+        ):
+            raise ValueError(
+                "aggregate model events are supported only as single-candidate "
+                "compatibility inputs"
+            )
+        if any(
+            len(candidate.relations) > MAX_RELATIONS_PER_EVENT
+            for candidate in candidate_batch
+        ):
+            raise ValueError(
+                f"candidate relations cannot exceed {MAX_RELATIONS_PER_EVENT} per event"
+            )
 
         candidate_keys = [candidate.key for candidate in candidate_batch]
         if len(candidate_keys) != len(set(candidate_keys)):
@@ -270,6 +304,10 @@ class EnforcementSession:
         unique_relations: dict[tuple[str, object], EventRelation] = {}
         for relation in all_relations:
             unique_relations[(relation.source_event_id, relation.kind)] = relation
+        if len(unique_relations) > MAX_RELATIONS_PER_EVENT:
+            raise ValueError(
+                f"resolved event relations cannot exceed {MAX_RELATIONS_PER_EVENT}"
+            )
         return tuple(unique_relations.values())
 
     def _validate_decision(self, decision: Decision, pending: PendingTrace) -> None:

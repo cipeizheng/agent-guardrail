@@ -7,9 +7,10 @@ from typing import cast
 import pytest
 from pydantic import JsonValue
 
-from agent_guardrail.core import DetectorRegistry, EngineConfig, GuardrailEngine, PolicySet
 from agent_guardrail.enforcement import EnforcementSession, GuardrailUnavailable
 from agent_guardrail.models import (
+    MAX_PENDING_EVENTS,
+    MAX_RELATIONS_PER_EVENT,
     Action,
     CandidateEvent,
     CandidateRelation,
@@ -19,27 +20,18 @@ from agent_guardrail.models import (
     Event,
     EventKind,
     EventOrigin,
+    Message,
+    MessageRole,
     ModelRequest,
     ModelResponse,
     PendingTrace,
     Phase,
+    TextContent,
     ToolCall,
     ToolResult,
     Trace,
 )
-from tests.support import FAKE_SECRET, secret_engine
-
-
-def empty_engine() -> GuardrailEngine:
-    return GuardrailEngine(
-        policy=PolicySet(
-            version=1,
-            content_hash="empty-policy",
-            engine=EngineConfig(),
-            rules=(),
-        ),
-        detectors=DetectorRegistry(),
-    )
+from tests.support import FAKE_SECRET, empty_analyzer, secret_analyzer
 
 
 def request_payload(content: str = "hello") -> dict[str, JsonValue]:
@@ -55,6 +47,15 @@ def tool_call_payload() -> dict[str, JsonValue]:
 def tool_result_payload() -> dict[str, JsonValue]:
     result = ToolResult(call_id="call-1", name="read_file", output="report")
     return cast(dict[str, JsonValue], result.model_dump(mode="json"))
+
+
+def message_payload(
+    *,
+    role: MessageRole = MessageRole.USER,
+    text: str = "hello",
+) -> dict[str, JsonValue]:
+    message = Message(role=role, content=TextContent(text=text))
+    return cast(dict[str, JsonValue], message.model_dump(mode="json"))
 
 
 class BrokenAnalyzer:
@@ -92,7 +93,7 @@ class MutatingAnalyzer:
 
 @pytest.mark.asyncio
 async def test_session_rejects_invalid_kind_phase_mapping() -> None:
-    session = EnforcementSession(analyzer=empty_engine(), trace=Trace(id="trace-1"))
+    session = EnforcementSession(analyzer=empty_analyzer(), trace=Trace(id="trace-1"))
 
     with pytest.raises(ValueError, match="invalid enforcement boundary"):
         await session.evaluate(
@@ -105,7 +106,7 @@ async def test_session_rejects_invalid_kind_phase_mapping() -> None:
 @pytest.mark.asyncio
 async def test_session_commits_only_valid_trusted_source_event_ids() -> None:
     trace = Trace(id="trace-1")
-    session = EnforcementSession(analyzer=empty_engine(), trace=trace)
+    session = EnforcementSession(analyzer=empty_analyzer(), trace=trace)
     call_decision = await session.evaluate(
         kind=EventKind.TOOL_CALL,
         phase=Phase.PRE_TOOL,
@@ -126,7 +127,7 @@ async def test_session_commits_only_valid_trusted_source_event_ids() -> None:
 @pytest.mark.asyncio
 async def test_session_does_not_infer_relation_from_call_id_alone() -> None:
     trace = Trace(id="trace-1")
-    session = EnforcementSession(analyzer=empty_engine(), trace=trace)
+    session = EnforcementSession(analyzer=empty_analyzer(), trace=trace)
     call_decision = await session.evaluate(
         kind=EventKind.TOOL_CALL,
         phase=Phase.PRE_TOOL,
@@ -163,7 +164,7 @@ async def test_session_does_not_infer_relation_from_call_id_alone() -> None:
 @pytest.mark.asyncio
 async def test_session_does_not_infer_relation_from_tool_call_id_alone() -> None:
     trace = Trace(id="trace-1")
-    session = EnforcementSession(analyzer=empty_engine(), trace=trace)
+    session = EnforcementSession(analyzer=empty_analyzer(), trace=trace)
     request_decision = await session.evaluate(
         kind=EventKind.MODEL_REQUEST,
         phase=Phase.PRE_LLM,
@@ -196,7 +197,7 @@ async def test_session_does_not_infer_relation_from_tool_call_id_alone() -> None
 @pytest.mark.asyncio
 async def test_session_rejects_caller_supplied_reserved_provenance_metadata() -> None:
     trace = Trace(id="trace-1")
-    session = EnforcementSession(analyzer=empty_engine(), trace=trace)
+    session = EnforcementSession(analyzer=empty_analyzer(), trace=trace)
 
     with pytest.raises(ValueError, match="reserved"):
         await session.evaluate(
@@ -218,7 +219,7 @@ async def test_session_rejects_invalid_declared_sources(
     source_event_ids: object,
 ) -> None:
     trace = Trace(id="trace-1")
-    session = EnforcementSession(analyzer=empty_engine(), trace=trace)
+    session = EnforcementSession(analyzer=empty_analyzer(), trace=trace)
 
     with pytest.raises(ValueError, match="source_event"):
         await session.evaluate(
@@ -246,7 +247,7 @@ async def test_session_rejects_guardrail_decision_as_a_source() -> None:
         payload={"sanitized": True},
     )
     trace = Trace(id="trace-1", events=(decision_event,))
-    session = EnforcementSession(analyzer=empty_engine(), trace=trace)
+    session = EnforcementSession(analyzer=empty_analyzer(), trace=trace)
 
     with pytest.raises(ValueError, match="decision events"):
         await session.evaluate(
@@ -313,7 +314,7 @@ async def test_session_rejects_analyzer_mutation_of_pending_snapshot() -> None:
 @pytest.mark.asyncio
 async def test_trace_capacity_fails_closed_without_overwriting_history() -> None:
     trace = Trace(id="trace-1", max_events=1)
-    session = EnforcementSession(analyzer=empty_engine(), trace=trace)
+    session = EnforcementSession(analyzer=empty_analyzer(), trace=trace)
 
     await session.evaluate(
         kind=EventKind.MODEL_REQUEST,
@@ -335,7 +336,7 @@ async def test_trace_capacity_fails_closed_without_overwriting_history() -> None
 @pytest.mark.asyncio
 async def test_concurrent_session_checks_keep_strict_event_order() -> None:
     trace = Trace(id="trace-1")
-    session = EnforcementSession(analyzer=empty_engine(), trace=trace)
+    session = EnforcementSession(analyzer=empty_analyzer(), trace=trace)
 
     await asyncio.gather(
         *(
@@ -354,7 +355,7 @@ async def test_concurrent_session_checks_keep_strict_event_order() -> None:
 @pytest.mark.asyncio
 async def test_candidate_batch_is_analyzed_and_committed_atomically() -> None:
     trace = Trace(id="trace-1")
-    session = EnforcementSession(analyzer=empty_engine(), trace=trace)
+    session = EnforcementSession(analyzer=empty_analyzer(), trace=trace)
     candidates = (
         CandidateEvent(
             key="first-call",
@@ -393,9 +394,220 @@ async def test_candidate_batch_is_analyzed_and_committed_atomically() -> None:
 
 
 @pytest.mark.asyncio
+async def test_session_preserves_single_aggregate_response_compatibility() -> None:
+    trace = Trace(id="trace-1")
+    session = EnforcementSession(analyzer=empty_analyzer(), trace=trace)
+    call = ToolCall(call_id="call-1", name="read_file", arguments={"path": "report"})
+    response = ModelResponse(tool_calls=(call,))
+    candidate = CandidateEvent(
+        key="response",
+        kind=EventKind.MODEL_RESPONSE,
+        phase=Phase.POST_LLM,
+        payload=cast(dict[str, JsonValue], response.model_dump(mode="json")),
+        origin=EventOrigin.OBSERVED,
+    )
+
+    decision = await session.evaluate_candidates((candidate,))
+
+    assert decision.pending_event_ids == (trace.events[0].id,)
+    assert trace.events[0].kind is EventKind.MODEL_RESPONSE
+
+
+@pytest.mark.asyncio
+async def test_session_rejects_mixed_aggregate_and_independent_batch() -> None:
+    trace = Trace(id="trace-1")
+    allocated_ids: list[str] = []
+
+    def id_factory() -> str:
+        allocated_ids.append("allocated")
+        return "unexpected-event-id"
+
+    session = EnforcementSession(
+        analyzer=BrokenAnalyzer(),
+        trace=trace,
+        id_factory=id_factory,
+    )
+    call = ToolCall(call_id="call-1", name="read_file", arguments={"path": "report"})
+    response = ModelResponse(tool_calls=(call,))
+    candidates = (
+        CandidateEvent(
+            key="response",
+            kind=EventKind.MODEL_RESPONSE,
+            phase=Phase.POST_LLM,
+            payload=cast(dict[str, JsonValue], response.model_dump(mode="json")),
+            origin=EventOrigin.OBSERVED,
+        ),
+        CandidateEvent(
+            key="tool-call",
+            kind=EventKind.TOOL_CALL,
+            phase=Phase.POST_LLM,
+            payload=cast(dict[str, JsonValue], call.model_dump(mode="json")),
+            origin=EventOrigin.DERIVED,
+            relations=(CandidateRelation(source_candidate_key="response"),),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="single-candidate compatibility"):
+        await session.evaluate_candidates(candidates, primary_key="response")
+
+    assert not trace.events
+    assert not allocated_ids
+
+
+@pytest.mark.asyncio
+async def test_session_rejects_multiple_aggregate_model_events() -> None:
+    trace = Trace(id="trace-1")
+    session = EnforcementSession(analyzer=BrokenAnalyzer(), trace=trace)
+    response_payload = cast(
+        dict[str, JsonValue],
+        ModelResponse(content="safe").model_dump(mode="json"),
+    )
+    candidates = (
+        CandidateEvent(
+            key="first-response",
+            kind=EventKind.MODEL_RESPONSE,
+            phase=Phase.POST_LLM,
+            payload=response_payload,
+            origin=EventOrigin.OBSERVED,
+        ),
+        CandidateEvent(
+            key="second-response",
+            kind=EventKind.MODEL_RESPONSE,
+            phase=Phase.POST_LLM,
+            payload=response_payload,
+            origin=EventOrigin.OBSERVED,
+        ),
+    )
+
+    with pytest.raises(ValueError, match="single-candidate compatibility"):
+        await session.evaluate_candidates(candidates)
+
+    assert not trace.events
+
+
+@pytest.mark.asyncio
+async def test_session_commits_independent_pre_llm_event_batch() -> None:
+    trace = Trace(id="trace-1")
+    session = EnforcementSession(analyzer=empty_analyzer(), trace=trace)
+    candidates = (
+        CandidateEvent(
+            key="user-message",
+            kind=EventKind.MESSAGE,
+            phase=Phase.PRE_LLM,
+            payload=message_payload(),
+        ),
+        CandidateEvent(
+            key="tool-call",
+            kind=EventKind.TOOL_CALL,
+            phase=Phase.PRE_LLM,
+            payload=tool_call_payload(),
+        ),
+        CandidateEvent(
+            key="tool-result",
+            kind=EventKind.TOOL_RESULT,
+            phase=Phase.PRE_LLM,
+            payload=tool_result_payload(),
+            relations=(CandidateRelation(source_candidate_key="tool-call"),),
+        ),
+    )
+
+    decision = await session.evaluate_candidates(candidates)
+
+    assert decision.pending_event_ids == tuple(event.id for event in trace.events)
+    assert [event.kind for event in trace.events] == [
+        EventKind.MESSAGE,
+        EventKind.TOOL_CALL,
+        EventKind.TOOL_RESULT,
+    ]
+    assert all(event.origin is EventOrigin.CLIENT_ASSERTED for event in trace.events)
+    assert trace.sources_of(trace.events[-1]) == (trace.events[1],)
+
+
+@pytest.mark.asyncio
+async def test_session_commits_independent_post_llm_event_batch() -> None:
+    trace = Trace(id="trace-1")
+    session = EnforcementSession(analyzer=empty_analyzer(), trace=trace)
+    candidates = (
+        CandidateEvent(
+            key="assistant-message",
+            kind=EventKind.MESSAGE,
+            phase=Phase.POST_LLM,
+            payload=message_payload(role=MessageRole.ASSISTANT),
+            origin=EventOrigin.OBSERVED,
+        ),
+        CandidateEvent(
+            key="tool-call",
+            kind=EventKind.TOOL_CALL,
+            phase=Phase.POST_LLM,
+            payload=tool_call_payload(),
+            origin=EventOrigin.OBSERVED,
+        ),
+    )
+
+    await session.evaluate_candidates(candidates, primary_key="assistant-message")
+
+    assert [event.kind for event in trace.events] == [EventKind.MESSAGE, EventKind.TOOL_CALL]
+    assert all(event.origin is EventOrigin.OBSERVED for event in trace.events)
+
+
+@pytest.mark.asyncio
+async def test_session_rejects_independent_event_at_invalid_phase() -> None:
+    trace = Trace(id="trace-1")
+    session = EnforcementSession(analyzer=empty_analyzer(), trace=trace)
+    candidate = CandidateEvent(
+        key="message",
+        kind=EventKind.MESSAGE,
+        phase=Phase.PRE_TOOL,
+        payload=message_payload(),
+    )
+
+    with pytest.raises(ValueError, match="invalid candidate enforcement phase"):
+        await session.evaluate_candidates((candidate,))
+
+    assert not trace.events
+
+
+@pytest.mark.asyncio
+async def test_session_rechecks_candidate_batch_and_relation_limits() -> None:
+    trace = Trace(id="trace-1")
+    session = EnforcementSession(analyzer=empty_analyzer(), trace=trace)
+    oversized_batch = tuple(
+        CandidateEvent(
+            key=f"message-{index}",
+            kind=EventKind.MESSAGE,
+            phase=Phase.PRE_LLM,
+            payload=message_payload(text=str(index)),
+        )
+        for index in range(MAX_PENDING_EVENTS + 1)
+    )
+
+    with pytest.raises(ValueError, match="candidate batch cannot exceed"):
+        await session.evaluate_candidates(oversized_batch)
+
+    valid = CandidateEvent(
+        key="message",
+        kind=EventKind.MESSAGE,
+        phase=Phase.PRE_LLM,
+        payload=message_payload(),
+    )
+    oversized_relations = valid.model_copy(
+        update={
+            "relations": tuple(
+                CandidateRelation(source_candidate_key=f"source-{index}")
+                for index in range(MAX_RELATIONS_PER_EVENT + 1)
+            )
+        }
+    )
+    with pytest.raises(ValueError, match="candidate relations cannot exceed"):
+        await session.evaluate_candidates((oversized_relations,))
+
+    assert not trace.events
+
+
+@pytest.mark.asyncio
 async def test_blocked_candidate_batch_commits_no_raw_pending_event() -> None:
     trace = Trace(id="trace-1")
-    session = EnforcementSession(analyzer=secret_engine(), trace=trace)
+    session = EnforcementSession(analyzer=secret_analyzer(), trace=trace)
     safe = CandidateEvent(
         key="safe",
         kind=EventKind.TOOL_CALL,
@@ -439,7 +651,7 @@ async def test_blocked_candidate_batch_commits_no_raw_pending_event() -> None:
 @pytest.mark.asyncio
 async def test_candidate_batch_rejects_future_relation_without_analysis() -> None:
     trace = Trace(id="trace-1")
-    session = EnforcementSession(analyzer=empty_engine(), trace=trace)
+    session = EnforcementSession(analyzer=empty_analyzer(), trace=trace)
     future_reference = CandidateEvent(
         key="first",
         kind=EventKind.TOOL_CALL,
@@ -466,7 +678,7 @@ async def test_candidate_batch_rejects_future_relation_without_analysis() -> Non
 @pytest.mark.asyncio
 async def test_candidate_batch_capacity_fails_before_analyzer_or_commit() -> None:
     trace = Trace(id="trace-1", max_events=1)
-    session = EnforcementSession(analyzer=empty_engine(), trace=trace)
+    session = EnforcementSession(analyzer=empty_analyzer(), trace=trace)
     candidates = (
         CandidateEvent(
             key="first",

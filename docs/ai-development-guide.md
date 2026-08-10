@@ -115,6 +115,26 @@ Gateway 测试统一使用 HTTP MockTransport/Fake Upstream，不允许单元测
 - 检查 pending batch 是否同 Phase、有界并原子提交，Decision/Violation 是否绑定正确 Event ID。
 - 检查 Provider payload 是否能把 `client_asserted` 提升为 `observed/derived`。
 - 检查是否把 sequence/时间先后错误地当成 provenance。
+- 检查 Finding binding key 是否只使用结构坐标；Secret、PII、Message/Tool 原值即使先 hash 也不能
+  成为普通 binding coordinate。检查 pending Finding 是否至少有一个 pending subject，且所有 Event
+  引用都属于同一 AnalysisReport snapshot。
+- 检查每个 MatchPlan 节点将消费哪个成本维度；Rule override 只能降低全局上限，超限消费必须原子失败，
+  且不能被解释为 no-match。新增 derive、量词、关系或 capability 节点时必须同时增加相邻超限 fixture。
+- 检查 SnapshotMatcher 的多 Event 变量仍按有方向的命名笛卡尔积枚举；去重、不同对象和先后必须由
+  Rule 显式表达。lexical 量词 binding 不得逃逸为 Finding binding，未编译 capability 不得因短路或
+  空 domain 退化为 no-match。
+- 检查 MatchPlan capability 仍经过显式 `compile_match_plan_capabilities`；Policy/YAML 不得提供 module
+  path、callable 或 descriptor。cache key 必须包含实现版本、规范输入哈希和上下文身份；cache hit 仍计
+  calls/input bytes，cache miss 必须先预留 deadline 并使用真实 timeout。能力异常文本不得进入 Report。
+- 检查作者 YAML 与类型化 Python 是否经过同一个 `compile_author_policy`；declarative predicate 必须
+  在编译期验证未知引用、实参、递归/环和词法遮蔽并完全内联，不能残留 callback、动态调用或第二执行器。
+- 修改生产 Policy 时必须验证 v3 YAML、AuthorPolicy、MatchPlan、capability linking 和 Decision 投影
+  是唯一执行链；不得重新加入 v1/v2 fallback、Python Rule、mandatory anchor 或双 Decision。
+- 新增 Detector/Predicate 条件必须同时验证短路、cache identity、descriptor deadline、输入字节、调用
+  数和 evidence 上限；复杂布尔条件的错误顺序必须由相邻 fixture 固定。
+- 检查 whole-pending Finding 是否至少一个 subject 属于 pending；past-only match 不应消费 Finding/
+  evidence 输出预算。被 block 或分析失败的 tentative pending 不得推进 MatchMonitor dedupe，否则重试
+  可能被错误放行。Monitor 状态超限不得静默驱逐或部分提交。
 
 ## 8. 何时停止并请求设计决策
 
@@ -122,7 +142,8 @@ Gateway 测试统一使用 HTTP MockTransport/Fake Upstream，不允许单元测
 
 - 要新增 Action 或改变严重度顺序。
 - 要支持 streaming 并声称可阻断输出。
-- 要改变 ADR-0007 已接受的表达式策略安全边界，或在 CEL/Invariant Interpreter 之间作最终选择。
+- 要改变 ADR-0010 的 MatchPlan/Policy/Monitor、可信扩展或顺序/精确来源边界，或重新选择
+  CEL/Invariant Interpreter。
 - 要引入远程 Core、数据库或消息队列。
 - 要改变 Canonical Event 字段语义。
 - 要保存完整 prompt/工具结果。

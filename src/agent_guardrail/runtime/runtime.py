@@ -1,4 +1,4 @@
-"""Lifecycle-aware public facade over the side-effect-free decision engine."""
+"""Lifecycle-aware public facade over the MatchPlan PolicyAnalyzer."""
 
 from __future__ import annotations
 
@@ -9,11 +9,11 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from agent_guardrail.core import DetectorRegistry, GuardrailEngine, RuleRegistry
+from agent_guardrail.core import DetectorRegistry, MatchPolicyAnalyzer, PredicateRegistry
 from agent_guardrail.models import Decision, GuardrailContext, PendingTrace
 from agent_guardrail.runtime.bootstrap import (
-    build_engine_from_policy_file,
-    build_engine_from_policy_yaml,
+    build_analyzer_from_policy_file,
+    build_analyzer_from_policy_yaml,
 )
 
 
@@ -39,10 +39,10 @@ class PolicyInfo(BaseModel):
 
 
 class GuardrailRuntime:
-    """Own one configured engine and expose a stable PolicyAnalyzer facade."""
+    """Own one compiled MatchPolicyAnalyzer and expose its stable lifecycle."""
 
-    def __init__(self, engine: GuardrailEngine) -> None:
-        self._engine = engine
+    def __init__(self, analyzer: MatchPolicyAnalyzer) -> None:
+        self._analyzer = analyzer
         self._state = RuntimeState.CREATED
         self._lifecycle_lock = asyncio.Lock()
 
@@ -51,15 +51,15 @@ class GuardrailRuntime:
         cls,
         path: str | Path,
         *,
-        rule_registry: RuleRegistry | None = None,
+        predicate_registry: PredicateRegistry | None = None,
         detector_registry: DetectorRegistry | None = None,
     ) -> Self:
         """Construct a runtime only after the complete policy validates."""
 
         return cls(
-            build_engine_from_policy_file(
+            build_analyzer_from_policy_file(
                 path,
-                rule_registry=rule_registry,
+                predicate_registry=predicate_registry,
                 detector_registry=detector_registry,
             )
         )
@@ -69,15 +69,15 @@ class GuardrailRuntime:
         cls,
         source: str,
         *,
-        rule_registry: RuleRegistry | None = None,
+        predicate_registry: PredicateRegistry | None = None,
         detector_registry: DetectorRegistry | None = None,
     ) -> Self:
         """Construct a runtime from validated YAML without global registry state."""
 
         return cls(
-            build_engine_from_policy_yaml(
+            build_analyzer_from_policy_yaml(
                 source,
-                rule_registry=rule_registry,
+                predicate_registry=predicate_registry,
                 detector_registry=detector_registry,
             )
         )
@@ -93,8 +93,8 @@ class GuardrailRuntime:
     @property
     def policy_info(self) -> PolicyInfo:
         return PolicyInfo(
-            version=self._engine.policy.version,
-            content_hash=self._engine.policy.content_hash,
+            version=self._analyzer.policy_version,
+            content_hash=self._analyzer.policy_hash,
         )
 
     async def start(self) -> None:
@@ -118,14 +118,14 @@ class GuardrailRuntime:
 
         if not self.ready:
             raise RuntimeNotReadyError("guardrail runtime is not ready")
-        return await self._engine.evaluate(context)
+        return await self._analyzer.analyze_pending(PendingTrace.from_context(context))
 
     async def analyze_pending(self, pending: PendingTrace) -> Decision:
         """Analyze an atomic pending event batch only while the runtime is ready."""
 
         if not self.ready:
             raise RuntimeNotReadyError("guardrail runtime is not ready")
-        return await self._engine.analyze_pending(pending)
+        return await self._analyzer.analyze_pending(pending)
 
     async def __aenter__(self) -> Self:
         await self.start()

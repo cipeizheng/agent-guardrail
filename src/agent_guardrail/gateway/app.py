@@ -5,13 +5,13 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 from uuid import uuid4
 
 import httpx
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
-from pydantic import JsonValue, ValidationError
+from pydantic import ValidationError
 from starlette.requests import Request
 from starlette.responses import Response
 
@@ -20,6 +20,8 @@ from agent_guardrail.enforcement import (
     AuditSink,
     EnforcementSession,
     GuardrailUnavailable,
+    InputNormalizationError,
+    InputNormalizer,
     JsonlAuditSink,
     NullAuditSink,
 )
@@ -30,9 +32,8 @@ from agent_guardrail.gateway.mcp import MCPGateway
 from agent_guardrail.gateway.mcp_upstream import MCPUpstream
 from agent_guardrail.gateway.upstream import OpenAIUpstream, UpstreamError
 from agent_guardrail.models import (
+    CandidateRelation,
     Decision,
-    EventKind,
-    EventOrigin,
     GuardrailContext,
     Phase,
     Trace,
@@ -45,6 +46,7 @@ class GatewayServices:
     settings: GatewaySettings
     runtime: GuardrailRuntime
     adapter: OpenAIAdapter
+    normalizer: InputNormalizer
     upstream: OpenAIUpstream | None
     mcp: MCPGateway
     audit: AuditSink
@@ -91,6 +93,7 @@ def create_app(
         settings=settings,
         runtime=active_runtime,
         adapter=OpenAIAdapter(),
+        normalizer=InputNormalizer(max_candidates=settings.max_trace_events - 1),
         upstream=openai_upstream,
         mcp=mcp_gateway,
         audit=active_audit,
@@ -198,6 +201,9 @@ def create_app(
                 )
             provider_request = services.adapter.parse_request(raw_request)
             canonical_request = services.adapter.request_to_canonical(provider_request)
+            normalized_request = services.normalizer.normalize_request_snapshot(
+                canonical_request
+            )
         except RequestReadError as exc:
             return _error_response(
                 exc.status_code,
@@ -214,6 +220,15 @@ def create_app(
                 message=str(exc),
                 trace_id=trace_id,
             )
+        except InputNormalizationError as exc:
+            return _error_response(
+                400,
+                error_type="invalid_request_error",
+                code=exc.code,
+                message=str(exc),
+                trace_id=trace_id,
+                phase=Phase.PRE_LLM.value,
+            )
 
         session = EnforcementSession(
             analyzer=services.runtime,
@@ -221,15 +236,9 @@ def create_app(
             audit=services.audit,
         )
         try:
-            pre_decision = await session.evaluate(
-                kind=EventKind.MODEL_REQUEST,
-                phase=Phase.PRE_LLM,
-                payload=cast(
-                    dict[str, JsonValue],
-                    canonical_request.model_dump(mode="json"),
-                ),
-                metadata={"adapter": "openai_gateway"},
-                origin=EventOrigin.CLIENT_ASSERTED,
+            pre_decision = await session.evaluate_candidates(
+                normalized_request.candidates,
+                primary_key=normalized_request.primary_key,
             )
         except GuardrailUnavailable:
             return _unavailable_response(trace_id, Phase.PRE_LLM)
@@ -245,6 +254,9 @@ def create_app(
             canonical_response = services.adapter.response_to_canonical(
                 provider_response,
                 request=provider_request,
+            )
+            normalized_response = services.normalizer.normalize_response(
+                canonical_response
             )
         except UpstreamError as exc:
             return _error_response(
@@ -262,6 +274,15 @@ def create_app(
                 message=str(exc),
                 trace_id=trace_id,
             )
+        except InputNormalizationError as exc:
+            return _error_response(
+                502,
+                error_type="upstream_error",
+                code=exc.code,
+                message=str(exc),
+                trace_id=trace_id,
+                phase=Phase.POST_LLM.value,
+            )
         except Exception:
             return _error_response(
                 502,
@@ -272,16 +293,19 @@ def create_app(
             )
 
         try:
-            post_decision = await session.evaluate(
-                kind=EventKind.MODEL_RESPONSE,
-                phase=Phase.POST_LLM,
-                payload=cast(
-                    dict[str, JsonValue],
-                    canonical_response.model_dump(mode="json"),
+            post_decision = await session.evaluate_candidates(
+                tuple(
+                    candidate.model_copy(
+                        update={
+                            "relations": (
+                                *candidate.relations,
+                                CandidateRelation(source_event_id=pre_decision.event_id),
+                            )
+                        }
+                    )
+                    for candidate in normalized_response.candidates
                 ),
-                metadata={"adapter": "openai_gateway"},
-                source_event_ids=(pre_decision.event_id,),
-                origin=EventOrigin.OBSERVED,
+                primary_key=normalized_response.primary_key,
             )
         except GuardrailUnavailable:
             return _unavailable_response(trace_id, Phase.POST_LLM)

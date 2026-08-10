@@ -1,103 +1,43 @@
-"""Explicit construction of the built-in rule and detector registries."""
+"""Explicit construction of built-in trusted capability registries."""
 
 from __future__ import annotations
 
-from pydantic import BaseModel
-
-from agent_guardrail.core.registry import DetectorRegistry, RuleRegistry
-from agent_guardrail.detectors.pii import PIIDetector
-from agent_guardrail.detectors.secrets import SecretDetector
-from agent_guardrail.models import Phase
-from agent_guardrail.rules.pii_exfiltration import (
-    PIIExfiltrationConfig,
-    PIIExfiltrationRule,
+from agent_guardrail.core.registry import (
+    DetectorPolicyDescriptor,
+    DetectorRegistry,
+    PredicateRegistry,
 )
-from agent_guardrail.rules.secret_exfiltration import (
-    SecretExfiltrationConfig,
-    SecretExfiltrationRule,
-)
-from agent_guardrail.rules.tool_access import ToolAccessConfig, ToolAccessRule
-from agent_guardrail.rules.tool_result_flow import (
-    ToolResultFlowConfig,
-    ToolResultFlowRule,
-)
-
-
-def create_default_rule_registry() -> RuleRegistry:
-    """Create a new registry containing only reviewed built-in rules."""
-
-    registry = RuleRegistry()
-
-    def build_secret_exfiltration(
-        rule_id: str,
-        phases: frozenset[Phase],
-        config: BaseModel,
-    ) -> SecretExfiltrationRule:
-        if not isinstance(config, SecretExfiltrationConfig):
-            raise TypeError("secret_exfiltration received an unexpected config model")
-        return SecretExfiltrationRule(rule_id=rule_id, phases=phases, config=config)
-
-    registry.register(
-        "secret_exfiltration",
-        config_model=SecretExfiltrationConfig,
-        factory=build_secret_exfiltration,
-        allowed_phases=frozenset({Phase.POST_LLM, Phase.PRE_TOOL}),
-    )
-
-    def build_pii_exfiltration(
-        rule_id: str,
-        phases: frozenset[Phase],
-        config: BaseModel,
-    ) -> PIIExfiltrationRule:
-        if not isinstance(config, PIIExfiltrationConfig):
-            raise TypeError("pii_exfiltration received an unexpected config model")
-        return PIIExfiltrationRule(rule_id=rule_id, phases=phases, config=config)
-
-    registry.register(
-        "pii_exfiltration",
-        config_model=PIIExfiltrationConfig,
-        factory=build_pii_exfiltration,
-        allowed_phases=frozenset({Phase.POST_LLM, Phase.PRE_TOOL}),
-    )
-
-    def build_tool_access(
-        rule_id: str,
-        phases: frozenset[Phase],
-        config: BaseModel,
-    ) -> ToolAccessRule:
-        if not isinstance(config, ToolAccessConfig):
-            raise TypeError("tool_access received an unexpected config model")
-        return ToolAccessRule(rule_id=rule_id, phases=phases, config=config)
-
-    registry.register(
-        "tool_access",
-        config_model=ToolAccessConfig,
-        factory=build_tool_access,
-        allowed_phases=frozenset({Phase.POST_LLM, Phase.PRE_TOOL}),
-    )
-
-    def build_tool_result_flow(
-        rule_id: str,
-        phases: frozenset[Phase],
-        config: BaseModel,
-    ) -> ToolResultFlowRule:
-        if not isinstance(config, ToolResultFlowConfig):
-            raise TypeError("tool_result_flow received an unexpected config model")
-        return ToolResultFlowRule(rule_id=rule_id, phases=phases, config=config)
-
-    registry.register(
-        "tool_result_flow",
-        config_model=ToolResultFlowConfig,
-        factory=build_tool_result_flow,
-        allowed_phases=frozenset({Phase.PRE_TOOL}),
-    )
-    return registry
+from agent_guardrail.detectors.pii import PII_PATTERNS, PIIDetector
+from agent_guardrail.detectors.secrets import SECRET_PATTERNS, SecretDetector
 
 
 def create_default_detector_registry() -> DetectorRegistry:
     """Create a new registry containing local deterministic detectors."""
 
     registry = DetectorRegistry()
-    registry.register(PIIDetector())
-    registry.register(SecretDetector())
+    registry.register(
+        PIIDetector(),
+        policy_descriptor=DetectorPolicyDescriptor(
+            name="pii",
+            allowed_encodings=frozenset({"canonical_json"}),
+            detection_types=frozenset(pattern.type for pattern in PII_PATTERNS)
+            | frozenset({"credit_card", "cn_resident_id"}),
+            max_input_bytes=16_384,
+        ),
+    )
+    registry.register(
+        SecretDetector(),
+        policy_descriptor=DetectorPolicyDescriptor(
+            name="secrets",
+            allowed_encodings=frozenset({"canonical_json"}),
+            detection_types=frozenset(pattern.type for pattern in SECRET_PATTERNS),
+            max_input_bytes=16_384,
+        ),
+    )
     return registry
+
+
+def create_default_predicate_registry() -> PredicateRegistry:
+    """Create the reviewed built-in pure Predicate registry (empty in v0.1)."""
+
+    return PredicateRegistry()

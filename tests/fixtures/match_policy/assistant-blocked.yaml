@@ -1,0 +1,54 @@
+version: 1
+scopes: [snapshot, pending]
+
+predicates:
+  is_assistant:
+    parameters: [message]
+    where:
+      compare:
+        left: {field: [message, payload, role]}
+        operator: equals
+        right: {literal: assistant}
+
+  contains_text:
+    parameters: [message, needle]
+    where:
+      compare:
+        id: text_match
+        left: {field: [message, payload, content, text]}
+        operator: contains
+        right: {binding: needle}
+
+  blocked_assistant:
+    parameters: [message]
+    where:
+      all:
+        - use:
+            name: is_assistant
+            arguments:
+              message: {binding: message}
+        - use:
+            name: contains_text
+            arguments:
+              message: {binding: message}
+              needle: {literal: blocked}
+
+rules:
+  - id: assistant_blocked
+    events:
+      message:
+        kind: message
+        phases: [post_llm]
+    where:
+      use:
+        name: blocked_assistant
+        arguments:
+          message: {binding: message}
+    finding:
+      code: blocked_content
+      message: Assistant emitted blocked content
+      subjects: [message]
+      evidence:
+        - source: matcher
+          id: text_match
+          masked_evidence: "******"

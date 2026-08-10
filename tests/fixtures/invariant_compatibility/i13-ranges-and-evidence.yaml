@@ -1,0 +1,53 @@
+id: i13-ranges-and-evidence
+capability: bounded ranges and masked evidence
+current_support: partial
+invariant_reference: [invariant/tests/analyzer/test_ranges.py::TestBasicRanges::test_masking]
+cases:
+  - id: i13-message-and-tool-ranges
+    mode: snapshot
+    oracle: {type: ranges, contains: marker, masked_evidence: "******"}
+    runs:
+      - id: repeated-ranges
+        snapshot:
+          - id: m1
+            kind: message
+            phase: pre_llm
+            payload: {role: user, content: {type: text, text: AA marker BB marker}}
+          - id: c1
+            kind: tool_call
+            phase: pre_tool
+            payload:
+              call_id: call-1
+              name: send_email
+              arguments: {body: marker and marker}
+        expected:
+          matches:
+            - subjects: [m1]
+              bindings: {event: m1}
+              ranges:
+                - m1.payload.content.text:3-9
+                - m1.payload.content.text:13-19
+              evidence_types: [range_match, range_match]
+              masked_evidence: ["******", "******"]
+            - subjects: [c1]
+              bindings: {event: c1}
+              ranges:
+                - c1.payload.arguments.body:0-6
+                - c1.payload.arguments.body:11-17
+              evidence_types: [range_match, range_match]
+              masked_evidence: ["******", "******"]
+          forbidden_strings: [AA marker BB marker, marker and marker]
+      - id: no-range
+        snapshot:
+          - id: m1
+            kind: message
+            phase: pre_llm
+            payload: {role: user, content: {type: text, text: safe}}
+        expected: {}
+      - id: partial-token-boundary
+        snapshot:
+          - id: m1
+            kind: message
+            phase: pre_llm
+            payload: {role: user, content: {type: text, text: marke}}
+        expected: {}

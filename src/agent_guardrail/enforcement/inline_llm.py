@@ -7,37 +7,68 @@ from typing import cast
 from pydantic import JsonValue
 
 from agent_guardrail.enforcement.exceptions import GuardrailBlocked
+from agent_guardrail.enforcement.input_normalizer import InputNormalizer
 from agent_guardrail.enforcement.protocols import LLMClient
 from agent_guardrail.enforcement.session import EnforcementSession
-from agent_guardrail.models import EventKind, EventOrigin, ModelRequest, ModelResponse, Phase
+from agent_guardrail.models import (
+    CandidateRelation,
+    EventKind,
+    EventOrigin,
+    ModelRequest,
+    ModelResponse,
+    Phase,
+)
 
 
 class GuardedLLMClient:
-    """Run pre_llm before the provider and post_llm before returning to the agent."""
+    """Guard an LLM with independent Events and a bounded repeated-snapshot bridge."""
 
-    def __init__(self, *, inner: LLMClient, session: EnforcementSession) -> None:
+    def __init__(
+        self,
+        *,
+        inner: LLMClient,
+        session: EnforcementSession,
+        normalizer: InputNormalizer | None = None,
+    ) -> None:
         self.inner = inner
         self.session = session
+        self.normalizer = normalizer or InputNormalizer()
+        self._submitted_initial_snapshot = False
 
     async def complete(self, request: ModelRequest) -> ModelResponse:
-        pre_decision = await self.session.evaluate(
-            kind=EventKind.MODEL_REQUEST,
-            phase=Phase.PRE_LLM,
-            payload=cast(dict[str, JsonValue], request.model_dump(mode="json")),
-            metadata={"adapter": "inline_llm"},
-            origin=EventOrigin.CLIENT_ASSERTED,
-        )
+        if not self._submitted_initial_snapshot:
+            request_batch = self.normalizer.normalize_request_snapshot(request)
+            pre_decision = await self.session.evaluate_candidates(
+                request_batch.candidates,
+                primary_key=request_batch.primary_key,
+            )
+            self._submitted_initial_snapshot = True
+        else:
+            pre_decision = await self.session.evaluate(
+                kind=EventKind.MODEL_REQUEST,
+                phase=Phase.PRE_LLM,
+                payload=cast(dict[str, JsonValue], request.model_dump(mode="json")),
+                metadata={"adapter": "inline_llm_repeated_snapshot"},
+                origin=EventOrigin.CLIENT_ASSERTED,
+            )
         if pre_decision.blocked:
             raise GuardrailBlocked(pre_decision)
 
         response = await self.inner.complete(request)
-        post_decision = await self.session.evaluate(
-            kind=EventKind.MODEL_RESPONSE,
-            phase=Phase.POST_LLM,
-            payload=cast(dict[str, JsonValue], response.model_dump(mode="json")),
-            metadata={"adapter": "inline_llm"},
-            source_event_ids=(pre_decision.event_id,),
-            origin=EventOrigin.OBSERVED,
+        response_batch = self.normalizer.normalize_response(response)
+        post_decision = await self.session.evaluate_candidates(
+            tuple(
+                candidate.model_copy(
+                    update={
+                        "relations": (
+                            *candidate.relations,
+                            CandidateRelation(source_event_id=pre_decision.event_id),
+                        )
+                    }
+                )
+                for candidate in response_batch.candidates
+            ),
+            primary_key=response_batch.primary_key,
         )
         if post_decision.blocked:
             raise GuardrailBlocked(post_decision)

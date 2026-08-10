@@ -6,6 +6,8 @@ import pytest
 from pydantic import ValidationError
 
 from agent_guardrail.models import (
+    MAX_RELATIONS_PER_EVENT,
+    MAX_TRACE_EVENTS,
     Action,
     CandidateEvent,
     CandidateRelation,
@@ -15,9 +17,12 @@ from agent_guardrail.models import (
     EventOrigin,
     EventRelation,
     GuardrailContext,
+    Message,
+    MessageRole,
     PendingTrace,
     Phase,
     RelationKind,
+    TextContent,
     Trace,
     Violation,
 )
@@ -178,6 +183,66 @@ def test_tool_event_rejects_malformed_canonical_payload() -> None:
         )
 
 
+def test_message_event_uses_closed_text_content_schema() -> None:
+    message = Message(
+        role=MessageRole.USER,
+        content=TextContent(text="hello"),
+    )
+    message_event = Event(
+        id="event-message",
+        trace_id="trace-1",
+        sequence=0,
+        kind=EventKind.MESSAGE,
+        phase=Phase.PRE_LLM,
+        timestamp=datetime(2026, 8, 4, tzinfo=UTC),
+        payload=message.model_dump(mode="json"),
+    )
+
+    assert message_event.payload == {
+        "role": MessageRole.USER.value,
+        "content": {"type": "text", "text": "hello"},
+    }
+    assert TextContent(text="").text == ""
+
+    with pytest.raises(ValidationError, match="system|user|assistant"):
+        Message.model_validate(
+            {"role": "tool", "content": {"type": "text", "text": "result"}}
+        )
+    with pytest.raises(ValidationError, match="text"):
+        Message.model_validate(
+            {"role": "user", "content": {"type": "image", "text": "unsupported"}}
+        )
+    with pytest.raises(ValidationError, match="extra_forbidden"):
+        Message.model_validate(
+            {
+                "role": "assistant",
+                "content": {"type": "text", "text": "hello"},
+                "tool_calls": [],
+            }
+        )
+
+
+def test_canonical_graph_limits_are_hard_bounded() -> None:
+    with pytest.raises(ValidationError, match="less than or equal to"):
+        Trace(id="trace-1", max_events=MAX_TRACE_EVENTS + 1)
+
+    relations = tuple(
+        CandidateRelation(source_candidate_key=f"source-{index}")
+        for index in range(MAX_RELATIONS_PER_EVENT + 1)
+    )
+    with pytest.raises(ValidationError, match="at most 64 items"):
+        CandidateEvent(
+            key="target",
+            kind=EventKind.MESSAGE,
+            phase=Phase.PRE_LLM,
+            payload=Message(
+                role=MessageRole.USER,
+                content=TextContent(text="hello"),
+            ).model_dump(mode="json"),
+            relations=relations,
+        )
+
+
 def test_decision_requires_aggregated_action() -> None:
     violation = Violation(
         rule_id="rule-1",
@@ -201,7 +266,7 @@ def test_decision_requires_aggregated_action() -> None:
         )
 
 
-def test_pending_trace_builds_prefix_contexts_for_each_event() -> None:
+def test_pending_trace_preserves_whole_pending_batch_identity() -> None:
     past = event(sequence=0)
     first = event(sequence=1).model_copy(update={"id": "pending-1"})
     second = event(sequence=2).model_copy(
@@ -216,14 +281,10 @@ def test_pending_trace_builds_prefix_contexts_for_each_event() -> None:
         primary_event_id=second.id,
     )
 
-    first_context = pending.context_for(first)
-    second_context = pending.context_for(second)
-
     assert pending.event_ids == (first.id, second.id)
     assert pending.primary_event == second
-    assert first_context.trace.events == (past,)
-    assert second_context.trace.events == (past, first)
-    assert second_context.trace.sources_of(second) == (first,)
+    combined = Trace(id="trace-1", events=(past, *pending.events))
+    assert combined.sources_of(second) == (first,)
 
 
 def test_pending_trace_rejects_mixed_phase_and_sequence_gap() -> None:

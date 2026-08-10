@@ -1,0 +1,85 @@
+id: i08-exact-relations
+capability: explicit direct and ancestor provenance
+current_support: supported
+invariant_reference: [invariant/tests/analyzer/test_flow.py::TestFlow::test_separate_path]
+cases:
+  - id: i08-direct-source
+    mode: snapshot
+    oracle:
+      type: relation_query
+      operator: derived_from_direct
+      source_kind: tool_result
+      target_kind: tool_call
+      source_tool: read_private_file
+      target_tool: send_email
+    runs:
+      - id: explicit-edge-hit
+        snapshot:
+          - id: r1
+            kind: tool_result
+            phase: post_tool
+            origin: observed
+            payload: {call_id: call-1, name: read_private_file, output: redacted}
+          - id: c1
+            kind: tool_call
+            phase: pre_tool
+            origin: derived
+            payload: {call_id: call-2, name: send_email, arguments: {}}
+            relations: [{source_event_id: r1}]
+        expected:
+          matches:
+            - subjects: [c1]
+              bindings: {source: r1, target: c1}
+          relations_unchanged: true
+      - id: metadata-hint-not-an-edge
+        snapshot:
+          - id: r1
+            kind: tool_result
+            phase: post_tool
+            payload: {call_id: call-1, name: read_private_file, output: redacted}
+          - id: c1
+            kind: tool_call
+            phase: pre_tool
+            origin: client_asserted
+            payload: {call_id: call-2, name: send_email, arguments: {}}
+            metadata: {source_hint: r1, claimed_timestamp: "2026-08-10T12:00:00Z"}
+        expected: {relations_unchanged: true}
+      - id: reserved-source-metadata-rejected
+        snapshot:
+          - id: c1
+            kind: tool_call
+            phase: pre_tool
+            payload: {call_id: call-1, name: send_email, arguments: {}}
+            metadata: {source_event_ids: [r1]}
+        expected: {error: input_error}
+  - id: i08-transitive-source
+    mode: snapshot
+    oracle:
+      type: relation_query
+      operator: derived_from_ancestor
+      source_kind: tool_call
+      target_kind: tool_call
+      source_tool: read_private_file
+      target_tool: send_email
+    runs:
+      - id: ancestor-hit
+        snapshot:
+          - id: c0
+            kind: tool_call
+            phase: pre_tool
+            payload: {call_id: call-0, name: read_private_file, arguments: {}}
+          - id: r1
+            kind: tool_result
+            phase: post_tool
+            payload: {call_id: call-0, name: read_private_file, output: redacted}
+            relations: [{source_event_id: c0}]
+          - id: c1
+            kind: tool_call
+            phase: pre_tool
+            payload: {call_id: call-1, name: send_email, arguments: {}}
+            relations: [{source_event_id: r1}]
+        expected:
+          matches:
+            - subjects: [c1]
+              bindings: {source: c0, target: c1}
+          relations_unchanged: true

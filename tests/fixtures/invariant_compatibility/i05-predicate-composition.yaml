@@ -1,0 +1,39 @@
+id: i05-predicate-composition
+capability: reusable declarative predicates
+current_support: partial
+invariant_reference: [invariant/tests/analyzer/test_predicates.py::TestConstants::test_two_level]
+cases:
+  - id: i05-composed-predicates
+    mode: snapshot
+    oracle: {type: predicate, role: assistant, contains: blocked}
+    runs:
+      - id: both-predicates-true
+        snapshot:
+          - id: m1
+            kind: message
+            phase: post_llm
+            payload: {role: assistant, content: {type: text, text: blocked answer}}
+        expected:
+          matches:
+            - subjects: [m1]
+              bindings: {message: m1}
+      - id: role-predicate-false
+        snapshot:
+          - id: m1
+            kind: message
+            phase: pre_llm
+            payload: {role: user, content: {type: text, text: blocked request}}
+        expected: {}
+      - id: pattern-predicate-false
+        snapshot:
+          - id: m1
+            kind: message
+            phase: post_llm
+            payload: {role: assistant, content: {type: text, text: safe answer}}
+        expected: {}
+  - id: i05-predicate-cycle
+    mode: compile
+    oracle: {type: predicate, role: assistant, contains: blocked, recursive: true}
+    runs:
+      - id: recursive-predicate-rejected
+        expected: {error: compile_error}

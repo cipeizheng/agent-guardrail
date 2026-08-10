@@ -9,24 +9,24 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
-from agent_guardrail.core import (
-    DetectorRegistry,
-    EngineConfig,
-    GuardrailEngine,
-    PolicySet,
-    RuleBinding,
-)
-from agent_guardrail.core.services import RuleServices
+from agent_guardrail.core import MatchPolicyAnalyzer
 from agent_guardrail.enforcement import InMemoryAuditSink
 from agent_guardrail.gateway import GatewaySettings, create_app
-from agent_guardrail.models import Action, GuardrailContext, Phase, Violation
+from agent_guardrail.models import (
+    EventKind,
+    EventOrigin,
+    PendingTrace,
+    Phase,
+)
 from agent_guardrail.runtime import GuardrailRuntime
 from tests.support import (
     FAKE_CN_RESIDENT_ID,
     FAKE_PII,
     FAKE_SECRET,
-    pii_engine,
-    tool_access_engine,
+    analyzer_from_yaml,
+    empty_analyzer,
+    pii_analyzer,
+    tool_access_analyzer,
     tool_context,
 )
 
@@ -85,14 +85,14 @@ def text_response(content: str = "Safe response") -> dict[str, object]:
     }
 
 
-def tool_response(body: str) -> dict[str, object]:
+def tool_response(body: str, *, content: str | None = None) -> dict[str, object]:
     response = text_response()
     response["choices"] = [
         {
             "index": 0,
             "message": {
                 "role": "assistant",
-                "content": None,
+                "content": content,
                 "tool_calls": [
                     {
                         "id": "call-1",
@@ -188,8 +188,37 @@ async def test_post_llm_block_hides_response_and_records_sanitized_audit() -> No
 
 
 @pytest.mark.asyncio
+async def test_post_llm_message_and_tool_call_are_one_atomic_batch() -> None:
+    audit = InMemoryAuditSink()
+
+    async with app_client(
+        lambda request: httpx.Response(
+            200,
+            json=tool_response(FAKE_SECRET, content="A safe-looking preface"),
+        ),
+        audit=audit,
+    ) as (client, requests):
+        response = await client.post(
+            "/v1/openai/chat/completions",
+            headers=auth_headers(),
+            json=request_payload(),
+        )
+
+    assert response.status_code == 400
+    assert len(requests) == 1
+    assert len(audit.records) == 1
+    decision = audit.records[0]
+    assert len(decision.pending_event_ids) == 2
+    assert len(decision.violations) == 1
+    assert set(decision.violations[0].event_ids) < set(decision.pending_event_ids)
+    assert FAKE_SECRET not in response.text
+    assert "A safe-looking preface" not in response.text
+    assert FAKE_SECRET not in decision.model_dump_json()
+
+
+@pytest.mark.asyncio
 async def test_tool_access_post_llm_block_hides_tool_call() -> None:
-    runtime = GuardrailRuntime(tool_access_engine())
+    runtime = GuardrailRuntime(tool_access_analyzer())
     async with app_client(
         lambda request: httpx.Response(200, json=tool_response("safe")),
         runtime=runtime,
@@ -212,7 +241,7 @@ async def test_tool_access_post_llm_block_hides_tool_call() -> None:
 async def test_pii_post_llm_block_hides_tool_call_and_records_safe_audit(
     sensitive_value: str,
 ) -> None:
-    runtime = GuardrailRuntime(pii_engine())
+    runtime = GuardrailRuntime(pii_analyzer())
     audit = InMemoryAuditSink()
     async with app_client(
         lambda request: httpx.Response(200, json=tool_response(sensitive_value)),
@@ -233,38 +262,230 @@ async def test_pii_post_llm_block_hides_tool_call_and_records_safe_audit(
     assert len(requests) == 1
 
 
-class BlockPreLlmRule:
-    id = "block-pre-llm"
-    phases = frozenset({Phase.PRE_LLM})
+class RecordingAnalyzer(MatchPolicyAnalyzer):
+    def __init__(self) -> None:
+        super().__init__(empty_analyzer().policy)
+        self.events: list[
+            tuple[EventKind, Phase, EventOrigin, str, tuple[str, ...]]
+        ] = []
 
-    async def evaluate(
-        self,
-        context: GuardrailContext,
-        services: RuleServices,
-    ) -> list[Violation]:
-        del services
-        return [
-            Violation(
-                rule_id=self.id,
-                code="blocked_for_test",
-                phase=context.event.phase,
-                message="Blocked before the provider call.",
+    async def analyze_pending(self, pending: PendingTrace):
+        self.events.extend(
+            (
+                event.kind,
+                event.phase,
+                event.origin,
+                event.id,
+                event.source_event_ids,
             )
-        ]
+            for event in pending.events
+        )
+        return await super().analyze_pending(pending)
 
 
 def pre_llm_blocking_runtime() -> GuardrailRuntime:
-    rule = BlockPreLlmRule()
-    engine = GuardrailEngine(
-        policy=PolicySet(
-            version=1,
-            content_hash="pre-llm-test-policy",
-            engine=EngineConfig(),
-            rules=(RuleBinding(rule=rule, action=Action.BLOCK),),
-        ),
-        detectors=DetectorRegistry(),
+    return GuardrailRuntime(
+        analyzer_from_yaml(
+            """\
+version: 3
+scopes: [pending]
+rules:
+  - id: block-pre-llm
+    action: block
+    events:
+      message: {kind: message, domain: pending, phases: [pre_llm]}
+    where: {present: [message, payload]}
+    finding:
+      code: blocked_for_test
+      message: Blocked before the provider call.
+      subjects: [message]
+"""
+        )
     )
-    return GuardrailRuntime(engine)
+
+
+@pytest.mark.asyncio
+async def test_gateway_submits_independent_events_with_boundary_owned_origins() -> None:
+    analyzer = RecordingAnalyzer()
+    runtime = GuardrailRuntime(analyzer)
+
+    async with app_client(
+        lambda request: httpx.Response(200, json=text_response()),
+        runtime=runtime,
+    ) as (client, requests):
+        response = await client.post(
+            "/v1/openai/chat/completions",
+            headers=auth_headers(),
+            json=request_payload(),
+        )
+
+    assert response.status_code == 200
+    assert len(requests) == 1
+    assert [(kind, phase, origin) for kind, phase, origin, _, _ in analyzer.events] == [
+        (EventKind.MESSAGE, Phase.PRE_LLM, EventOrigin.CLIENT_ASSERTED),
+        (EventKind.MESSAGE, Phase.POST_LLM, EventOrigin.OBSERVED),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_gateway_normalizes_valid_tool_history_as_one_related_batch() -> None:
+    analyzer = RecordingAnalyzer()
+    runtime = GuardrailRuntime(analyzer)
+    payload = request_payload()
+    payload["messages"] = [
+        {"role": "user", "content": "Send the report"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "call-history-1",
+                    "type": "function",
+                    "function": {
+                        "name": "send_email",
+                        "arguments": json.dumps(
+                            {"to": "inside@example.com", "body": "safe"}
+                        ),
+                    },
+                }
+            ],
+        },
+        {"role": "tool", "content": "sent", "tool_call_id": "call-history-1"},
+    ]
+
+    async with app_client(
+        lambda request: httpx.Response(200, json=text_response()),
+        runtime=runtime,
+    ) as (client, requests):
+        response = await client.post(
+            "/v1/openai/chat/completions",
+            headers=auth_headers(),
+            json=payload,
+        )
+
+    assert response.status_code == 200
+    assert len(requests) == 1
+    assert [event[0] for event in analyzer.events] == [
+        EventKind.MESSAGE,
+        EventKind.TOOL_CALL,
+        EventKind.TOOL_RESULT,
+        EventKind.MESSAGE,
+    ]
+    tool_call_event_id = analyzer.events[1][3]
+    assert analyzer.events[2][4] == (tool_call_event_id,)
+
+
+@pytest.mark.asyncio
+async def test_orphan_tool_result_is_rejected_before_upstream() -> None:
+    payload = request_payload()
+    payload["messages"] = [
+        {"role": "tool", "content": "untrusted result", "tool_call_id": "unknown"}
+    ]
+
+    async with app_client(
+        lambda request: httpx.Response(200, json=text_response()),
+    ) as (client, requests):
+        response = await client.post(
+            "/v1/openai/chat/completions",
+            headers=auth_headers(),
+            json=payload,
+        )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "orphan_tool_result"
+    assert response.json()["error"]["phase"] == "pre_llm"
+    assert "untrusted result" not in response.text
+    assert "unknown" not in response.text
+    assert requests == []
+
+
+@pytest.mark.asyncio
+async def test_normalized_candidate_limit_is_rejected_before_upstream() -> None:
+    settings = gateway_settings().model_copy(update={"max_trace_events": 2})
+    payload = request_payload()
+    payload["messages"] = [
+        {"role": "user", "content": "one"},
+        {"role": "user", "content": "two"},
+    ]
+
+    async with app_client(
+        lambda request: httpx.Response(200, json=text_response()),
+        settings=settings,
+    ) as (client, requests):
+        response = await client.post(
+            "/v1/openai/chat/completions",
+            headers=auth_headers(),
+            json=payload,
+        )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "candidate_limit_exceeded"
+    assert requests == []
+
+
+@pytest.mark.asyncio
+async def test_response_candidate_limit_does_not_release_upstream_payload() -> None:
+    settings = gateway_settings().model_copy(update={"max_trace_events": 3})
+    oversized_response = tool_response("safe", content="private upstream text")
+    tool_calls = oversized_response["choices"][0]["message"]["tool_calls"]  # type: ignore[index]
+    tool_calls.append(  # type: ignore[union-attr]
+        {
+            "id": "call-2",
+            "type": "function",
+            "function": {
+                "name": "send_email",
+                "arguments": json.dumps(
+                    {"to": "outside@example.com", "body": "also safe"}
+                ),
+            },
+        }
+    )
+
+    async with app_client(
+        lambda request: httpx.Response(200, json=oversized_response),
+        settings=settings,
+    ) as (client, requests):
+        response = await client.post(
+            "/v1/openai/chat/completions",
+            headers=auth_headers(),
+            json=request_payload(),
+        )
+
+    assert response.status_code == 502
+    assert response.json()["error"]["code"] == "candidate_limit_exceeded"
+    assert response.json()["error"]["phase"] == "post_llm"
+    assert "private upstream text" not in response.text
+    assert "call-2" not in response.text
+    assert len(requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_combined_trace_capacity_does_not_release_upstream_payload() -> None:
+    settings = gateway_settings().model_copy(update={"max_trace_events": 3})
+    payload = request_payload()
+    payload["messages"] = [
+        {"role": "user", "content": "one"},
+        {"role": "user", "content": "two"},
+    ]
+
+    async with app_client(
+        lambda request: httpx.Response(
+            200,
+            json=tool_response("safe", content="private upstream text"),
+        ),
+        settings=settings,
+    ) as (client, requests):
+        response = await client.post(
+            "/v1/openai/chat/completions",
+            headers=auth_headers(),
+            json=payload,
+        )
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "evaluation_failed"
+    assert response.json()["error"]["phase"] == "post_llm"
+    assert "private upstream text" not in response.text
+    assert len(requests) == 1
 
 
 @pytest.mark.asyncio
@@ -282,6 +503,33 @@ async def test_pre_llm_block_makes_zero_upstream_requests() -> None:
     assert response.status_code == 400
     assert response.json()["error"]["phase"] == "pre_llm"
     assert requests == []
+
+
+@pytest.mark.asyncio
+async def test_request_snapshot_is_atomic_and_does_not_deduplicate_messages() -> None:
+    audit = InMemoryAuditSink()
+    payload = request_payload()
+    payload["messages"] = [
+        {"role": "user", "content": "same"},
+        {"role": "user", "content": "same"},
+    ]
+
+    async with app_client(
+        lambda request: httpx.Response(200, json=text_response()),
+        runtime=pre_llm_blocking_runtime(),
+        audit=audit,
+    ) as (client, requests):
+        response = await client.post(
+            "/v1/openai/chat/completions",
+            headers=auth_headers(),
+            json=payload,
+        )
+
+    assert response.status_code == 400
+    assert requests == []
+    assert len(audit.records) == 1
+    assert len(audit.records[0].pending_event_ids) == 2
+    assert len(audit.records[0].violations) == 2
 
 
 @pytest.mark.asyncio

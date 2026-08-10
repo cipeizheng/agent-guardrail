@@ -8,7 +8,8 @@ from pydantic import SecretStr, ValidationError
 
 from agent_guardrail.enforcement import JsonlAuditSink
 from agent_guardrail.gateway import GatewaySettings
-from tests.support import FAKE_SECRET, secret_engine, tool_context
+from agent_guardrail.models import PendingTrace
+from tests.support import FAKE_SECRET, secret_analyzer, tool_context
 
 
 def test_gateway_settings_reject_missing_server_key_and_non_allowlisted_host() -> None:
@@ -43,7 +44,9 @@ def test_gateway_settings_load_prefixed_environment(monkeypatch: pytest.MonkeyPa
 
 @pytest.mark.asyncio
 async def test_jsonl_audit_contains_only_sanitized_decision_summary(tmp_path: Path) -> None:
-    decision = await secret_engine().evaluate(tool_context(body=FAKE_SECRET))
+    decision = await secret_analyzer().analyze_pending(
+        PendingTrace.from_context(tool_context(body=FAKE_SECRET))
+    )
     audit_path = tmp_path / "audit/decisions.jsonl"
     sink = JsonlAuditSink(audit_path)
 

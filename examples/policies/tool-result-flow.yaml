@@ -1,18 +1,40 @@
-version: 1
+version: 3
 
-engine:
-  default_timeout_ms: 1000
-  detector_timeout_ms: 500
-  on_rule_error: block
-  on_detector_timeout: block
-  max_violations: 100
+scopes: [pending]
 
 rules:
   - id: prevent-private-file-email
-    type: tool_result_flow
-    enabled: true
     action: block
-    phases: [pre_tool]
-    config:
-      source_tools: [read_private_file]
-      destination_tools: [send_email]
+    events:
+      source:
+        kind: tool_call
+        domain: past
+      result:
+        kind: tool_result
+        domain: past
+      destination:
+        kind: tool_call
+        domain: pending
+        phases: [pre_tool]
+    where:
+      all:
+        - compare:
+            left: {field: [source, payload, name]}
+            operator: in
+            right: {literal: [read_private_file]}
+        - compare:
+            left: {field: [destination, payload, name]}
+            operator: in
+            right: {literal: [send_email]}
+        - relation:
+            source: source
+            target: result
+            operator: derived_from_direct
+        - relation:
+            source: result
+            target: destination
+            operator: derived_from_ancestor
+    finding:
+      code: tool_result_flow_denied
+      message: The requested tool flow is not allowed by policy.
+      subjects: [destination]

@@ -25,8 +25,9 @@ class Phase(StrEnum):
 
 
 class EventKind(StrEnum):
-    """Provider-neutral event categories."""
+    """Provider-neutral categories; aggregate model kinds are compatibility-only."""
 
+    MESSAGE = "message"
     MODEL_REQUEST = "model_request"
     MODEL_RESPONSE = "model_response"
     TOOL_CALL = "tool_call"
@@ -56,6 +57,9 @@ ACTION_PRIORITY: dict[Action, int] = {
     Action.BLOCK: 2,
 }
 
+MAX_PENDING_EVENTS = 1_000
+MAX_RELATIONS_PER_EVENT = 64
+MAX_TRACE_EVENTS = 1_000
 _LEGACY_SOURCE_EVENT_IDS_METADATA_KEY = "source_event_ids"
 
 
@@ -63,6 +67,14 @@ class RelationKind(StrEnum):
     """A typed, explicitly observed relationship between canonical events."""
 
     DERIVED_FROM = "derived_from"
+
+
+class MessageRole(StrEnum):
+    """Roles represented by independent canonical message events."""
+
+    SYSTEM = "system"
+    USER = "user"
+    ASSISTANT = "assistant"
 
 
 class EventRelation(CanonicalModel):
@@ -100,6 +112,20 @@ class CandidateRelation(CanonicalModel):
         return self
 
 
+class TextContent(CanonicalModel):
+    """The only content variant supported by independent messages in v0.1."""
+
+    type: Literal["text"] = "text"
+    text: str
+
+
+class Message(CanonicalModel):
+    """A provider-neutral conversational message without embedded tool fields."""
+
+    role: MessageRole
+    content: TextContent
+
+
 class ToolCall(CanonicalModel):
     """A normalized request to execute a tool."""
 
@@ -127,7 +153,10 @@ class CandidateEvent(CanonicalModel):
     payload: dict[str, JsonValue] = Field(default_factory=dict)
     metadata: dict[str, JsonValue] = Field(default_factory=dict)
     origin: EventOrigin = EventOrigin.CLIENT_ASSERTED
-    relations: tuple[CandidateRelation, ...] = ()
+    relations: tuple[CandidateRelation, ...] = Field(
+        default=(),
+        max_length=MAX_RELATIONS_PER_EVENT,
+    )
 
     @model_validator(mode="after")
     def validate_candidate(self) -> Self:
@@ -167,11 +196,16 @@ class Event(CanonicalModel):
     origin: EventOrigin = EventOrigin.CLIENT_ASSERTED
     payload: dict[str, JsonValue] = Field(default_factory=dict)
     metadata: dict[str, JsonValue] = Field(default_factory=dict)
-    relations: tuple[EventRelation, ...] = ()
+    relations: tuple[EventRelation, ...] = Field(
+        default=(),
+        max_length=MAX_RELATIONS_PER_EVENT,
+    )
 
     @model_validator(mode="after")
     def validate_typed_payload(self) -> Self:
-        if self.kind is EventKind.MODEL_REQUEST:
+        if self.kind is EventKind.MESSAGE:
+            Message.model_validate(self.payload)
+        elif self.kind is EventKind.MODEL_REQUEST:
             from agent_guardrail.models.chat import ModelRequest
 
             ModelRequest.model_validate(self.payload)
@@ -208,7 +242,7 @@ class Trace(CanonicalModel):
     id: str = Field(min_length=1)
     events: tuple[Event, ...] = ()
     metadata: dict[str, JsonValue] = Field(default_factory=dict)
-    max_events: int = Field(default=1_000, ge=1, exclude=True)
+    max_events: int = Field(default=MAX_TRACE_EVENTS, ge=1, le=MAX_TRACE_EVENTS, exclude=True)
 
     @model_validator(mode="after")
     def validate_events(self) -> Self:
@@ -395,7 +429,10 @@ class PendingTrace(CanonicalModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     trace: Trace
-    events: tuple[Event, ...] = Field(min_length=1)
+    events: tuple[Event, ...] = Field(
+        min_length=1,
+        max_length=MAX_PENDING_EVENTS,
+    )
     primary_event_id: str = Field(min_length=1)
     attributes: dict[str, JsonValue] = Field(default_factory=dict)
 
@@ -429,7 +466,7 @@ class PendingTrace(CanonicalModel):
 
     @classmethod
     def from_context(cls, context: GuardrailContext) -> Self:
-        """Adapt the v0.1 single-event rule context to the pending analyzer boundary."""
+        """Adapt the direct v0.1 single-event API to the pending analyzer boundary."""
 
         return cls(
             trace=context.trace.model_copy(deep=True),
@@ -449,26 +486,6 @@ class PendingTrace(CanonicalModel):
         """Return every pending event ID in batch order."""
 
         return tuple(event.id for event in self.events)
-
-    def context_for(self, event: Event) -> GuardrailContext:
-        """Build the Python Rule view for one pending event."""
-
-        try:
-            pending_index = self.events.index(event)
-        except ValueError as exc:
-            raise ValueError("event is not part of this pending trace") from exc
-        prefix = Trace(
-            id=self.trace.id,
-            events=(*self.trace.events, *self.events[:pending_index]),
-            metadata=self.trace.metadata,
-            max_events=self.trace.max_events,
-        )
-        return GuardrailContext(
-            event=event,
-            trace=prefix,
-            attributes=dict(self.attributes),
-        )
-
 
 class DetectionContext(CanonicalModel):
     """Minimal context exposed to a detector."""

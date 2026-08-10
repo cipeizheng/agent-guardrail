@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol
+from dataclasses import dataclass
+from typing import Protocol
 
-from agent_guardrail.models import Detection, DetectionContext, GuardrailContext, Phase, Violation
+from pydantic import JsonValue
 
-if TYPE_CHECKING:
-    from agent_guardrail.core.services import RuleServices
+from agent_guardrail.models import Detection, DetectionContext
 
 
 class Detector(Protocol):
@@ -24,14 +24,25 @@ class Detector(Protocol):
     ) -> list[Detection]: ...
 
 
-class Rule(Protocol):
-    """Decide whether detector facts violate policy in the current context."""
+@dataclass(frozen=True, slots=True)
+class PredicateContext:
+    """Minimal, payload-free context exposed to a trusted Predicate."""
 
-    id: str
-    phases: frozenset[Phase]
+    trace_id: str
+    rule_id: str
+    condition_id: str
+    event_ids: tuple[str, ...]
+
+
+class Predicate(Protocol):
+    """Return one boolean fact from bounded JSON arguments without side effects."""
+
+    name: str
+    version: str
 
     async def evaluate(
         self,
-        context: GuardrailContext,
-        services: RuleServices,
-    ) -> list[Violation]: ...
+        arguments: tuple[JsonValue, ...],
+        *,
+        context: PredicateContext,
+    ) -> bool: ...

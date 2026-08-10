@@ -45,7 +45,7 @@ async def test_simulated_agent_secret_scenario_executes_no_tool() -> None:
     assert inner_llm.call_count == 1
     assert fake.call_count("send_email") == 0
     assert [event.kind for event in trace.events] == [
-        EventKind.MODEL_REQUEST,
+        EventKind.MESSAGE,
         EventKind.GUARDRAIL_DECISION,
     ]
     assert FAKE_SECRET not in trace.model_dump_json()
@@ -74,12 +74,12 @@ async def test_simulated_agent_completes_safe_tool_loop() -> None:
     assert inner_llm.call_count == 2
     assert fake.call_count("send_email") == 1
     assert [event.kind for event in trace.events] == [
-        EventKind.MODEL_REQUEST,
-        EventKind.MODEL_RESPONSE,
+        EventKind.MESSAGE,
+        EventKind.TOOL_CALL,
         EventKind.TOOL_CALL,
         EventKind.TOOL_RESULT,
         EventKind.MODEL_REQUEST,
-        EventKind.MODEL_RESPONSE,
+        EventKind.MESSAGE,
     ]
 
 
@@ -121,18 +121,18 @@ async def test_provenance_flow_blocks_derived_tool_call_before_side_effect() -> 
 
     assert blocked.value.decision.phase is Phase.PRE_TOOL
     assert blocked.value.decision.violations[0].code == "tool_result_flow_denied"
-    assert blocked.value.decision.violations[0].metadata["matched_source_event_ids"] == [
-        trace.events[3].id
-    ]
+    bound_event_ids = blocked.value.decision.violations[0].metadata["bound_event_ids"]
+    assert isinstance(bound_event_ids, list)
+    assert trace.events[3].id in bound_event_ids
     assert fake.call_count("read_private_file") == 1
     assert fake.call_count("send_email") == 0
     assert [event.kind for event in trace.events] == [
-        EventKind.MODEL_REQUEST,
-        EventKind.MODEL_RESPONSE,
+        EventKind.MESSAGE,
+        EventKind.TOOL_CALL,
         EventKind.TOOL_CALL,
         EventKind.TOOL_RESULT,
         EventKind.MODEL_REQUEST,
-        EventKind.MODEL_RESPONSE,
+        EventKind.TOOL_CALL,
         EventKind.GUARDRAIL_DECISION,
     ]
     assert trace.events[1].source_event_ids == (trace.events[0].id,)

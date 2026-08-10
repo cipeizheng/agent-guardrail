@@ -1,17 +1,75 @@
 """Public guardrail core APIs."""
 
-from agent_guardrail.core.engine import GuardrailEngine
-from agent_guardrail.core.policy import EngineConfig, PolicySet, RuleBinding
-from agent_guardrail.core.protocols import Detector, Rule
-from agent_guardrail.core.registry import DetectorRegistry, RuleRegistry
+from agent_guardrail.core.authoring import (
+    AuthorPolicy,
+    AuthorPolicyCompilationError,
+    compile_author_policy,
+)
+from agent_guardrail.core.capabilities import (
+    CapabilityCompilationError,
+    CompiledDetectorCapability,
+    CompiledMatchPlan,
+    CompiledPredicateCapability,
+    compile_match_plan_capabilities,
+)
+from agent_guardrail.core.decision_analyzer import MatchPolicyAnalyzer
+from agent_guardrail.core.match_plan import (
+    CostDimension,
+    MatchBudgetExceeded,
+    MatchCostLedger,
+    MatchCostSnapshot,
+    MatchLimitOverrides,
+    MatchLimits,
+    MatchPlan,
+    MatchRulePlan,
+)
+from agent_guardrail.core.matcher import SnapshotMatcher
+from agent_guardrail.core.monitor import MatchMonitor
+from agent_guardrail.core.policy import (
+    CompiledPolicy,
+    EnforcementConfig,
+    PolicyDocument,
+    RuleAction,
+)
+from agent_guardrail.core.protocols import Detector, Predicate, PredicateContext
+from agent_guardrail.core.registry import (
+    CapabilityEvidencePolicy,
+    DetectorPolicyDescriptor,
+    DetectorRegistry,
+    PredicatePolicyDescriptor,
+    PredicateRegistry,
+)
 
 __all__ = [
     "Detector",
+    "Predicate",
+    "PredicateContext",
+    "DetectorPolicyDescriptor",
     "DetectorRegistry",
-    "EngineConfig",
-    "GuardrailEngine",
-    "PolicySet",
-    "Rule",
-    "RuleBinding",
-    "RuleRegistry",
+    "PredicatePolicyDescriptor",
+    "PredicateRegistry",
+    "CompiledPolicy",
+    "EnforcementConfig",
+    "MatchPolicyAnalyzer",
+    "CostDimension",
+    "MatchBudgetExceeded",
+    "MatchCostLedger",
+    "MatchCostSnapshot",
+    "MatchLimitOverrides",
+    "MatchLimits",
+    "MatchMonitor",
+    "MatchPlan",
+    "MatchRulePlan",
+    "PolicyDocument",
+    "RuleAction",
+    "SnapshotMatcher",
+    "AuthorPolicy",
+    "AuthorPolicyCompilationError",
+    "compile_author_policy",
+    "CapabilityCompilationError",
+    "CapabilityEvidencePolicy",
+    "CompiledDetectorCapability",
+    "CompiledMatchPlan",
+    "CompiledPredicateCapability",
+    "compile_match_plan_capabilities",
 ]

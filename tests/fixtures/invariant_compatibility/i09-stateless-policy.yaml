@@ -1,0 +1,37 @@
+id: i09-stateless-policy
+capability: deterministic stateless snapshot Policy
+current_support: partial
+invariant_reference: [invariant/tests/analyzer/test_flow.py::TestFlow::test_stateful_vs_stateless]
+cases:
+  - id: i09-repeat-snapshot
+    mode: snapshot
+    oracle: {type: typed_message, role: assistant, contains: blocked}
+    runs:
+      - id: first-analysis
+        snapshot:
+          - id: m1
+            kind: message
+            phase: post_llm
+            payload: {role: assistant, content: {type: text, text: blocked answer}}
+        expected:
+          matches:
+            - subjects: [m1]
+              bindings: {message: m1}
+      - id: second-analysis
+        snapshot:
+          - id: m1
+            kind: message
+            phase: post_llm
+            payload: {role: assistant, content: {type: text, text: blocked answer}}
+        expected:
+          matches:
+            - subjects: [m1]
+              bindings: {message: m1}
+          same_identities_as: 0
+      - id: safe-snapshot
+        snapshot:
+          - id: m1
+            kind: message
+            phase: post_llm
+            payload: {role: assistant, content: {type: text, text: safe answer}}
+        expected: {}

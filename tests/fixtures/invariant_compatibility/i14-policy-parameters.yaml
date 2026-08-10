@@ -1,0 +1,58 @@
+id: i14-policy-parameters
+capability: typed trusted policy parameters
+current_support: partial
+invariant_reference: [invariant/tests/analyzer/test_readme_examples.py::TestReadmeExamples::test_rag]
+cases:
+  - id: i14-principal-parameter
+    mode: snapshot
+    oracle: {type: parameter, name: principal, authorized_values: [admin]}
+    runs:
+      - id: unauthorized-principal
+        parameters: {principal: alice}
+        snapshot:
+          - id: c1
+            kind: tool_call
+            phase: pre_tool
+            payload: {call_id: call-1, name: read_internal, arguments: {}}
+            metadata: {principal: admin}
+        expected:
+          matches:
+            - subjects: [c1]
+              bindings: {event: c1, principal: $parameters.principal}
+      - id: authorized-principal
+        parameters: {principal: admin}
+        snapshot:
+          - id: c1
+            kind: tool_call
+            phase: pre_tool
+            payload: {call_id: call-1, name: read_internal, arguments: {}}
+        expected: {}
+      - id: provider-payload-cannot-override
+        parameters: {principal: alice}
+        snapshot:
+          - id: c1
+            kind: tool_call
+            phase: pre_tool
+            payload:
+              call_id: call-1
+              name: read_internal
+              arguments: {principal: admin}
+        expected:
+          matches:
+            - subjects: [c1]
+              bindings: {event: c1, principal: $parameters.principal}
+      - id: missing-parameter
+        snapshot:
+          - id: c1
+            kind: tool_call
+            phase: pre_tool
+            payload: {call_id: call-1, name: read_internal, arguments: {}}
+        expected: {error: parameter_error}
+      - id: wrong-parameter-type
+        parameters: {principal: 7}
+        snapshot:
+          - id: c1
+            kind: tool_call
+            phase: pre_tool
+            payload: {call_id: call-1, name: read_internal, arguments: {}}
+        expected: {error: parameter_error}

@@ -1,0 +1,81 @@
+id: i02-multi-event-binding
+capability: multi Event binding and bounded cross product
+current_support: partial
+invariant_reference: [invariant/tests/analyzer/test_flow.py::TestFlow::test_multipath]
+cases:
+  - id: i02-ordered-two-message-binding
+    mode: snapshot
+    oracle: {type: multi_event, tool_name: send_email, combination_limit: 4}
+    runs:
+      - id: hit
+        snapshot:
+          - id: m1
+            kind: message
+            phase: pre_llm
+            payload: {role: user, content: {type: text, text: first}}
+          - id: m2
+            kind: message
+            phase: pre_llm
+            payload: {role: user, content: {type: text, text: second}}
+          - id: c1
+            kind: tool_call
+            phase: pre_tool
+            origin: observed
+            payload: {call_id: call-1, name: send_email, arguments: {}}
+        expected:
+          matches:
+            - subjects: [c1]
+              bindings: {m1: m1, m2: m2, call: c1}
+      - id: wrong-role
+        snapshot:
+          - id: m1
+            kind: message
+            phase: pre_llm
+            payload: {role: user, content: {type: text, text: first}}
+          - id: m2
+            kind: message
+            phase: post_llm
+            payload: {role: assistant, content: {type: text, text: second}}
+          - id: c1
+            kind: tool_call
+            phase: pre_tool
+            payload: {call_id: call-1, name: send_email, arguments: {}}
+        expected: {}
+      - id: call-before-messages
+        snapshot:
+          - id: c1
+            kind: tool_call
+            phase: pre_tool
+            payload: {call_id: call-1, name: send_email, arguments: {}}
+          - id: m1
+            kind: message
+            phase: pre_llm
+            payload: {role: user, content: {type: text, text: first}}
+          - id: m2
+            kind: message
+            phase: pre_llm
+            payload: {role: user, content: {type: text, text: second}}
+        expected: {}
+  - id: i02-combination-budget
+    mode: snapshot
+    oracle: {type: multi_event, tool_name: send_email, combination_limit: 2}
+    runs:
+      - id: adjacent-over-limit
+        snapshot:
+          - id: m1
+            kind: message
+            phase: pre_llm
+            payload: {role: user, content: {type: text, text: one}}
+          - id: m2
+            kind: message
+            phase: pre_llm
+            payload: {role: user, content: {type: text, text: two}}
+          - id: m3
+            kind: message
+            phase: pre_llm
+            payload: {role: user, content: {type: text, text: three}}
+          - id: c1
+            kind: tool_call
+            phase: pre_tool
+            payload: {call_id: call-1, name: send_email, arguments: {}}
+        expected: {error: resource_exhausted}

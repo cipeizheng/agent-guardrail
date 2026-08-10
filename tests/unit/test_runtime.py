@@ -13,7 +13,7 @@ async def test_runtime_requires_start_and_exposes_safe_policy_info() -> None:
 
     assert runtime.state is RuntimeState.CREATED
     assert not runtime.ready
-    assert runtime.policy_info.version == 1
+    assert runtime.policy_info.version == 3
     assert len(runtime.policy_info.content_hash) == 64
 
     context = tool_context(body=FAKE_SECRET)

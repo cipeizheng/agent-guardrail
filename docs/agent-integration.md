@@ -6,14 +6,15 @@
 定义框架无关协议和确定性测试 Agent，并实现 OpenAI-compatible Gateway 与 MCP `2026-07-28`
 Gateway；LangGraph 和 OpenAI Agents SDK 放在后续适配层。
 
-当前实现状态（2026-08-06）：`GuardrailRuntime`、共享 `EnforcementSession`、
+当前实现状态（2026-08-10）：`GuardrailRuntime`、共享 `EnforcementSession`、
 `GuardedLLMClient`、`GuardedToolExecutor` 以及 testing 中的 `ScriptedLLM`、
 `FakeToolExecutor`、`SimulatedAgent` 均已实现。模拟 Agent 只依赖普通 LLM/Tool Protocol；同一
 Session 确保 LLM 与 Tool 的四个检查点共享一条 Trace，并通过
 `PendingTrace → PolicyAnalyzer` 原子分析 Candidate batch。当前 Wrapper 仍使用单 Candidate 便利
-入口，独立 Message Framework Adapter 尚未实现。OpenAI-compatible 非流式 Gateway 也已
-实现，真实 Agent 不需要导入本项目，只需将 OpenAI SDK `base_url` 指向 `/v1/openai`，或将
-官方 MCP SDK 的 server URL 指向 `/v1/mcp`。
+入口，独立 Message Framework Adapter 尚未实现。OpenAI-compatible 非流式 Gateway 已通过
+InputNormalizer 提交完整 request snapshot 和 observed response 的独立原子批次；真实 Agent 不需要
+导入本项目，只需将 OpenAI SDK `base_url` 指向 `/v1/openai`，或将官方 MCP SDK 的 server URL
+指向 `/v1/mcp`。
 
 优先级：
 
@@ -107,7 +108,7 @@ tools: ToolExecutor = GuardedToolExecutor(inner=executor, session=session)
 agent = SomeAgent(llm=llm, tools=tools)
 ```
 
-Agent 只依赖 Protocol，不依赖 Guardrail Engine、Rule 或具体 Wrapper 类型。
+Agent 只依赖 Protocol，不依赖 MatchPolicyAnalyzer、MatchPlan 或具体 Wrapper 类型。
 
 `EnforcementSession` 负责 Candidate 验证、PendingTrace、Canonical Event、Trace 和脱敏审计，
 Wrapper 只控制副作用时机。这避免 LLM 与 Tool 各自维护一份不一致的 Trace。Provider 请求历史
@@ -128,7 +129,7 @@ LLM Gateway 拦截响应中的 ToolCall，只表示 Agent 没有收到该 ToolCa
 
 ## 5. Inline 检查点
 
-Wrapper 固定执行四个检查点，但实际是否命中取决于启用的 Rule。当前默认 Registry 中的
+Wrapper 固定执行四个检查点，但实际是否命中取决于启用的 v3 MatchPlan Rule。示例 Policy 中的
 `secret_exfiltration`、`pii_exfiltration` 和 `tool_access` 都支持 `post_llm` 和 `pre_tool`；
 `tool_result_flow` 只支持 `pre_tool`。下面列出的其他检查内容是这些阶段的扩展边界，不代表对应
 规则已经实现。
@@ -180,7 +181,7 @@ agent_guardrail/testing/
 └── simulated_agent.py     # 只实现最小 model/tool loop
 ```
 
-`SimulatedAgent` 构造函数只接收 `LLMClient` 和 `ToolExecutor`，不接收 Engine、Runtime、Session
+`SimulatedAgent` 构造函数只接收 `LLMClient` 和 `ToolExecutor`，不接收 Analyzer、Runtime、Session
 或具体 `GuardedToolExecutor`。测试在外部完成组装，并通过 Fake 的调用计数和 Session Trace 断言
 Enforcement 是否真实发生。
 
@@ -215,11 +216,11 @@ user → send_email(to=external)
 read_file → "token=ghp_..." → send_email
 ```
 
-当前 Secret Detector/Rule 已实现；直接出现在 `send_email` ToolCall 参数中的 Secret 会在
+当前 Secret Detector 与示例 YAML Rule 已实现；直接出现在 `send_email` ToolCall 参数中的 Secret 会在
 post_llm/pre_tool 阻断，日志不包含完整 token。当前 `tool_result_flow` 还能在任务级 Inline Session
 中，根据自动建立的 `ToolResult → ModelRequest → ModelResponse → ToolCall` 来源链阻断配置的
 `read_private_file → send_email` 路径，并保证 `send_email` 执行次数为零。它阻断配置的来源路径，
-并不证明两个 payload 包含相同 token；需要内容级判断时仍应结合 Secret/PII Rule。
+并不证明两个 payload 包含相同 token；需要内容级判断时仍应结合 Secret/PII Detector Rule。
 
 ### 场景 C2：基础 PII 外发
 
@@ -227,7 +228,7 @@ post_llm/pre_tool 阻断，日志不包含完整 token。当前 `tool_result_flo
 model → send_email(body="customer@example.test")
 ```
 
-当前基础 PII Detector/Rule 已实现；配置选择的邮箱、常见北美格式电话、美国 SSN、通过 Luhn
+当前基础 PII Detector 与示例 YAML Rule 已实现；配置选择的邮箱、常见北美格式电话、美国 SSN、通过 Luhn
 校验的银行卡号、中国大陆 18 位居民身份证号或大陆手机号形状直接出现在目标 ToolCall 参数中时，
 会在 post_llm/pre_tool 阻断。它不覆盖姓名、地址等上下文 PII，不验证证件真实签发或手机号当前
 分配，也不扫描 `post_tool` 输出。
@@ -298,7 +299,7 @@ Adapter 与 Inline Wrapper/Gateway 共同提供：
 Adapter 和 Enforcement Point 都不允许：
 
 - 绕过 `pre_tool` 直接执行工具。
-- 将 Rule 逻辑写进格式转换代码。
+- 将 MatchPlan Rule 逻辑写进格式转换代码。
 - 在检测完成前并发启动副作用以降低延迟。
 
 ## 10. 后续用户确认模型
@@ -323,7 +324,7 @@ Rule 检查该事件与 ToolCall 参数一致且未过期。模拟 Agent 应覆�
 - pre_tool block 时 Fake Tool 调用计数为零。
 - post_llm/post_tool block 时原始内容不进入下游。
 - 同一策略可用于模拟 Agent、Inline Adapter 与 Gateway。
-- SimulatedAgent 不导入 GuardrailRuntime、Engine 或具体 Wrapper。
+- SimulatedAgent 不导入 GuardrailRuntime、Analyzer 或具体 Wrapper。
 - LLM 与 Tool Wrapper 使用同一个 Session/Trace。
 - Canonical 结构精确对应时，Trace 形成请求/响应、调用/结果及下一轮模型输入的来源链。
 - 仅有时间先后但没有来源边时，`tool_result_flow` 不得命中。

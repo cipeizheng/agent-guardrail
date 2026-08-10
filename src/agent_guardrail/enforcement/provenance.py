@@ -11,6 +11,7 @@ from agent_guardrail.models import (
     EventKind,
     ModelRequest,
     ModelResponse,
+    Phase,
     ToolCall,
     ToolResult,
     Trace,
@@ -23,14 +24,14 @@ def infer_source_event_ids(
     kind: EventKind,
     payload: dict[str, JsonValue],
 ) -> tuple[str, ...]:
-    """Infer only exact canonical relationships; return no edge when uncertain."""
+    """Infer exact relations for the single-event Inline compatibility path."""
 
     if kind is EventKind.MODEL_REQUEST:
         request = ModelRequest.model_validate(payload)
         return _tool_result_sources(trace, request)
     if kind is EventKind.TOOL_CALL:
         call = ToolCall.model_validate(payload)
-        return _model_response_source(trace, call)
+        return _proposed_tool_call_source(trace, call)
     return ()
 
 
@@ -63,7 +64,10 @@ def _tool_result_sources(trace: Trace, request: ModelRequest) -> tuple[str, ...]
     return tuple(source_event_ids)
 
 
-def _model_response_source(trace: Trace, call: ToolCall) -> tuple[str, ...]:
+def _proposed_tool_call_source(trace: Trace, call: ToolCall) -> tuple[str, ...]:
+    for event in reversed(trace.find(kind=EventKind.TOOL_CALL, phase=Phase.POST_LLM)):
+        if ToolCall.model_validate(event.payload) == call:
+            return (event.id,)
     for event in reversed(trace.find(kind=EventKind.MODEL_RESPONSE)):
         response = ModelResponse.model_validate(event.payload)
         if call in response.tool_calls:

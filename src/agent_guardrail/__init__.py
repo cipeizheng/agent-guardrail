@@ -2,11 +2,11 @@
 
 from agent_guardrail.config import (
     create_default_detector_registry,
-    create_default_rule_registry,
+    create_default_predicate_registry,
     load_policy_file,
     load_policy_yaml,
 )
-from agent_guardrail.core import GuardrailEngine
+from agent_guardrail.core import MatchPolicyAnalyzer
 from agent_guardrail.enforcement import (
     EnforcementSession,
     GuardedLLMClient,
@@ -42,7 +42,7 @@ __all__ = [
     "EventKind",
     "EventOrigin",
     "EventRelation",
-    "GuardrailEngine",
+    "MatchPolicyAnalyzer",
     "GuardedLLMClient",
     "GuardedToolExecutor",
     "GuardrailBlocked",
@@ -54,7 +54,7 @@ __all__ = [
     "RelationKind",
     "Trace",
     "create_default_detector_registry",
-    "create_default_rule_registry",
+    "create_default_predicate_registry",
     "load_policy_file",
     "load_policy_yaml",
 ]

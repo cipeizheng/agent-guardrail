@@ -1,0 +1,75 @@
+id: i03-nested-tool-pattern
+capability: nested Tool pattern and collection binding
+current_support: partial
+invariant_reference: [invariant/tests/analyzer/test_readme_examples.py::TestReadmeExamples::test_productivity]
+cases:
+  - id: i03-email-collection
+    mode: snapshot
+    oracle:
+      type: nested_mail
+      tool_name: send_email
+      recipient_field: to
+      allowlist: [alice@example.test]
+      max_items: 3
+    runs:
+      - id: one-safe-one-unsafe
+        snapshot:
+          - id: c1
+            kind: tool_call
+            phase: pre_tool
+            payload:
+              call_id: call-1
+              name: send_email
+              arguments:
+                emails:
+                  - {to: alice@example.test, body: safe}
+                  - {to: mallory@example.test, body: unsafe}
+        expected:
+          matches:
+            - subjects: [c1]
+              bindings:
+                call: c1
+                outgoing_mail: c1#payload.arguments.emails[1]
+      - id: all-allowed
+        snapshot:
+          - id: c1
+            kind: tool_call
+            phase: pre_tool
+            payload:
+              call_id: call-1
+              name: send_email
+              arguments: {emails: [{to: alice@example.test}]}
+        expected: {}
+      - id: missing-collection
+        snapshot:
+          - id: c1
+            kind: tool_call
+            phase: pre_tool
+            payload: {call_id: call-1, name: send_email, arguments: {}}
+        expected: {}
+      - id: non-list-boundary
+        snapshot:
+          - id: c1
+            kind: tool_call
+            phase: pre_tool
+            payload: {call_id: call-1, name: send_email, arguments: {emails: invalid}}
+        expected: {}
+  - id: i03-collection-budget
+    mode: snapshot
+    oracle:
+      type: nested_mail
+      tool_name: send_email
+      recipient_field: to
+      allowlist: []
+      max_items: 2
+    runs:
+      - id: adjacent-over-limit
+        snapshot:
+          - id: c1
+            kind: tool_call
+            phase: pre_tool
+            payload:
+              call_id: call-1
+              name: send_email
+              arguments: {emails: [{to: a}, {to: b}, {to: c}]}
+        expected: {error: resource_exhausted}

@@ -1,360 +1,136 @@
-# Runtime 与 Enforcement 详细设计
+# Runtime 与 Enforcement
 
-本文是 ADR-0004/0005/0006/0007 的实现合同及当前实现说明。Runtime、Session、Inline Wrapper、
-OpenAI Gateway 和 MCP Gateway 均已实现；若本文与 Accepted ADR 冲突，以 ADR 为准。
-
-## 1. 目标
-
-建立一条被 Inline、LLM Gateway 和 MCP Gateway 共用的最小流水线：
+## 1. 当前调用链
 
 ```text
-Enforcement Point（使用 Protocol Adapter 完成转换）
-   → EnforcementSession
-   → PendingTrace
-   → PolicyAnalyzer
-   → GuardrailRuntime
-   → GuardrailEngine
-   → Decision
+GuardrailRuntime
+  └─ MatchPolicyAnalyzer
+       ├─ CompiledPolicy v3
+       └─ SnapshotMatcher
+
+EnforcementSession
+  → PendingTrace
+  → runtime.analyze_pending(...)
+  → AnalysisReport
+  → Decision
+  → atomic commit / sanitized block event
 ```
 
-Runtime 判断，Session 管理检查历史，Enforcement Point 控制副作用。三者不能合并成一个大类。
-
-## 2. 公共协议
-
-### 2.1 PolicyAnalyzer
+Runtime 只管理已完整验证的 analyzer 生命周期。它不解析 Provider 协议、不执行 LLM/Tool，也不拥有
+请求级 Trace。`PolicyAnalyzer` 主协议固定为：
 
 ```python
 class PolicyAnalyzer(Protocol):
     async def analyze_pending(self, pending: PendingTrace) -> Decision: ...
 ```
 
-要求：
+`GuardrailRuntime.evaluate(GuardrailContext)` 只为直接 `/v1/evaluate` 单 Event API 构造
+`PendingTrace.from_context`；Session 不依赖该桥。
 
-- `analyze_pending` 不执行 LLM、Tool、HTTP 或 Audit 副作用。
-- 相同 Policy 与 PendingTrace 必须产生相同动作语义。
-- 实现必须支持多个请求并发调用。
-- Runtime 不可用时抛出类型明确且不含输入原文的异常，不能返回 allow。
-- Decision v2 必须精确绑定 primary Event、完整 pending Event ID 集合和 Phase；Violation 必须绑定
-  至少一个 pending Event。
-
-`GuardrailEngine.evaluate(GuardrailContext)` 和 `GuardrailRuntime.evaluate(GuardrailContext)` 仍用于
-直接 `/v1/evaluate` 兼容边界，但它们只是构造单 Event PendingTrace 的桥。Session 和新的生产集成
-不得依赖该旧主入口。
-
-### 2.2 LLMClient 与 ToolExecutor
+## 2. 构造与生命周期
 
 ```python
-class LLMClient(Protocol):
-    async def complete(self, request: ModelRequest) -> ModelResponse: ...
-
-
-class ToolExecutor(Protocol):
-    async def execute(self, call: ToolCall) -> ToolResult: ...
-```
-
-`GuardedLLMClient` 和 `GuardedToolExecutor` 必须满足与 inner 相同的 Protocol，因此调用方无需
-知道是否安装护栏。
-
-### 2.3 AuditSink
-
-```python
-class AuditSink(Protocol):
-    async def record(self, decision: Decision) -> None: ...
-```
-
-AuditSink 只接收已经脱敏的 Decision。当前 Session 记录所有包含 Violation 的 Decision；没有
-Violation 的普通 allow 不逐条持久化。Audit 写入失败默认 fail-open，并把不含原文的异常类型
-保存在 Session 的 `audit_failure_types`。
-
-## 3. GuardrailRuntime
-
-### 3.1 职责
-
-```python
-class GuardrailRuntime:
-    @classmethod
-    def from_policy_file(
-        cls,
-        path: str | Path,
-        *,
-        rule_registry: RuleRegistry | None = None,
-        detector_registry: DetectorRegistry | None = None,
-    ) -> GuardrailRuntime: ...
-
-    @classmethod
-    def from_policy_yaml(
-        cls,
-        source: str,
-        *,
-        rule_registry: RuleRegistry | None = None,
-        detector_registry: DetectorRegistry | None = None,
-    ) -> GuardrailRuntime: ...
-
-    async def start(self) -> None: ...
-    async def close(self) -> None: ...
-    async def analyze_pending(self, pending: PendingTrace) -> Decision: ...
-    async def evaluate(self, context: GuardrailContext) -> Decision: ...
-
-    @property
-    def ready(self) -> bool: ...
-
-    @property
-    def state(self) -> RuntimeState: ...
-
-    @property
-    def policy_info(self) -> PolicyInfo: ...
-```
-
-具体要求：
-
-- `from_policy_file`/`from_policy_yaml` 使用默认 built-in Registry，除非受信任的应用组装代码或测试
-  显式注入 Registry；普通 YAML 不能指定 Python Rule。
-- 每次构建创建独立 Registry，不使用可变全局单例。
-- 构造只在 Policy 完整校验后成功，不能部分启用规则。
-- ready 状态下重复 `start` 幂等，任意状态重复 `close` 幂等，并支持 `async with`；closed Runtime
-  不能重新启动。
-- `evaluate` 只能在 ready 状态调用，否则抛出 `RuntimeNotReadyError`。
-- `PolicyInfo` 只包含 version/hash，不回显 Policy YAML 或 Rule Secret 配置。
-- Runtime 可被多个 Session 并发复用；单个 Session 不跨租户共享。
-
-MVP 不实现热加载。未来热加载只能用“构建新 Engine → 完整验证 → 原子交换”的方式，正在执行
-的请求继续使用它开始时捕获的旧 Engine snapshot。
-
-### 3.2 与 GuardrailEngine 的关系
-
-```text
-GuardrailRuntime
-  ├─ lifecycle/readiness
-  ├─ PolicyInfo
-  └─ active GuardrailEngine
-       ├─ immutable PolicySet
-       └─ DetectorRegistry
-```
-
-Engine 保持可以直接在单元测试中构造。生产 Inline/Gateway 默认使用 Runtime，不各自调用
-Config Loader 和 Registry。
-
-## 4. EnforcementSession
-
-### 4.1 构造
-
-```python
-session = EnforcementSession(
-    analyzer=runtime,
-    trace=Trace(id=trace_id),
-    audit=JsonlAuditSink(...),
-    attributes={"tenant_id": "..."},
-    clock=clock,
-    id_factory=id_factory,
+runtime = GuardrailRuntime.from_policy_file(
+    "policy.yaml",
+    predicate_registry=predicates,
+    detector_registry=detectors,
 )
+
+async with runtime:
+    decision = await runtime.analyze_pending(pending)
 ```
 
-Session 独占一个 Trace。`attributes` 在构造时会复制，当前 Adapter 不会用 Provider payload
-覆盖可信 tenant/user 属性。当前对象仍暴露普通 `dict`，调用方必须把它视为只读；若未来需要
-硬性不可变保证，应调整公共类型并补兼容性测试。
+默认构造使用新的空 Predicate Registry 和内置 `secrets/pii` Detector Registry。YAML 只接受 v3；
+Loader 先编译 MatchPlan，再原子链接全部 capability，最后构造 `MatchPolicyAnalyzer`。任何错误都会阻止
+Runtime 创建。
 
-### 4.2 检查 API
+状态为 `created → ready → closed`。未 ready 或已经 closed 的 Runtime 拒绝分析；closed 不能重新启动。
 
-单 Candidate 便利 API：
+## 3. Session 原子性
 
-```python
-decision = await session.evaluate(
-    kind=EventKind.TOOL_CALL,
-    phase=Phase.PRE_TOOL,
-    payload=call.model_dump(mode="json"),
-    metadata={"adapter": "inline"},
-    source_event_ids=(source_event.id,),
-)
-```
+`EnforcementSession` 持有一个请求/任务级 Trace、AuditSink、可信 attributes、时钟和 ID factory。一次
+`evaluate_candidates`：
 
-它必须委托批次主入口：
+1. 验证 batch 非空、有界、同 Phase、key 唯一；
+2. 解析只指向同 Trace 更早 Event 或更早 Candidate 的 relation；
+3. 分配连续 ID/sequence/time，构造 immutable PendingTrace；
+4. 在 Session lock 内调用 Analyzer；
+5. 验证 Analyzer 未修改输入，且 Decision identity 精确绑定 trace/primary/pending/phase；
+6. allow/log 原子提交所有 Event；block 丢弃所有原始 Event，只提交脱敏 Decision Event；
+7. 在锁外记录脱敏 Audit。
 
-```python
-decision = await session.evaluate_candidates(
-    (
-        CandidateEvent(
-            key="response",
-            kind=EventKind.MODEL_RESPONSE,
-            phase=Phase.POST_LLM,
-            payload=response_payload,
-            origin=EventOrigin.OBSERVED,
-        ),
-        CandidateEvent(
-            key="tool-call",
-            kind=EventKind.TOOL_CALL,
-            phase=Phase.POST_LLM,
-            payload=tool_call_payload,
-            origin=EventOrigin.DERIVED,
-            relations=(CandidateRelation(source_candidate_key="response"),),
-        ),
-    ),
-    primary_key="response",
-)
-```
+Trace 容量不足、Analyzer 异常、输入被修改或 Decision identity 错误都变成
+`GuardrailUnavailable`；候选原文不提交。
 
-当前 OpenAI/MCP/Inline Adapter 仍使用单 Candidate 入口；批次 API 和内部原子语义已经交付，独立
-Message/Input Normalizer 尚未接入。
+聚合 `MODEL_REQUEST/MODEL_RESPONSE` 只能作为单 Candidate 显式桥，不能与独立 Event 混批，也不能成为
+MatchPlan binding。普通批次使用 Message/ToolCall/ToolResult。
 
-Session 必须校验合法映射：
+## 4. Inline LLM
 
-- `MODEL_REQUEST` 只能是 `PRE_LLM`。
-- `MODEL_RESPONSE` 只能是 `POST_LLM`。
-- `TOOL_CALL` 只能是 `PRE_TOOL`。
-- `TOOL_RESULT` 只能是 `POST_TOOL`。
-- Adapter 不能用 `GUARDRAIL_DECISION` 调用 evaluate。
-
-批次入口还允许 `post_llm` 中的派生 ToolCall Candidate。所有 Candidate 必须使用同一 Phase，key
-唯一，primary key 必须存在，合并后的 Event 数不能超过 Trace 上限。
-
-`source_event_ids` 是可信 Enforcement 代码专用参数；Session 将它转换为类型化
-`EventRelation(kind="derived_from")`。`metadata["source_event_ids"]` 会被拒绝，防止客户端或
-通用 Adapter metadata 冒充来源。每个来源必须是同一 Trace 中更早、已提交且不是
-`guardrail_decision` 的 Event；空白、重复、未知和跨 Trace ID 都会在评估前失败。
-
-### 4.3 来源推导与关系查询
-
-Session 会对两种 Canonical 结构做保守推导：历史 ModelResponse 中完全相同的 ToolCall 可以作为
-当前 ToolCall 的来源；历史 ToolResult 与 ModelRequest 中 Tool message 的 `tool_call_id` 和规范化
-内容都精确一致时，可以作为该 ModelRequest 的来源。Wrapper/Gateway 还会显式记录同一副作用边界
-的 `ModelRequest → ModelResponse` 和 `ToolCall → ToolResult`。无法精确对应时不建边。
-
-Trace 提供 `by_id`、`find`、`events_since`、`sources_of` 和 `ancestors_of`。来源只能指向更早事件，
-因此图保持无环；`sources_of` 返回直接来源，`ancestors_of` 返回按 Trace 顺序排列的传递祖先。
-`previous`/`count` 继续用于纯历史查询。关系只在当前 Session 内可信，不能跨 Gateway HTTP 请求。
-
-### 4.4 原子批次分析与提交
-
-单个 Session 内使用异步锁串行化“构造 pending snapshot → analyze → commit”，以支持并行 Tool 调用
-而不破坏 Trace 顺序。锁不能覆盖真正的 LLM/Tool 副作用。
+`GuardedLLMClient.complete` 的顺序：
 
 ```text
-lock
-  → validate Candidate keys/origin/references/capacity
-  → allocate IDs/sequences/timestamps and build typed relations
-  → PendingTrace(committed snapshot + pending events)
-  → analyzer.analyze_pending(pending)
-  → validate Decision identity and Violation event bindings
-  → allow/log: append every pending Event atomically
-  → block: append one sanitized guardrail_decision Event
-  → unlock
-  → Enforcement Point decides whether to perform/release side effect
+first request snapshot → InputNormalizer → independent pre_llm batch
+repeated full snapshot → explicit aggregate ModelRequest bridge
+pre Decision allow
+→ inner.complete
+→ InputNormalizer response → independent observed post_llm batch
+→ post Decision allow
+→ return response
 ```
 
-block Event 只能包含：
+每个 observed response Event 显式引用该轮 request primary Event。首次请求已经使用独立事件；重复全量
+history 在缺少 Framework stable message identity 时不得按内容静默去重，所以仍使用显式聚合桥。
+可证明 identity 的增量 Framework Normalizer 是后续规划。
 
-- action、phase。
-- primary event_id 和本批次 pending_event_ids。
-- rule_id 与 violation code。
-- Policy version/hash。
+`pre_llm` block 时上游调用次数必须为零；`post_llm` block 时原响应不返回、不提交。
 
-不得包含 Violation evidence、message、原始 payload 或 Provider response。
+## 5. Inline Tool
 
-### 4.5 错误语义
-
-| 错误 | Session/Enforcement 行为 |
-|---|---|
-| Rule/Detector 已知错误 | Engine 转换为系统 Violation，按 Policy 聚合 |
-| Runtime 未 ready | 抛 `GuardrailUnavailable`，不执行/不释放副作用 |
-| Analyzer 未知异常 | 抛 `GuardrailUnavailable`，不执行/不释放副作用 |
-| Analyzer 修改 PendingTrace snapshot | 拒绝 Decision 并 fail-closed，不提交任何原始 pending Event |
-| AuditSink 失败 | Decision 保持有效，默认继续；发出脱敏错误信号 |
-| Trace 容量不足以容纳整个 pending batch | 分析前 fail-closed，不覆盖或删除旧 Event |
-| 来源 ID 非法 | 评估前拒绝，不执行/不释放副作用 |
-
-`GuardrailBlocked` 和 `GuardrailUnavailable` 的异常字符串只能包含 trace ID、phase 和错误类别。
-结构化 Decision 可以作为 `GuardrailBlocked.decision` 提供，但不得额外附带 candidate Event。
-
-## 5. Inline Wrapper
-
-### 5.1 GuardedLLMClient
+`GuardedToolExecutor.execute`：
 
 ```text
-ModelRequest
-  → session.evaluate(model_request, pre_llm；精确匹配历史 ToolResult 来源)
-  → block: raise GuardrailBlocked，inner.complete count = 0
-  → inner.complete
-  → session.evaluate(model_response, post_llm；来源为本次 ModelRequest)
-  → block: raise GuardrailBlocked，不返回原 ModelResponse
-  → return ModelResponse
+observed ToolCall → pre_tool Decision
+→ allow 才执行 inner tool
+→ observed ToolResult → post_tool Decision
+→ allow 才返回结果
 ```
 
-### 5.2 GuardedToolExecutor
+Session 会在精确 payload 相等时把 observed `post_llm ToolCall` 关联到实际 `pre_tool ToolCall`；ToolResult
+显式引用实际 ToolCall。这样多 Event MatchPlan 可以查询 request→response→execution→result 来源链，
+而不把时间顺序冒充 provenance。
 
-```text
-ToolCall
-  → session.evaluate(tool_call, pre_tool；精确匹配历史 ModelResponse 来源)
-  → block: raise GuardrailBlocked，inner.execute count = 0
-  → inner.execute
-  → session.evaluate(tool_result, post_tool；来源为本次 ToolCall)
-  → block: raise GuardrailBlocked，不返回原 ToolResult
-  → return ToolResult
-```
+`pre_tool` block 时工具执行次数必须为零；`post_tool` block 时工具已经执行，但原结果不得进入 Trace
+或返回 Agent。
 
-Wrapper 不直接访问 `GuardrailEngine`、Policy、Trace 或 AuditSink；这些只通过 Session 使用。
+## 6. Gateway
 
-## 6. HTTP 与 MCP EnforcementSession 生命周期
+OpenAI Chat Completions 与 MCP 每个 HTTP 请求创建独立 Session。OpenAI Gateway 的 request/response
+均经 InputNormalizer 生成独立 Event 批次，并将 response Event 关联到 request primary Event。
+MCP `tools/call` 完整经过 pre_tool/post_tool；discover、ping、tools/list 不伪造工具执行边界。
 
-| 接入 | Session 生命周期 | 历史保证 |
-|---|---|---|
-| Inline | 一次 Agent task/run | 提供同任务事件历史、计数查询和来源关系；内置调用次数/审批规则尚未实现 |
-| LLM Gateway v0.1 | 一次 HTTP request | 只保证本次 request/response；messages 不作为可信历史 |
-| MCP Gateway `2026-07-28` | 一个 `tools/call` HTTP request | 只跟踪该调用及其 ToolResult；无协议 Session |
+Runtime/Analyzer 不知道 HTTP、OpenAI 或 MCP。Gateway/Enforcement 不解释 MatchPlan 条件，只消费
+Decision。
 
-LLM 与 MCP Gateway 即使使用相同外部 correlation ID，MVP 也不合并内存 Trace。跨 Gateway 的
-统一 Agent Trace 需要认证后的 Session Store，属于后续 ADR。现代 MCP 不再提供可直接作为该
-Store 主键的 `Mcp-Session-Id`，不能从旧协议语义推断可信历史。
+## 7. Decision 与 Audit
 
-## 7. 已完成的目录迁移
+MatchPolicyAnalyzer 把 Finding 和 AnalysisError 映射为 Violation：
 
-```text
-models/chat.py                    # provider-neutral Chat Models
-enforcement/protocols.py          # LLM/Tool/Audit Protocol
-enforcement/inline_tools.py       # pre_tool/post_tool
-enforcement/inline_llm.py         # pre_llm/post_llm
-enforcement/session.py            # shared Trace/evaluate/commit
-testing/fakes.py                  # ScriptedLLM/FakeToolExecutor
-testing/simulated_agent.py        # protocol-only Agent loop
-runtime/
-  ├─ protocols.py                 # PolicyAnalyzer
-  ├─ runtime.py                   # GuardrailRuntime
-  └─ bootstrap.py                 # built-in registry composition
-```
+- action 来自 v3 Policy Rule；
+- pending subject 成为 Violation Event ID；
+- Detector evidence 只含类型、版本、位置、mask、fingerprint 和 confidence；
+- Detector timeout 使用专用失败动作，其他错误使用通用分析错误动作；
+- `max_violations` 不提前终止 Matcher。
 
-旧 `integrations/` 已移除。生产模块不导入 testing；当前 Gateway 只依赖 Runtime、Session 和
-协议 Adapter，没有重新实现 Rule 判断。
+AuditSink 只接收 Decision，不接收 Event payload。JSONL Audit 仅记录时间、trace、phase、action、Rule ID、
+code、Policy version/hash。Audit 失败对 block Decision 仍 fail-closed；log/allow 的具体审计失败处理保持
+现有 Session 合同。
 
-## 8. 最小测试矩阵
+## 8. 当前遗留与后续
 
-Runtime：
+仍保留且有真实消费者：`GuardrailContext`/`PendingTrace.from_context` 的直接 `/v1/evaluate` 桥，
+`MODEL_REQUEST` 重复全量 Inline 快照桥，以及 ModelRequest/ModelResponse Provider-neutral DTO。
+这些都不是旧 Policy/Rule 引擎。
 
-- Policy 成功/失败构建。
-- start/close 幂等。
-- 未 ready evaluate 失败且不返回 allow。
-- 并发 evaluate 不共享请求级 Detector Cache。
-
-Session：
-
-- allow/log 原子提交整个 candidate batch。
-- block 不提交任何原始 pending Event，只提交一个脱敏 Decision Event。
-- 并发检查保持严格递增 sequence。
-- Trace 满时 fail-closed。
-- Audit 失败不泄露原文。
-- provenance 只能进入类型化 Relation，不能由普通 metadata 注入。
-- 未知/重复/未来/Decision 来源被拒绝，直接与传递关系查询保持顺序。
-- Event 默认 `client_asserted`，只有 Enforcement 代码显式标记 `observed/derived`。
-- Analyzer 失败或 Decision 的 primary/pending identity 不一致时不提交原始 Event。
-
-Inline：
-
-- pre block 时 inner 调用为零。
-- allow/log 时 inner 调用恰好一次。
-- post block 时调用发生一次，但原结果不返回且不进入 Trace。
-- LLM 与 Tool Wrapper 共享一个 Trace。
-- 精确的完整 Agent loop 自动形成 request/response/call/result 来源链。
-- 只有时间先后、没有来源边时，关系 Rule 不得命中。
-
-Testing：
-
-- SimulatedAgent 只依赖 Protocol。
-- 所有场景无网络、无 API Key、无时间随机性。
-- Secret 不出现在异常、Audit 和 block Trace Event。
+尚未实现：Framework stable identity 增量提交、跨请求 Session Store、Policy 热加载、Streaming、
+多模态 Content 和远程 Core。

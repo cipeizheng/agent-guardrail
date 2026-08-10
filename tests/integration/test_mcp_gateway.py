@@ -10,13 +10,13 @@ from agent_guardrail.gateway import GatewaySettings
 from agent_guardrail.models import Phase
 from agent_guardrail.runtime import GuardrailRuntime
 from tests.integration.test_gateway import POLICY_FILE, app_client
-from tests.integration.test_guarded_llm import engine_for_phase
+from tests.integration.test_guarded_llm import analyzer_for_phase
 from tests.support import (
     FAKE_CN_MOBILE,
     FAKE_PII,
     FAKE_SECRET,
-    pii_engine,
-    tool_access_engine,
+    pii_analyzer,
+    tool_access_analyzer,
 )
 
 
@@ -91,7 +91,7 @@ def tool_response(text: str) -> dict[str, object]:
 
 @pytest.mark.asyncio
 async def test_post_tool_block_hides_raw_result_after_one_upstream_execution() -> None:
-    runtime = GuardrailRuntime(engine_for_phase(Phase.POST_TOOL))
+    runtime = GuardrailRuntime(analyzer_for_phase(Phase.POST_TOOL))
     async with app_client(
         lambda request: httpx.Response(200, json=tool_response(FAKE_SECRET)),
         settings=mcp_settings(),
@@ -112,7 +112,7 @@ async def test_post_tool_block_hides_raw_result_after_one_upstream_execution() -
 
 @pytest.mark.asyncio
 async def test_tool_access_pre_tool_block_makes_zero_upstream_requests() -> None:
-    runtime = GuardrailRuntime(tool_access_engine())
+    runtime = GuardrailRuntime(tool_access_analyzer())
     async with app_client(
         lambda request: httpx.Response(200, json=tool_response("must not execute")),
         settings=mcp_settings(),
@@ -136,7 +136,7 @@ async def test_tool_access_pre_tool_block_makes_zero_upstream_requests() -> None
 async def test_pii_pre_tool_block_makes_zero_upstream_requests(
     sensitive_value: str,
 ) -> None:
-    runtime = GuardrailRuntime(pii_engine())
+    runtime = GuardrailRuntime(pii_analyzer())
     async with app_client(
         lambda request: httpx.Response(200, json=tool_response("must not execute")),
         settings=mcp_settings(),

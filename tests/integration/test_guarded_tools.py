@@ -2,14 +2,6 @@ from __future__ import annotations
 
 import pytest
 
-from agent_guardrail.core import (
-    DetectorRegistry,
-    EngineConfig,
-    GuardrailEngine,
-    PolicySet,
-    RuleBinding,
-)
-from agent_guardrail.core.services import RuleServices
 from agent_guardrail.enforcement import (
     EnforcementSession,
     GuardedToolExecutor,
@@ -20,34 +12,21 @@ from agent_guardrail.models import (
     Action,
     EventKind,
     EventOrigin,
-    GuardrailContext,
-    Phase,
     RelationKind,
     ToolCall,
     Trace,
-    Violation,
 )
 from agent_guardrail.testing import FakeToolExecutor
 from tests.support import (
     FAKE_CN_RESIDENT_ID,
     FAKE_PII,
     FAKE_SECRET,
-    pii_engine,
-    secret_engine,
-    tool_access_engine,
+    analyzer_from_yaml,
+    empty_analyzer,
+    pii_analyzer,
+    secret_analyzer,
+    tool_access_analyzer,
 )
-
-
-def empty_engine() -> GuardrailEngine:
-    return GuardrailEngine(
-        policy=PolicySet(
-            version=1,
-            content_hash="empty-policy",
-            engine=EngineConfig(),
-            rules=(),
-        ),
-        detectors=DetectorRegistry(),
-    )
 
 
 def email_call(body: str) -> ToolCall:
@@ -61,7 +40,7 @@ def email_call(body: str) -> ToolCall:
 @pytest.mark.asyncio
 async def test_allow_executes_tool_exactly_once() -> None:
     fake = FakeToolExecutor({"send_email": lambda arguments: {"sent": True}})
-    session = EnforcementSession(analyzer=empty_engine(), trace=Trace(id="trace-1"))
+    session = EnforcementSession(analyzer=empty_analyzer(), trace=Trace(id="trace-1"))
     guarded = GuardedToolExecutor(inner=fake, session=session)
 
     result = await guarded.execute(email_call("safe body"))
@@ -86,7 +65,7 @@ async def test_log_records_audit_and_executes_tool_once() -> None:
     fake = FakeToolExecutor({"send_email": lambda arguments: {"sent": True}})
     audit = InMemoryAuditSink()
     session = EnforcementSession(
-        analyzer=secret_engine(action="log"),
+        analyzer=secret_analyzer(action="log"),
         trace=Trace(id="trace-1"),
         audit=audit,
     )
@@ -110,7 +89,7 @@ class BrokenAuditSink:
 async def test_audit_failure_is_safe_and_fail_open_for_log_action() -> None:
     fake = FakeToolExecutor({"send_email": lambda arguments: {"sent": True}})
     session = EnforcementSession(
-        analyzer=secret_engine(action="log"),
+        analyzer=secret_analyzer(action="log"),
         trace=Trace(id="trace-1"),
         audit=BrokenAuditSink(),
     )
@@ -129,7 +108,7 @@ async def test_block_prevents_tool_side_effect_and_leaks_no_secret() -> None:
     audit = InMemoryAuditSink()
     trace = Trace(id="trace-1")
     session = EnforcementSession(
-        analyzer=secret_engine(),
+        analyzer=secret_analyzer(),
         trace=trace,
         audit=audit,
     )
@@ -152,7 +131,7 @@ async def test_tool_access_block_prevents_tool_side_effect() -> None:
     fake = FakeToolExecutor({"send_email": lambda arguments: {"sent": True}})
     trace = Trace(id="trace-1")
     session = EnforcementSession(
-        analyzer=tool_access_engine(mode="denylist", tools=("send_email",)),
+        analyzer=tool_access_analyzer(mode="denylist", tools=("send_email",)),
         trace=trace,
     )
     guarded = GuardedToolExecutor(inner=fake, session=session)
@@ -174,7 +153,7 @@ async def test_pii_block_prevents_tool_side_effect_and_keeps_audit_safe(
     audit = InMemoryAuditSink()
     trace = Trace(id="trace-1")
     session = EnforcementSession(
-        analyzer=pii_engine(),
+        analyzer=pii_analyzer(),
         trace=trace,
         audit=audit,
     )
@@ -191,40 +170,27 @@ async def test_pii_block_prevents_tool_side_effect_and_keeps_audit_safe(
     assert [event.kind for event in trace.events] == [EventKind.GUARDRAIL_DECISION]
 
 
-class BlockToolResultRule:
-    id = "block-tool-result"
-    phases = frozenset({Phase.POST_TOOL})
-
-    async def evaluate(
-        self,
-        context: GuardrailContext,
-        services: RuleServices,
-    ) -> list[Violation]:
-        del services
-        return [
-            Violation(
-                rule_id=self.id,
-                code="blocked_result",
-                phase=context.event.phase,
-                message="Tool result is not safe for downstream use.",
-            )
-        ]
-
-
 @pytest.mark.asyncio
 async def test_post_tool_block_does_not_append_raw_result() -> None:
-    engine = GuardrailEngine(
-        policy=PolicySet(
-            version=1,
-            content_hash="post-tool-policy",
-            engine=EngineConfig(),
-            rules=(RuleBinding(rule=BlockToolResultRule(), action=Action.BLOCK),),
-        ),
-        detectors=DetectorRegistry(),
+    analyzer = analyzer_from_yaml(
+        """\
+version: 3
+scopes: [pending]
+rules:
+  - id: block-tool-result
+    action: block
+    events:
+      result: {kind: tool_result, domain: pending, phases: [post_tool]}
+    where: {present: [result, payload]}
+    finding:
+      code: blocked_result
+      message: Tool result is not safe for downstream use.
+      subjects: [result]
+"""
     )
     fake = FakeToolExecutor({"send_email": lambda arguments: FAKE_SECRET})
     trace = Trace(id="trace-1")
-    session = EnforcementSession(analyzer=engine, trace=trace)
+    session = EnforcementSession(analyzer=analyzer, trace=trace)
     guarded = GuardedToolExecutor(inner=fake, session=session)
 
     with pytest.raises(GuardrailBlocked):

@@ -1,9 +1,10 @@
 # Gateway 设计
 
-当前状态（2026-08-06）：OpenAI 非流式 Gateway v0.1 与 MCP `2026-07-28` Streamable HTTP
+当前状态（2026-08-10）：OpenAI 非流式 Gateway v0.1.0 与 MCP `2026-07-28` Streamable HTTP
 Gateway 已实现。两者共享应用工厂、Runtime lifespan、认证、固定上游、大小/超时限制和可选的
-JSONL AuditSink；分别执行 pre/post LLM 与 pre/post Tool Enforcement。Policy reload、LLM 实时
-Streaming 和 Docker 镜像仍未实现。
+JSONL AuditSink；分别执行 pre/post LLM 与 pre/post Tool Enforcement。OpenAI 路径已通过
+InputNormalizer 提交独立 Message/ToolCall/ToolResult 原子批次。Policy reload、LLM 实时 Streaming
+和 Docker 镜像仍未实现。
 
 ## 1. 定位
 
@@ -35,23 +36,23 @@ identity 和 fail-closed 语义必须保持一致。MVP 不启动单独 Core 服
 FastAPI Route
    │ validate HTTP envelope
    ▼
-OpenAI Adapter ── normalize ──► Canonical Event
-   │                                │
-   │                                ▼
-   │                       EnforcementSession
-   │                                │
-   │                                ▼
-   │                       GuardrailRuntime
-   │                                │
-   │                             Decision
-   │                                │
-   ├── block ◄───────────────────────┘
-   │
-   └── allow/log ──► UpstreamClient ──► fixed LLM Provider
+OpenAI Adapter ──► provider-neutral DTO
+                         │
+                         ▼
+                  InputNormalizer
+                         │ independent Candidate batch
+                         ▼
+                  EnforcementSession
+                         │
+                         ▼
+                  GuardrailRuntime ──► Decision
+                         │
+             block ◄─────┴─────► allow/log ──► UpstreamClient
 ```
 
 - Route 只处理 HTTP envelope、认证、限制和错误映射。
 - OpenAI Adapter 只处理协议模型、Canonical 转换及结构校验。
+- InputNormalizer 只把 provider-neutral DTO 确定性展开为有界 Candidate batch，不分配 Event identity。
 - EnforcementSession 管理当前请求的 Trace 和审计。
 - Runtime 是唯一规则判断入口。
 - UpstreamClient 是可注入接口，测试使用 HTTP MockTransport。
@@ -135,14 +136,16 @@ client = OpenAI(
 LLM Gateway v0.1 每个 HTTP 请求创建一个新的 `EnforcementSession`：
 
 - Trace ID 由服务端产生，通过响应 Header 和错误体返回。
-- 请求携带的历史 messages 是本次 `model_request` 的不可信内容，不自动转换成可信审批事件。
-- Session 内部统一构造 `PendingTrace` 并调用 `PolicyAnalyzer.analyze_pending`；现有 Gateway
-  Adapter 尚未把 messages 拆成独立 Candidate，因此使用单 Candidate 便利入口。
+- 请求携带的完整历史 messages 被逐项展开为独立 Message/ToolCall/ToolResult，但全部是本次请求的
+  `client_asserted` 快照，不能自动变成可信审批、服务端调用次数或跨请求历史。
+- request snapshot 与 observed response 各自形成一个原子 batch；Session 构造 `PendingTrace` 并调用
+  `PolicyAnalyzer.analyze_pending`，不再为 OpenAI 路径创建聚合模型边界 Event。
 - 不接受客户端通过 Header 覆盖生产 Trace、Policy 或 tenant 属性。
 - 不维护跨 HTTP 请求 Session Store。
-- 同一请求内，post_llm Event 会通过类型化 Relation 引用本次 pre_llm Event；MCP `tools/call` 的
-  post_tool Event 同样引用本次 pre_tool Event。Gateway 不接受客户端通过 metadata 或协议字段
-  自报来源 Relation。
+- 同一 request snapshot 中，tool role Event 只引用当前 assistant tool-call group 内精确匹配的
+  ToolCall。OpenAI Gateway 不把时间先后自动转换成 request/response Relation；MCP `tools/call` 的
+  post_tool Event 仍引用本次 pre_tool Event。Gateway 不接受客户端通过 metadata 或协议字段自报
+  来源 Relation。
 - Tool 调用次数等跨请求规则在 LLM 或现代 MCP Gateway 中都不可依赖；当前只有任务级 Inline
   Session 能提供这类历史。
 - pre_llm/MCP 调用请求使用 `client_asserted` 来源，真实上游响应和 ToolResult 使用 `observed`；
@@ -152,10 +155,13 @@ LLM Gateway v0.1 每个 HTTP 请求创建一个新的 `EnforcementSession`：
 
 ## 6. Canonical 映射
 
-| OpenAI 数据 | EventKind | Phase | 说明 |
+| OpenAI 数据 | EventKind | Phase / Origin | 说明 |
 |---|---|---|---|
-| Chat Completions request | `model_request` | `pre_llm` | messages、model、tools 的标准化视图 |
-| Assistant response | `model_response` | `post_llm` | content、标准化 ToolCall；当前不保留 finish reason |
+| request system/user/assistant 文本 | `message` | `pre_llm` / `client_asserted` | 每条非空文本一个封闭 `Message` payload，不去重 |
+| request assistant tool call | `tool_call` | `pre_llm` / `client_asserted` | 每个 call 一个独立 Event |
+| request tool role message | `tool_result` | `pre_llm` / `client_asserted` | 必须匹配当前 turn 的 call ID，name 取自 ToolCall 并建立批内 Relation |
+| response assistant 文本或 refusal | `message` | `post_llm` / `observed` | 一个封闭 `Message` payload |
+| response assistant tool call | `tool_call` | `post_llm` / `observed` | 每个 call 一个独立 Event |
 
 OpenAI Adapter 必须：
 
@@ -163,9 +169,13 @@ OpenAI Adapter 必须：
 - 验证响应中的工具名存在于请求声明的 tools 中。
 - 使用请求中声明的 JSON Schema 校验 ToolCall arguments。
 - 只把明确支持的 `ModelRequest`/`ModelResponse` 字段转换成 Canonical Model。其他受支持的 OpenAI
-  字段可以严格校验后代理，但不复制到 Event metadata，也不暴露给 Rule；未知字段直接拒绝。
+  字段可以严格校验后代理，但不复制到 Event metadata，也不暴露给 MatchPlan；未知字段直接拒绝。
 
-上述结构校验是协议完整性要求。生产 Policy 中的 Tool allow/deny 已由 `tool_access` Rule 实现；
+当前 `model`、tool declaration、usage 和 finish reason 不形成独立 Event。tool declaration 仍用于
+Adapter 校验响应工具名及 arguments Schema。Normalizer 对 request tool group 执行 turn-local 完整性
+校验：孤立、重复、跨轮次或未完成的 ToolResult group 在上游请求前安全拒绝。
+
+上述结构校验是协议完整性要求。生产 Policy 中的 Tool allow/deny 已由 v3 MatchPlan Rule 实现；
 Secret/PII 外发分别由 `secret_exfiltration`/`pii_exfiltration` 判断，参数范围仍未实现。
 
 ## 7. 严格请求生命周期
@@ -173,13 +183,13 @@ Secret/PII 外发分别由 `secret_exfiltration`/`pii_exfiltration` 判断，参
 ```text
 1. 验证认证、Content-Type 和大小
 2. OpenAI Adapter 严格解析 Provider Request
-3. 转换 Canonical Events
-4. 创建请求级 Session，完整等待 Runtime 的 pre_llm Decision；含 Violation 时执行脱敏 Audit
+3. 转换 provider-neutral ModelRequest，由 InputNormalizer 展开完整 request snapshot batch
+4. 创建请求级 Session，原子检查完整 pre_llm batch；含 Violation 时执行脱敏 Audit
 5. block → 返回拒绝；绝不创建上游请求
 6. allow/log → 构建并发送上游请求
 7. 完整读取非流式响应
-8. 严格解析响应并转换 Canonical Event
-9. 完整等待 Runtime 的 post_llm Decision；含 Violation 时执行脱敏 Audit
+8. 严格解析响应，转换 ModelResponse 并展开 observed response batch
+9. 原子检查完整 post_llm batch；含 Violation 时执行脱敏 Audit
 10. block → 返回拒绝；不返回原响应
 11. allow/log → 返回兼容响应
 ```
@@ -188,10 +198,13 @@ Secret/PII 外发分别由 `secret_exfiltration`/`pii_exfiltration` 判断，参
 
 ## 8. Event 提交与内容保留
 
-- pre/post Decision 为 `allow/log` 时，Session 原子追加整个 pending batch；当前 Gateway batch 各含
-  一个边界 Event。
+- pre/post Decision 为 `allow/log` 时，Session 原子追加整个独立 pending batch；重复文本保留为不同
+  Event，文本和 ToolCall 共存的响应也属于同一 post_llm batch。
 - Decision 为 `block` 时，丢弃全部原始 pending Event，只追加包含 primary/pending Event ID、rule
   ID/code 的脱敏 Decision Event。
+- `AGENT_GUARDRAIL_MAX_TRACE_EVENTS` 限制请求级 Trace 总容量；Normalizer 使用比它少一个的单批
+  上限，为非空响应预留至少一个 Event。request batch 展开错误发生在上游调用前；多 Event response
+  仍可能在自身展开或合并 Trace 时超限，此时发生在上游调用后但原响应释放前并 fail-closed。
 - post_llm block 后，Provider 原响应不得进入 Access Log、Audit Record 或返回体。
 - Request Trace 默认只存在于内存；配置 `AGENT_GUARDRAIL_AUDIT_PATH` 后，JSONL Audit 只保存含
   Violation 的 Decision 摘要，普通 allow 不逐条持久化。
@@ -230,7 +243,7 @@ Gateway 自有错误结构：
 - 415：请求 `Content-Type` 不是 `application/json`。
 - 422：`/v1/evaluate` 请求可解析，但 Canonical `GuardrailContext` 校验失败。
 - 429：未来实现 Guardrail/Gateway 速率限制后使用；当前没有 rate limiter。
-- 502：上游模型失败。
+- 502：上游模型失败，或上游响应无法转换为有界独立事件批次。
 - 503：策略未就绪或 Core 不可用。
 - Guardrail block：MVP 使用 400 保持 OpenAI Client 可识别；后续通过 ADR 固定。
 
@@ -238,11 +251,13 @@ Gateway 自有错误结构：
 
 | 情况 | HTTP | 是否调用上游 |
 |---|---:|---|
-| 输入协议非法 | 400/413/415/422 | 否 |
+| 输入协议或 request snapshot 结构非法 | 400/413/415/422 | 否 |
+| request snapshot Candidate 超限 | 400 | 否 |
 | pre_llm block | 400 | 否 |
 | Runtime 未就绪/异常 | 503 | 否 |
 | 上游失败 | 502/504 | 已调用 |
-| 上游响应协议非法 | 502 | 已调用，但不返回原响应 |
+| 上游响应协议或 Normalization 非法 | 502 | 已调用，但不返回原响应 |
+| post_llm Trace 容量不足 | 503 | 已调用，但不返回原响应 |
 | post_llm block | 400 | 已调用，但不返回原响应 |
 
 ## 10. Policy 来源
@@ -253,7 +268,7 @@ MVP 只有一个服务端启动策略：
 启动时指定的 AGENT_GUARDRAIL_POLICY_FILE
 ```
 
-不允许普通请求头直接上传 Python Rule、任意 YAML 或选择 Policy。未来可以允许受信任客户端
+不允许普通请求头直接上传 Policy YAML、Python capability 或选择 Policy。未来可以允许受信任客户端
 选择服务端已存在的命名 Policy Profile：
 
 ```text
@@ -303,13 +318,13 @@ OpenAI Gateway 当前不支持 streaming。MCP Gateway 只接受请求级 SSE，
 
 - 请求体大小限制。
 - 上游连接、读取和总超时。
-- Rule/Detector 超时。
+- MatchPlan budget/Predicate/Detector 错误或超时。
 - 最大 Trace Event 数。
 - 最大 Violation 数。
 - HTTP Client 连接池。
 - 优雅关闭。
-- Readiness 只报告 `GuardrailRuntime.ready`；Policy、Registry 或固定上游配置失败会在应用构造时
-  阻止进程启动，不会产生一个可返回失败 Readiness 的运行中应用。
+- Readiness 只报告 `GuardrailRuntime.ready`；v3 Policy、可信 capability linking 或固定上游配置失败会
+  在应用构造时阻止进程启动，不会产生一个可返回失败 Readiness 的运行中应用。
 - Gateway 启动时创建一个 Runtime，所有请求复用；每个 Chat Completions 或 MCP `tools/call` 创建
   独立 Session，其他端点不创建 Session。
 - FastAPI lifespan 负责 Runtime 和 Gateway 自有 HTTP Client 的启动与关闭。当前 AuditSink 没有

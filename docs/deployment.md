@@ -1,6 +1,6 @@
 # Docker 与部署设计
 
-当前状态（2026-08-06）：Gateway 进程和环境配置已实现，可通过
+当前状态（2026-08-10）：Gateway 进程和环境配置已实现，可通过
 `python -m agent_guardrail.gateway` 启动；Dockerfile/Compose 仍属于下一阶段。
 
 ## 1. 部署目标
@@ -86,7 +86,7 @@ runtime
 | `AGENT_GUARDRAIL_LOG_LEVEL` | `info` | Uvicorn 日志级别 |
 | `AGENT_GUARDRAIL_MAX_REQUEST_BYTES` | `1048576` | 请求体上限 |
 | `AGENT_GUARDRAIL_MAX_UPSTREAM_RESPONSE_BYTES` | `4194304` | 响应体上限 |
-| `AGENT_GUARDRAIL_MAX_TRACE_EVENTS` | `16` | 每个 Gateway 请求的 Trace Event 上限 |
+| `AGENT_GUARDRAIL_MAX_TRACE_EVENTS` | `16` | 每个 Gateway 请求的 Trace Event 上限；OpenAI 单个 NormalizedBatch 上限为该值减一 |
 | `AGENT_GUARDRAIL_UPSTREAM_TIMEOUT_SECONDS` | `60` | 上游总超时 |
 | `AGENT_GUARDRAIL_EVALUATE_ENDPOINT_ENABLED` | `false` | 是否启用直接 Decision API |
 | `AGENT_GUARDRAIL_MCP_UPSTREAM_URL` | MCP 模式必填 | 固定 MCP `2026-07-28` Streamable HTTP endpoint |
@@ -120,7 +120,7 @@ runtime
   "action": "block",
   "rule_ids": ["prevent-secret-email"],
   "codes": ["secret_exfiltration"],
-  "policy_version": 1,
+  "policy_version": 3,
   "policy_hash": "..."
 }
 ```
@@ -129,15 +129,15 @@ runtime
 先通过 ADR 设计显式开关、脱敏、权限和保留周期。
 
 当需要查询、多实例写入或长期审计时，再引入 SQLite/PostgreSQL Adapter，不让存储逻辑进入
-Engine。
+Enforcement 或 Analyzer。
 
 ## 7. 健康检查
 
 Liveness 只检查事件循环和进程。
 
-当前 `GET /health/ready` 只报告 `GuardrailRuntime.ready`。Policy、Registry 和固定上游配置在应用
-构造/Settings 校验阶段失败时会阻止进程成功启动；当前 Readiness 不主动探测上游网络，也不验证
-Audit 路径可写性。
+当前 `GET /health/ready` 只报告 `GuardrailRuntime.ready`。v3 Policy、可信 capability linking 和固定
+上游配置在应用构造/Settings 校验阶段失败时会阻止进程成功启动；当前 Readiness 不主动探测上游网络，
+也不验证 Audit 路径可写性。
 
 未来 Policy 热加载失败时应保留上一个有效 Policy，并让 Readiness/Metric 反映配置错误；热加载
 当前尚未实现。
@@ -177,7 +177,7 @@ Decision/Detector 耗时日志、Metrics 或 OpenTelemetry；不得把下面的�
 
 - Semantic Versioning。
 - `uv.lock` 必须提交。
-- Policy YAML 带 `version: 1`。
+- Policy YAML 必须明确带 `version: 3`，并在进程启动时完整编译为 MatchPlan 与可信 capability。
 - Canonical Event 与 Decision API 的破坏性变更必须升级 API version。
 
 后续发布阶段要求：

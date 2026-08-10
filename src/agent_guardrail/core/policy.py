@@ -1,85 +1,103 @@
-"""Strict policy configuration and immutable runtime policy objects."""
+"""The only production policy schema: strict YAML compiled to MatchPlan."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Literal, Self
 
-from pydantic import (
-    BaseModel,
-    ConfigDict,
-    Field,
-    JsonValue,
-    StrictBool,
-    StrictInt,
-    model_validator,
+from pydantic import ConfigDict, Field, StrictInt, model_validator
+
+from agent_guardrail.core.authoring import (
+    MAX_AUTHOR_PARAMETERS,
+    MAX_AUTHOR_PREDICATES,
+    MAX_AUTHOR_RULES,
+    AuthorModel,
+    AuthorParameterSpec,
+    AuthorPolicy,
+    AuthorPredicateDefinition,
+    AuthorRule,
 )
-
-from agent_guardrail.core.protocols import Rule
-from agent_guardrail.models import Action, Phase
-
-
-class PolicyConfigModel(BaseModel):
-    """Base for closed policy schemas."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
+from agent_guardrail.core.capabilities import CompiledMatchPlan
+from agent_guardrail.core.match_plan import MatchLimits
+from agent_guardrail.models import Action, AnalysisScope
 
 
-class EngineConfig(PolicyConfigModel):
-    """Bounded execution and failure behavior for the engine."""
+class EnforcementConfig(AuthorModel):
+    """Bounded Finding-to-Decision behavior owned by Enforcement."""
 
-    default_timeout_ms: StrictInt = Field(default=1_000, ge=1, le=60_000)
-    detector_timeout_ms: StrictInt = Field(default=500, ge=1, le=60_000)
-    on_rule_error: Action = Action.BLOCK
-    on_detector_timeout: Action = Action.BLOCK
     max_violations: StrictInt = Field(default=100, ge=1, le=1_000)
+    on_analysis_error: Action = Action.BLOCK
+    on_detector_timeout: Action = Action.BLOCK
 
 
-class RuleEntry(PolicyConfigModel):
-    """A YAML rule reference; it cannot name a Python module or class."""
+class PolicyRule(AuthorRule):
+    """One readable MatchPlan rule plus its deployment action."""
 
-    id: str = Field(min_length=1, max_length=128, pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*$")
-    type: str = Field(min_length=1, max_length=128, pattern=r"^[a-z0-9][a-z0-9_]*$")
-    enabled: StrictBool = True
     action: Action = Action.BLOCK
-    phases: tuple[Phase, ...] = Field(min_length=1)
-    config: dict[str, JsonValue] = Field(default_factory=dict)
+
+
+class PolicyDocument(AuthorModel):
+    """Breaking v3 production document; legacy Rule and anchor forms are invalid."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, populate_by_name=True)
+
+    version: Literal[3]
+    engine: EnforcementConfig = Field(default_factory=EnforcementConfig)
+    scopes: tuple[AnalysisScope, ...] = (AnalysisScope.PENDING,)
+    limits: MatchLimits = Field(default_factory=MatchLimits)
+    parameters: dict[str, AuthorParameterSpec] = Field(
+        default_factory=dict,
+        max_length=MAX_AUTHOR_PARAMETERS,
+    )
+    predicates: dict[str, AuthorPredicateDefinition] = Field(
+        default_factory=dict,
+        max_length=MAX_AUTHOR_PREDICATES,
+    )
+    rules: tuple[PolicyRule, ...] = Field(max_length=MAX_AUTHOR_RULES)
 
     @model_validator(mode="after")
-    def validate_phases(self) -> Self:
-        if len(self.phases) != len(set(self.phases)):
-            raise ValueError("rule phases must be unique")
-        return self
-
-
-class PolicyDocument(PolicyConfigModel):
-    """The versioned top-level YAML schema."""
-
-    version: Literal[1]
-    engine: EngineConfig = Field(default_factory=EngineConfig)
-    rules: tuple[RuleEntry, ...]
-
-    @model_validator(mode="after")
-    def validate_rule_ids(self) -> Self:
-        rule_ids = [rule.id for rule in self.rules]
+    def validate_policy(self) -> Self:
+        if len(self.scopes) != len(set(self.scopes)):
+            raise ValueError("policy scopes must be unique")
+        if AnalysisScope.PENDING not in self.scopes:
+            raise ValueError("production policy must support pending analysis")
+        rule_ids = tuple(rule.id for rule in self.rules)
         if len(rule_ids) != len(set(rule_ids)):
-            raise ValueError("rule IDs must be unique")
+            raise ValueError("policy Rule IDs must be unique")
+        if any(
+            parameter.required and parameter.default is None
+            for parameter in self.parameters.values()
+        ):
+            raise ValueError("production policy parameters must define defaults")
         return self
+
+    def analysis_policy(self) -> AuthorPolicy:
+        """Project the action-free author policy consumed by the MatchPlan compiler."""
+
+        return AuthorPolicy(
+            version=1,
+            scopes=self.scopes,
+            limits=self.limits,
+            parameters=self.parameters,
+            predicates=self.predicates,
+            rules=self.rules,
+        )
 
 
 @dataclass(frozen=True, slots=True)
-class RuleBinding:
-    """A trusted rule instance plus its deployment action."""
+class RuleAction:
+    """Deployment-only action for one action-free MatchPlan rule."""
 
-    rule: Rule
+    rule_id: str
     action: Action
 
 
 @dataclass(frozen=True, slots=True)
-class PolicySet:
-    """An immutable policy activated only after complete validation."""
+class CompiledPolicy:
+    """Atomically validated production policy and trusted capabilities."""
 
     version: int
     content_hash: str
-    engine: EngineConfig
-    rules: tuple[RuleBinding, ...]
+    engine: EnforcementConfig
+    match_plan: CompiledMatchPlan
+    actions: tuple[RuleAction, ...]
