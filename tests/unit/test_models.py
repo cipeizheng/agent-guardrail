@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import cast
 
 import pytest
 from pydantic import ValidationError
@@ -11,17 +12,25 @@ from agent_guardrail.models import (
     Action,
     CandidateEvent,
     CandidateRelation,
+    ContentTrustClass,
+    DataSensitivity,
     Decision,
     Event,
     EventKind,
     EventOrigin,
     EventRelation,
+    FlowAuthorization,
+    FlowSecurityContext,
     GuardrailContext,
     Message,
     MessageRole,
+    OwnerScope,
     PendingTrace,
     Phase,
     RelationKind,
+    SecurityDestination,
+    SecurityFactAuthorities,
+    SecurityFactAuthority,
     TextContent,
     Trace,
     Violation,
@@ -318,3 +327,108 @@ def test_candidate_relation_requires_one_explicit_source() -> None:
         payload={"call_id": "call-1", "name": "safe", "arguments": {}},
     )
     assert candidate.origin is EventOrigin.CLIENT_ASSERTED
+
+
+def test_flow_security_context_is_closed_typed_and_authority_bound() -> None:
+    context = FlowSecurityContext(
+        trust_class=ContentTrustClass.USER_CONTENT,
+        sensitivity=DataSensitivity.PRIVATE,
+        owner_scope=OwnerScope.CURRENT_PRINCIPAL,
+        destination=SecurityDestination.LLM_PROVIDER,
+        authorization=FlowAuthorization.ALLOWED,
+        authorities=SecurityFactAuthorities(
+            trust_class=SecurityFactAuthority.ENFORCEMENT,
+            sensitivity=SecurityFactAuthority.DATA_SOURCE,
+            owner_scope=SecurityFactAuthority.AUTHENTICATION,
+            destination=SecurityFactAuthority.ENFORCEMENT,
+            authorization=SecurityFactAuthority.AUTHORIZATION_SERVICE,
+        ),
+    )
+
+    boundary = context.with_enforcement_destination(SecurityDestination.LLM_PROVIDER)
+
+    assert boundary.owner_scope is OwnerScope.CURRENT_PRINCIPAL
+    assert boundary.destination is SecurityDestination.LLM_PROVIDER
+    assert boundary.authorities.destination is SecurityFactAuthority.ENFORCEMENT
+    assert boundary.policy_parameters() == {
+        "security_trust_class": "user_content",
+        "security_sensitivity": "private",
+        "security_owner_scope": "current_principal",
+        "security_destination": "llm_provider",
+        "security_authorization": "allowed",
+    }
+    changed_sink = boundary.with_enforcement_destination(
+        SecurityDestination.EXTERNAL_TOOL
+    )
+    assert changed_sink.authorization is FlowAuthorization.UNKNOWN
+    assert (
+        changed_sink.authorities.authorization is SecurityFactAuthority.UNKNOWN
+    )
+    with pytest.raises(ValueError, match="must be known"):
+        boundary.with_enforcement_destination(SecurityDestination.UNKNOWN)
+    with pytest.raises(TypeError, match="SecurityDestination"):
+        boundary.with_enforcement_destination(
+            cast(SecurityDestination, "llm_provider")
+        )
+    with pytest.raises(ValidationError, match="frozen"):
+        boundary.authorization = FlowAuthorization.DENIED
+    with pytest.raises(ValidationError, match="Extra inputs"):
+        FlowSecurityContext.model_validate({"tenant_id": "raw-tenant"})
+
+
+@pytest.mark.parametrize(
+    "context, message",
+    [
+        (
+            {"destination": "llm_provider"},
+            "destination requires an explicit authority",
+        ),
+        (
+            {
+                "authorities": {"destination": "enforcement"},
+            },
+            "unknown destination cannot declare an authority",
+        ),
+        (
+            {
+                "owner_scope": "current_tenant",
+                "authorities": {"owner_scope": "detector"},
+            },
+            "owner_scope cannot use that authority",
+        ),
+        (
+            {
+                "authorization": "allowed",
+                "authorities": {"authorization": "authentication"},
+            },
+            "authorization cannot use that authority",
+        ),
+        (
+            {
+                "authorization": "allowed",
+                "authorities": {"authorization": "authorization_service"},
+            },
+            "authorization requires a known destination",
+        ),
+    ],
+)
+def test_flow_security_context_rejects_untrusted_fact_sources(
+    context: dict[str, object],
+    message: str,
+) -> None:
+    with pytest.raises(ValidationError, match=message):
+        FlowSecurityContext.model_validate(context)
+
+
+def test_direct_context_cannot_submit_a_security_context() -> None:
+    current = event(sequence=0)
+    payload = GuardrailContext(event=current, trace=Trace(id="trace-1")).model_dump(
+        mode="json"
+    )
+    payload["security_context"] = {
+        "authorization": "allowed",
+        "authorities": {"authorization": "authorization_service"},
+    }
+
+    with pytest.raises(ValidationError, match="Extra inputs"):
+        GuardrailContext.model_validate(payload)

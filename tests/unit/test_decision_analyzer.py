@@ -19,8 +19,13 @@ from agent_guardrail.models import (
     Event,
     EventKind,
     EventOrigin,
+    FlowAuthorization,
+    FlowSecurityContext,
     PendingTrace,
     Phase,
+    SecurityDestination,
+    SecurityFactAuthorities,
+    SecurityFactAuthority,
     ToolCall,
     Trace,
 )
@@ -62,6 +67,81 @@ async def test_empty_policy_allows_pending_batch() -> None:
 
     assert decision.action is Action.ALLOW
     assert decision.pending_event_ids == ("e1",)
+    assert decision.violations == ()
+
+
+@pytest.mark.asyncio
+async def test_only_typed_security_context_reaches_reserved_policy_parameters() -> None:
+    analyzer = _analyzer(
+        """\
+version: 3
+scopes: [pending]
+parameters:
+  security_authorization: {type: string, required: false, default: unknown}
+rules:
+  - id: require-context-channel
+    action: block
+    events:
+      call: {kind: tool_call, domain: pending, phases: [pre_tool]}
+    where:
+      compare:
+        left: {parameter: security_authorization}
+        operator: equals
+        right: {literal: allowed}
+    finding:
+      code: trusted_context_seen
+      message: The trusted context channel supplied this authorization state.
+      subjects: [call]
+"""
+    )
+    untrusted_attributes = PendingTrace(
+        trace=Trace(id="trace-1"),
+        events=(call("e1", 0),),
+        primary_event_id="e1",
+        attributes={"security_authorization": "allowed"},
+    )
+    trusted_context = PendingTrace(
+        trace=Trace(id="trace-1"),
+        events=(call("e2", 0),),
+        primary_event_id="e2",
+        security_context=FlowSecurityContext(
+            destination=SecurityDestination.EXTERNAL_TOOL,
+            authorization=FlowAuthorization.ALLOWED,
+            authorities=SecurityFactAuthorities(
+                destination=SecurityFactAuthority.ENFORCEMENT,
+                authorization=SecurityFactAuthority.AUTHORIZATION_SERVICE
+            ),
+        ),
+    )
+
+    untrusted_decision = await analyzer.analyze_pending(untrusted_attributes)
+    trusted_decision = await analyzer.analyze_pending(trusted_context)
+
+    assert untrusted_decision.action is Action.ALLOW
+    assert untrusted_decision.violations == ()
+    assert trusted_decision.action is Action.BLOCK
+    assert trusted_decision.violations[0].code == "trusted_context_seen"
+
+
+@pytest.mark.asyncio
+async def test_undeclared_security_context_does_not_become_unknown_parameter_error() -> None:
+    batch = PendingTrace(
+        trace=Trace(id="trace-1"),
+        events=(call("e1", 0),),
+        primary_event_id="e1",
+        security_context=FlowSecurityContext(
+            destination=SecurityDestination.EXTERNAL_TOOL,
+            authorization=FlowAuthorization.DENIED,
+            authorities=SecurityFactAuthorities(
+                destination=SecurityFactAuthority.ENFORCEMENT,
+                authorization=SecurityFactAuthority.AUTHORIZATION_SERVICE
+            ),
+        ),
+    )
+
+    decision = await empty_analyzer().analyze_pending(batch)
+
+    assert decision.action is Action.ALLOW
     assert decision.violations == ()
 
 

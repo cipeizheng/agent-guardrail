@@ -17,6 +17,7 @@ from agent_guardrail.models import (
     EventOrigin,
     PendingTrace,
     Phase,
+    SecurityDestination,
 )
 from agent_guardrail.runtime import GuardrailRuntime
 from tests.support import (
@@ -268,8 +269,12 @@ class RecordingAnalyzer(MatchPolicyAnalyzer):
         self.events: list[
             tuple[EventKind, Phase, EventOrigin, str, tuple[str, ...]]
         ] = []
+        self.security_destinations: list[tuple[Phase, SecurityDestination]] = []
 
     async def analyze_pending(self, pending: PendingTrace):
+        self.security_destinations.append(
+            (pending.primary_event.phase, pending.security_context.destination)
+        )
         self.events.extend(
             (
                 event.kind,
@@ -324,6 +329,10 @@ async def test_gateway_submits_independent_events_with_boundary_owned_origins() 
     assert [(kind, phase, origin) for kind, phase, origin, _, _ in analyzer.events] == [
         (EventKind.MESSAGE, Phase.PRE_LLM, EventOrigin.CLIENT_ASSERTED),
         (EventKind.MESSAGE, Phase.POST_LLM, EventOrigin.OBSERVED),
+    ]
+    assert analyzer.security_destinations == [
+        (Phase.PRE_LLM, SecurityDestination.LLM_PROVIDER),
+        (Phase.POST_LLM, SecurityDestination.CLIENT),
     ]
 
 
@@ -602,6 +611,62 @@ async def test_direct_evaluate_is_explicit_and_has_no_upstream_side_effect() -> 
     assert response.json()["action"] == "block"
     assert response.json()["phase"] == "pre_tool"
     assert FAKE_SECRET not in response.text
+    assert requests == []
+
+
+@pytest.mark.asyncio
+async def test_direct_evaluate_cannot_spoof_the_trusted_security_channel() -> None:
+    analyzer = analyzer_from_yaml(
+        """\
+version: 3
+scopes: [pending]
+parameters:
+  security_authorization: {type: string, required: false, default: unknown}
+rules:
+  - id: trusted-authorization-only
+    action: block
+    events:
+      call: {kind: tool_call, domain: pending, phases: [pre_tool]}
+    where:
+      compare:
+        left: {parameter: security_authorization}
+        operator: equals
+        right: {literal: allowed}
+    finding:
+      code: spoofed_authorization
+      message: A trusted authorization fact was present.
+      subjects: [call]
+"""
+    )
+    settings = gateway_settings().model_copy(update={"evaluate_endpoint_enabled": True})
+    claimed_attributes = tool_context(body="safe").model_dump(mode="json")
+    claimed_attributes["attributes"] = {"security_authorization": "allowed"}
+    claimed_context = dict(claimed_attributes)
+    claimed_context["security_context"] = {
+        "authorization": "allowed",
+        "authorities": {"authorization": "authorization_service"},
+    }
+
+    async with app_client(
+        lambda request: httpx.Response(200, json=text_response()),
+        settings=settings,
+        runtime=GuardrailRuntime(analyzer),
+    ) as (client, requests):
+        attributes_response = await client.post(
+            "/v1/evaluate",
+            headers=auth_headers(),
+            json=claimed_attributes,
+        )
+        context_response = await client.post(
+            "/v1/evaluate",
+            headers=auth_headers(),
+            json=claimed_context,
+        )
+
+    assert attributes_response.status_code == 200
+    assert attributes_response.json()["action"] == "allow"
+    assert context_response.status_code == 422
+    assert context_response.json()["error"]["code"] == "invalid_guardrail_context"
     assert requests == []
 
 

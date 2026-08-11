@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from agent_guardrail.config import (
     PolicyLoadError,
     create_default_detector_registry,
     create_default_predicate_registry,
+    load_policy_file,
     load_policy_yaml,
 )
 from agent_guardrail.models import Action
@@ -65,3 +68,60 @@ def test_empty_v3_policy_is_valid() -> None:
 
     assert policy.match_plan.plan.rules == ()
     assert policy.actions == ()
+
+
+@pytest.mark.parametrize(
+    "declaration",
+    [
+        "{type: boolean, required: false, default: false}",
+        "{type: string, required: true, default: unknown}",
+        "{type: string, required: false, default: allowed}",
+    ],
+)
+def test_reserved_security_parameters_require_safe_unknown_defaults(
+    declaration: str,
+) -> None:
+    with pytest.raises(
+        PolicyLoadError,
+        match="reserved security context parameters",
+    ):
+        load(
+            f"""\
+version: 3
+scopes: [pending]
+parameters:
+  security_authorization: {declaration}
+rules: []
+"""
+        )
+
+
+def test_reserved_security_parameter_with_unknown_default_compiles() -> None:
+    policy = load(
+        """\
+version: 3
+scopes: [pending]
+parameters:
+  security_destination: {type: string, required: false, default: unknown}
+rules: []
+"""
+    )
+
+    declaration = policy.match_plan.plan.parameters[0]
+    assert declaration.name == "security_destination"
+    assert declaration.default == "unknown"
+
+
+@pytest.mark.parametrize(
+    "path",
+    sorted((Path(__file__).parents[2] / "examples" / "policies").glob("*.yaml")),
+    ids=lambda path: path.name,
+)
+def test_all_example_policies_compile_with_default_capabilities(path: Path) -> None:
+    policy = load_policy_file(
+        path,
+        detectors=create_default_detector_registry(),
+        predicates=create_default_predicate_registry(),
+    )
+
+    assert policy.version == 3

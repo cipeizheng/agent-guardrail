@@ -24,6 +24,7 @@ from agent_guardrail.models import (
     EventKind,
     EventOrigin,
     EventRelation,
+    FlowSecurityContext,
     PendingTrace,
     Phase,
     Trace,
@@ -76,6 +77,7 @@ class EnforcementSession:
         trace: Trace,
         audit: AuditSink | None = None,
         attributes: Mapping[str, JsonValue] | None = None,
+        security_context: FlowSecurityContext | None = None,
         clock: Clock | None = None,
         id_factory: IdFactory | None = None,
     ) -> None:
@@ -83,6 +85,13 @@ class EnforcementSession:
         self.trace = trace
         self.audit = audit or NullAuditSink()
         self.attributes = dict(attributes or {})
+        if security_context is not None and not isinstance(
+            security_context, FlowSecurityContext
+        ):
+            raise TypeError("security_context must be a FlowSecurityContext")
+        self.security_context = (security_context or FlowSecurityContext()).model_copy(
+            deep=True
+        )
         self.clock = clock or (lambda: datetime.now(UTC))
         self.id_factory = id_factory or (lambda: uuid4().hex)
         self.audit_failure_types: list[str] = []
@@ -97,6 +106,7 @@ class EnforcementSession:
         metadata: Mapping[str, JsonValue] | None = None,
         source_event_ids: Sequence[str] = (),
         origin: EventOrigin = EventOrigin.CLIENT_ASSERTED,
+        security_context: FlowSecurityContext | None = None,
     ) -> Decision:
         """Evaluate one compatibility candidate through the atomic batch path."""
 
@@ -132,18 +142,27 @@ class EnforcementSession:
                 for source_event_id in declared_source_ids
             ),
         )
-        return await self.evaluate_candidates((candidate,), primary_key=candidate.key)
+        return await self.evaluate_candidates(
+            (candidate,),
+            primary_key=candidate.key,
+            security_context=security_context,
+        )
 
     async def evaluate_candidates(
         self,
         candidates: Sequence[CandidateEvent],
         *,
         primary_key: str | None = None,
+        security_context: FlowSecurityContext | None = None,
     ) -> Decision:
         """Analyze and atomically commit a bounded batch of candidate events."""
 
         if isinstance(candidates, (str, bytes)):
             raise ValueError("candidates must be a sequence of CandidateEvent values")
+        if security_context is not None and not isinstance(
+            security_context, FlowSecurityContext
+        ):
+            raise TypeError("security_context must be a FlowSecurityContext")
         if len(candidates) > MAX_PENDING_EVENTS:
             raise ValueError(f"candidate batch cannot exceed {MAX_PENDING_EVENTS} events")
         candidate_batch = tuple(candidates)
@@ -230,6 +249,9 @@ class EnforcementSession:
                 events=tuple(pending_events),
                 primary_event_id=candidate_ids[selected_primary_key],
                 attributes=dict(self.attributes),
+                security_context=(
+                    security_context or self.security_context
+                ).model_copy(deep=True),
             )
             pending_snapshot = pending.model_dump(mode="json")
             try:

@@ -1,33 +1,25 @@
 # Architecture Decision Records
 
-ADR 用于记录会长期约束实现的架构决策。
+当前架构从 2026-08-11 起重新建立基线。ADR-0001–0013 已移出当前文档树，不再作为实现约束或日常
+阅读材料；当前仓库不维护它们的索引。
 
-状态：
+日常任务先读 [`current-architecture-contract.md`](../current-architecture-contract.md)。只有当任务要改变该
+合同中的长期边界时，才读取现行 ADR 或提出新 ADR。实现既有 roadmap capability 不需要历史 ADR。
 
-- Proposed
-- Accepted
-- Superseded
-- Rejected
+## 现行 ADR
 
-新增 ADR 使用四位递增编号。已有 Accepted ADR 不应直接重写结论；需要变更时新增 ADR 并将
-旧记录标记为 Superseded。
+| ADR | 状态 | 作用 | 读取条件 |
+| --- | --- | --- | --- |
+| [0014](0014-current-architecture-baseline.md) | Accepted | 确立当前合同、事实来源和增量决策方式 | 修改架构合同、事实来源或 ADR 流程 |
 
-当前记录：
+## 何时需要新 ADR
 
-- [0001：Python Rule + YAML Config](0001-python-rules-yaml-config.md)（由 0011 替代）
-- [0002：Inline Core，同时规划 Gateway](0002-inline-core-gateway-planned.md)
-- [0003：Canonical Event Model](0003-canonical-event-model.md)
-- [0004：统一 Runtime 与 Enforcement 边界](0004-runtime-and-enforcement-boundaries.md)
-- [0005：MCP 2026-07-28 无状态 Gateway](0005-mcp-2026-stateless-gateway.md)（部分替代 0004 的
-  MCP 长 Session 假设）
-- [0006：一等 Event Relation](0006-first-class-event-relations.md)（补充 0003/0004 的来源关系模型）
-- [0007：面向 Invariant 的事件分析架构](0007-invariant-oriented-event-analysis.md)（部分替代
-  0001/0004/0006，建立 PendingTrace 与 PolicyAnalyzer；双轨 Policy 方向后由 0011 替代）
-- [0008：独立 Message Event 与 Input Normalization](0008-independent-message-input-normalization.md)
-  （补充 0007，固定全量快照、显式增量、兼容迁移和批次安全语义）
-- [0009：Structured RulePlan YAML Policy](0009-structured-rule-plan-policy.md)
-  （历史决策；由 0010/0011 替代）
-- [0010：Invariant 对齐的 Policy/Monitor 与通用匹配模型](0010-invariant-aligned-policy-monitor.md)
-  （部分替代 0007/0009 的通用策略载体结论；其 MatchPlan 结论保留，v2 迁移结论由 0011 替代）
-- [0011：MatchPlan 生产硬切换](0011-matchplan-production-cutover.md)
-  （删除 Python Rule、Structured RulePlan、mandatory anchor 和 v1/v2 生产兼容轨道）
+以下变化需要短 ADR：新增 Action；改变 Policy/MatchPlan 执行语言或生产链；改变 Canonical Event/Relation
+语义；改变 pre/post 安全承诺；引入远程 Core、持久化状态或新的信任主体；保存原始敏感内容；引入可修改
+payload 的 Transformation；破坏性协议版本升级。
+
+普通 Detector/Predicate 实现、规则集、文档修正和不改变上述合同的 Adapter 工作不需要 ADR，只需遵守
+当前合同、专项设计和 capability 状态矩阵。
+
+新 ADR 使用 [`template.md`](template.md)，正文目标不超过约 120 行。调研、竞品对比、执行清单、测试日志
+和频繁变化的实现状态必须放入专项文档，不能重新塞回 ADR。

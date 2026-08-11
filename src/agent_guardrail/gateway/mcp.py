@@ -26,7 +26,14 @@ from agent_guardrail.gateway.mcp_upstream import (
     MCPUpstreamError,
     MCPUpstreamResponse,
 )
-from agent_guardrail.models import Decision, EventKind, EventOrigin, Phase, Trace
+from agent_guardrail.models import (
+    Decision,
+    EventKind,
+    EventOrigin,
+    Phase,
+    SecurityDestination,
+    Trace,
+)
 from agent_guardrail.runtime import GuardrailRuntime
 
 
@@ -163,6 +170,9 @@ class MCPGateway:
                 payload=cast(dict[str, JsonValue], tool_call.model_dump(mode="json")),
                 metadata={"adapter": "mcp_gateway", "protocol_version": request.protocol_version},
                 origin=EventOrigin.CLIENT_ASSERTED,
+                security_context=session.security_context.with_enforcement_destination(
+                    SecurityDestination.EXTERNAL_TOOL
+                ),
             )
         except GuardrailUnavailable:
             return self._guardrail_unavailable(request, trace_id, Phase.PRE_TOOL)
@@ -190,6 +200,9 @@ class MCPGateway:
                 metadata={"adapter": "mcp_gateway", "protocol_version": request.protocol_version},
                 source_event_ids=(pre_decision.event_id,),
                 origin=EventOrigin.OBSERVED,
+                security_context=session.security_context.with_enforcement_destination(
+                    SecurityDestination.CLIENT
+                ),
             )
         except GuardrailUnavailable:
             return self._guardrail_unavailable(request, trace_id, Phase.POST_TOOL)

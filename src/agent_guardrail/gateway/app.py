@@ -36,6 +36,7 @@ from agent_guardrail.models import (
     Decision,
     GuardrailContext,
     Phase,
+    SecurityDestination,
     Trace,
 )
 from agent_guardrail.runtime import GuardrailRuntime
@@ -239,6 +240,9 @@ def create_app(
             pre_decision = await session.evaluate_candidates(
                 normalized_request.candidates,
                 primary_key=normalized_request.primary_key,
+                security_context=session.security_context.with_enforcement_destination(
+                    SecurityDestination.LLM_PROVIDER
+                ),
             )
         except GuardrailUnavailable:
             return _unavailable_response(trace_id, Phase.PRE_LLM)
@@ -306,6 +310,9 @@ def create_app(
                     for candidate in normalized_response.candidates
                 ),
                 primary_key=normalized_response.primary_key,
+                security_context=session.security_context.with_enforcement_destination(
+                    SecurityDestination.CLIENT
+                ),
             )
         except GuardrailUnavailable:
             return _unavailable_response(trace_id, Phase.POST_LLM)

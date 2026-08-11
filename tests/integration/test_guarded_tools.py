@@ -12,7 +12,9 @@ from agent_guardrail.models import (
     Action,
     EventKind,
     EventOrigin,
+    Phase,
     RelationKind,
+    SecurityDestination,
     ToolCall,
     Trace,
 )
@@ -25,6 +27,7 @@ from tests.support import (
     empty_analyzer,
     pii_analyzer,
     secret_analyzer,
+    security_destination_analyzer,
     tool_access_analyzer,
 )
 
@@ -58,6 +61,49 @@ async def test_allow_executes_tool_exactly_once() -> None:
     ]
     assert session.trace.events[1].relations[0].kind is RelationKind.DERIVED_FROM
     assert "source_event_ids" not in session.trace.events[1].metadata
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("phase", "destination", "kind", "expected_tool_calls"),
+    [
+        (
+            Phase.PRE_TOOL,
+            SecurityDestination.EXTERNAL_TOOL,
+            EventKind.TOOL_CALL,
+            0,
+        ),
+        (
+            Phase.POST_TOOL,
+            SecurityDestination.AGENT_RUNTIME,
+            EventKind.TOOL_RESULT,
+            1,
+        ),
+    ],
+)
+async def test_inline_tool_injects_the_actual_flow_destination(
+    phase: Phase,
+    destination: SecurityDestination,
+    kind: EventKind,
+    expected_tool_calls: int,
+) -> None:
+    fake = FakeToolExecutor({"send_email": lambda arguments: {"sent": True}})
+    session = EnforcementSession(
+        analyzer=security_destination_analyzer(
+            destination=destination,
+            phase=phase,
+            kind=kind,
+        ),
+        trace=Trace(id="trace-1"),
+    )
+    guarded = GuardedToolExecutor(inner=fake, session=session)
+
+    with pytest.raises(GuardrailBlocked) as blocked:
+        await guarded.execute(email_call("safe body"))
+
+    assert blocked.value.decision.phase is phase
+    assert blocked.value.decision.violations[0].code == "destination_seen"
+    assert fake.call_count("send_email") == expected_tool_calls
 
 
 @pytest.mark.asyncio

@@ -18,6 +18,7 @@ from agent_guardrail.models import (
     ModelResponse,
     Phase,
     RelationKind,
+    SecurityDestination,
     ToolCall,
     Trace,
 )
@@ -29,6 +30,7 @@ from tests.support import (
     analyzer_from_yaml,
     empty_analyzer,
     pii_analyzer,
+    security_destination_analyzer,
     tool_access_analyzer,
 )
 
@@ -79,6 +81,38 @@ async def test_allow_checks_both_sides_and_returns_response() -> None:
     ]
     assert session.trace.events[1].relations[0].kind is RelationKind.DERIVED_FROM
     assert "source_event_ids" not in session.trace.events[1].metadata
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("phase", "destination", "expected_provider_calls"),
+    [
+        (Phase.PRE_LLM, SecurityDestination.LLM_PROVIDER, 0),
+        (Phase.POST_LLM, SecurityDestination.AGENT_RUNTIME, 1),
+    ],
+)
+async def test_inline_llm_injects_the_actual_flow_destination(
+    phase: Phase,
+    destination: SecurityDestination,
+    expected_provider_calls: int,
+) -> None:
+    inner = ScriptedLLM([ModelResponse(content="Safe response")])
+    session = EnforcementSession(
+        analyzer=security_destination_analyzer(
+            destination=destination,
+            phase=phase,
+            kind=EventKind.MESSAGE,
+        ),
+        trace=Trace(id="trace-1"),
+    )
+    guarded = GuardedLLMClient(inner=inner, session=session)
+
+    with pytest.raises(GuardrailBlocked) as blocked:
+        await guarded.complete(request())
+
+    assert blocked.value.decision.phase is phase
+    assert blocked.value.decision.violations[0].code == "destination_seen"
+    assert inner.call_count == expected_provider_calls
 
 
 @pytest.mark.asyncio

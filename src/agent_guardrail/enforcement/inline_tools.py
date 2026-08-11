@@ -9,7 +9,14 @@ from pydantic import JsonValue
 from agent_guardrail.enforcement.exceptions import GuardrailBlocked
 from agent_guardrail.enforcement.protocols import ToolExecutor
 from agent_guardrail.enforcement.session import EnforcementSession
-from agent_guardrail.models import EventKind, EventOrigin, Phase, ToolCall, ToolResult
+from agent_guardrail.models import (
+    EventKind,
+    EventOrigin,
+    Phase,
+    SecurityDestination,
+    ToolCall,
+    ToolResult,
+)
 
 
 class GuardedToolExecutor:
@@ -26,6 +33,9 @@ class GuardedToolExecutor:
             payload=cast(dict[str, JsonValue], call.model_dump(mode="json")),
             metadata={"adapter": "inline_tool"},
             origin=EventOrigin.OBSERVED,
+            security_context=self.session.security_context.with_enforcement_destination(
+                SecurityDestination.EXTERNAL_TOOL
+            ),
         )
         if pre_decision.blocked:
             raise GuardrailBlocked(pre_decision)
@@ -38,6 +48,9 @@ class GuardedToolExecutor:
             metadata={"adapter": "inline_tool"},
             source_event_ids=(pre_decision.event_id,),
             origin=EventOrigin.OBSERVED,
+            security_context=self.session.security_context.with_enforcement_destination(
+                SecurityDestination.AGENT_RUNTIME
+            ),
         )
         if post_decision.blocked:
             raise GuardrailBlocked(post_decision)

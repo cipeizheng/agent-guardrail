@@ -17,6 +17,7 @@ from agent_guardrail.models import (
     ModelRequest,
     ModelResponse,
     Phase,
+    SecurityDestination,
 )
 
 
@@ -41,6 +42,9 @@ class GuardedLLMClient:
             pre_decision = await self.session.evaluate_candidates(
                 request_batch.candidates,
                 primary_key=request_batch.primary_key,
+                security_context=self.session.security_context.with_enforcement_destination(
+                    SecurityDestination.LLM_PROVIDER
+                ),
             )
             self._submitted_initial_snapshot = True
         else:
@@ -50,6 +54,9 @@ class GuardedLLMClient:
                 payload=cast(dict[str, JsonValue], request.model_dump(mode="json")),
                 metadata={"adapter": "inline_llm_repeated_snapshot"},
                 origin=EventOrigin.CLIENT_ASSERTED,
+                security_context=self.session.security_context.with_enforcement_destination(
+                    SecurityDestination.LLM_PROVIDER
+                ),
             )
         if pre_decision.blocked:
             raise GuardrailBlocked(pre_decision)
@@ -69,6 +76,9 @@ class GuardedLLMClient:
                 for candidate in response_batch.candidates
             ),
             primary_key=response_batch.primary_key,
+            security_context=self.session.security_context.with_enforcement_destination(
+                SecurityDestination.AGENT_RUNTIME
+            ),
         )
         if post_decision.blocked:
             raise GuardrailBlocked(post_decision)

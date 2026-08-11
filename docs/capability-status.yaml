@@ -1,0 +1,116 @@
+schema_version: 1
+last_verified: "2026-08-11"
+
+status_vocabulary:
+  verified: 实际算法或声明的真实后端已运行，并满足完整行为完成定义。
+  baseline: 已实现并测试基础能力，但未达到该 roadmap 能力要求的覆盖面。
+  adapter_only: 接入、Schema、预算和 Enforcement 已测试，但真实外部后端未验证。
+  planned: 尚未实现。
+
+verified_definition:
+  - actual_algorithm_or_backend_executed
+  - safe_attack_boundary_cases
+  - applicable_failure_timeout_budget_cases
+  - redacted_evidence
+  - registry_matchplan_decision_path
+  - enforcement_side_effect_assertion
+  - documentation_synchronized
+  - quality_gates_passed
+
+priority_capabilities:
+  - id: P0-D01
+    name: unicode_security
+    kind: detector
+    status: verified
+    threat_paths: [T03, T04, T07]
+    implementation: unicode_security
+    note: 控制、格式、双向、零宽和有限混合脚本混淆检测已实际运行。
+
+  - id: P0-D02
+    name: enhanced_secrets
+    kind: detector
+    status: planned
+    threat_paths: [T01, T02, T05, T09]
+    baseline_capability: secrets
+    note: 当前固定模式 secrets 只是基础能力，不等于 detect-secrets 对齐。
+
+  - id: P0-D03
+    name: contextual_multilingual_pii
+    kind: detector
+    status: planned
+    threat_paths: [T01, T02, T05, T09]
+    baseline_capability: pii
+    note: 当前邮箱、电话、SSN、卡号和中国身份证/手机号只是基础能力，不含 Presidio/GLiNER NER。
+
+  - id: P0-D04
+    name: model_prompt_injection
+    kind: detector
+    status: adapter_only
+    threat_paths: [T03, T04]
+    implementation: prompt_injection_model
+    note: classifier/pipeline 适配和 Enforcement 已测试；未运行真实 checkpoint。
+
+  - id: P0-D05
+    name: jailbreak
+    kind: detector
+    status: planned
+    threat_paths: [T03, T04]
+
+  - id: P0-D06
+    name: yara_injection_signatures
+    kind: detector
+    status: planned
+    threat_paths: [T03, T04]
+
+  - id: P1-P01
+    name: fuzzy_contains
+    kind: predicate
+    status: planned
+    threat_paths: [T03, T04]
+
+  - id: P1-P02
+    name: embedding_similarity
+    kind: predicate
+    status: planned
+    threat_paths: [T03, T04]
+
+  - id: P1-D01
+    name: python_ast_ipython
+    kind: detector
+    status: planned
+    threat_paths: [T04]
+
+  - id: P1-D02
+    name: semgrep
+    kind: detector
+    status: planned
+    threat_paths: [T04]
+
+  - id: P1-D03
+    name: hidden_content
+    kind: detector
+    status: planned
+    threat_paths: [T03, T04, T07]
+
+other_current_capabilities:
+  - name: secrets
+    kind: detector
+    status: baseline
+  - name: pii
+    kind: detector
+    status: baseline
+  - name: prompt_injection
+    kind: detector
+    status: baseline
+  - name: dangerous_command
+    kind: detector
+    status: baseline
+  - name: number_in_range
+    kind: predicate
+    status: verified
+  - name: length_in_range
+    kind: predicate
+    status: verified
+  - name: url_host_allowed
+    kind: predicate
+    status: verified

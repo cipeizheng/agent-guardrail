@@ -20,12 +20,17 @@ from agent_guardrail.models import (
     Event,
     EventKind,
     EventOrigin,
+    FlowAuthorization,
+    FlowSecurityContext,
     Message,
     MessageRole,
     ModelRequest,
     ModelResponse,
     PendingTrace,
     Phase,
+    SecurityDestination,
+    SecurityFactAuthorities,
+    SecurityFactAuthority,
     TextContent,
     ToolCall,
     ToolResult,
@@ -91,6 +96,23 @@ class MutatingAnalyzer:
         )
 
 
+class CapturingAnalyzer:
+    def __init__(self) -> None:
+        self.pending: list[PendingTrace] = []
+
+    async def analyze_pending(self, pending: PendingTrace) -> Decision:
+        self.pending.append(pending.model_copy(deep=True))
+        return Decision(
+            action=Action.ALLOW,
+            trace_id=pending.trace.id,
+            event_id=pending.primary_event_id,
+            pending_event_ids=pending.event_ids,
+            phase=pending.primary_event.phase,
+            policy_version=3,
+            policy_hash="security-context-test",
+        )
+
+
 @pytest.mark.asyncio
 async def test_session_rejects_invalid_kind_phase_mapping() -> None:
     session = EnforcementSession(analyzer=empty_analyzer(), trace=Trace(id="trace-1"))
@@ -100,6 +122,53 @@ async def test_session_rejects_invalid_kind_phase_mapping() -> None:
             kind=EventKind.MODEL_RESPONSE,
             phase=Phase.PRE_LLM,
             payload=request_payload(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_session_snapshots_trusted_context_and_allows_per_flow_override() -> None:
+    analyzer = CapturingAnalyzer()
+    base_context = FlowSecurityContext(
+        destination=SecurityDestination.LLM_PROVIDER,
+        authorization=FlowAuthorization.ALLOWED,
+        authorities=SecurityFactAuthorities(
+            destination=SecurityFactAuthority.ENFORCEMENT,
+            authorization=SecurityFactAuthority.AUTHORIZATION_SERVICE
+        ),
+    )
+    session = EnforcementSession(
+        analyzer=analyzer,
+        trace=Trace(id="trace-1"),
+        attributes={"security_authorization": "denied"},
+        security_context=base_context,
+    )
+
+    await session.evaluate(
+        kind=EventKind.MODEL_REQUEST,
+        phase=Phase.PRE_LLM,
+        payload=request_payload(),
+        security_context=session.security_context.with_enforcement_destination(
+            SecurityDestination.LLM_PROVIDER
+        ),
+    )
+
+    captured = analyzer.pending[0]
+    assert captured.security_context.authorization is FlowAuthorization.ALLOWED
+    assert captured.security_context.destination is SecurityDestination.LLM_PROVIDER
+    assert (
+        captured.security_context.authorities.destination
+        is SecurityFactAuthority.ENFORCEMENT
+    )
+    assert captured.attributes == {"security_authorization": "denied"}
+    assert session.security_context.destination is SecurityDestination.LLM_PROVIDER
+
+
+def test_session_rejects_untyped_security_context() -> None:
+    with pytest.raises(TypeError, match="FlowSecurityContext"):
+        EnforcementSession(
+            analyzer=empty_analyzer(),
+            trace=Trace(id="trace-1"),
+            security_context=cast(FlowSecurityContext, {"authorization": "allowed"}),
         )
 
 

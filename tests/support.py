@@ -19,6 +19,7 @@ from agent_guardrail.models import (
     GuardrailContext,
     ModelResponse,
     Phase,
+    SecurityDestination,
     ToolCall,
     ToolResult,
     Trace,
@@ -235,6 +236,38 @@ def tool_result_flow_analyzer(
             destination_tools=destination_tools,
             action=action,
         )
+    )
+
+
+def security_destination_analyzer(
+    *,
+    destination: SecurityDestination,
+    phase: Phase,
+    kind: EventKind,
+) -> MatchPolicyAnalyzer:
+    """Build a deterministic policy proving Adapter-owned destination injection."""
+
+    return analyzer_from_yaml(
+        f"""\
+version: 3
+scopes: [pending]
+parameters:
+  security_destination: {{type: string, required: false, default: unknown}}
+rules:
+  - id: destination-boundary-test
+    action: block
+    events:
+      subject: {{kind: {kind.value}, domain: pending, phases: [{phase.value}]}}
+    where:
+      compare:
+        left: {{parameter: security_destination}}
+        operator: equals
+        right: {{literal: {destination.value}}}
+    finding:
+      code: destination_seen
+      message: The trusted enforcement destination matched.
+      subjects: [subject]
+"""
     )
 
 

@@ -43,6 +43,221 @@ class EventOrigin(StrEnum):
     DERIVED = "derived"
 
 
+class ContentTrustClass(StrEnum):
+    """A content trust classification independent of EventOrigin."""
+
+    UNKNOWN = "unknown"
+    TRUSTED_CONTROL = "trusted_control"
+    USER_CONTENT = "user_content"
+    EXTERNAL_UNTRUSTED = "external_untrusted"
+    MODEL_GENERATED = "model_generated"
+    MIXED = "mixed"
+
+
+class DataSensitivity(StrEnum):
+    """A relative data classification without carrying the protected value."""
+
+    UNKNOWN = "unknown"
+    PUBLIC = "public"
+    PRIVATE = "private"
+    PII = "pii"
+    SECRET = "secret"
+    MIXED = "mixed"
+
+
+class OwnerScope(StrEnum):
+    """The protected value's owner relative to the current security principal."""
+
+    UNKNOWN = "unknown"
+    CURRENT_PRINCIPAL = "current_principal"
+    CURRENT_TENANT = "current_tenant"
+    OTHER_PRINCIPAL = "other_principal"
+    OTHER_TENANT = "other_tenant"
+    SHARED = "shared"
+
+
+class SecurityDestination(StrEnum):
+    """A bounded sink class established by trusted enforcement code."""
+
+    UNKNOWN = "unknown"
+    LLM_PROVIDER = "llm_provider"
+    AGENT_RUNTIME = "agent_runtime"
+    CLIENT = "client"
+    EXTERNAL_TOOL = "external_tool"
+    AUDIT = "audit"
+
+
+class FlowAuthorization(StrEnum):
+    """Whether the exact protected flow has independent authorization."""
+
+    UNKNOWN = "unknown"
+    ALLOWED = "allowed"
+    DENIED = "denied"
+
+
+class SecurityFactAuthority(StrEnum):
+    """The trusted subsystem that established one security fact."""
+
+    UNKNOWN = "unknown"
+    DEPLOYMENT = "deployment"
+    ENFORCEMENT = "enforcement"
+    AUTHENTICATION = "authentication"
+    AUTHORIZATION_SERVICE = "authorization_service"
+    DATA_SOURCE = "data_source"
+    DETECTOR = "detector"
+
+
+class SecurityFactAuthorities(CanonicalModel):
+    """Per-fact authority labels; values never come from ordinary content."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    trust_class: SecurityFactAuthority = SecurityFactAuthority.UNKNOWN
+    sensitivity: SecurityFactAuthority = SecurityFactAuthority.UNKNOWN
+    owner_scope: SecurityFactAuthority = SecurityFactAuthority.UNKNOWN
+    destination: SecurityFactAuthority = SecurityFactAuthority.UNKNOWN
+    authorization: SecurityFactAuthority = SecurityFactAuthority.UNKNOWN
+
+
+SECURITY_CONTEXT_PARAMETER_NAMES: frozenset[str] = frozenset(
+    {
+        "security_trust_class",
+        "security_sensitivity",
+        "security_owner_scope",
+        "security_destination",
+        "security_authorization",
+    }
+)
+
+
+class FlowSecurityContext(CanonicalModel):
+    """Immutable source-to-sink facts supplied only by a trusted host boundary."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    trust_class: ContentTrustClass = ContentTrustClass.UNKNOWN
+    sensitivity: DataSensitivity = DataSensitivity.UNKNOWN
+    owner_scope: OwnerScope = OwnerScope.UNKNOWN
+    destination: SecurityDestination = SecurityDestination.UNKNOWN
+    authorization: FlowAuthorization = FlowAuthorization.UNKNOWN
+    authorities: SecurityFactAuthorities = Field(default_factory=SecurityFactAuthorities)
+
+    @model_validator(mode="after")
+    def validate_authorities(self) -> Self:
+        facts = (
+            (
+                "trust_class",
+                self.trust_class,
+                ContentTrustClass.UNKNOWN,
+                self.authorities.trust_class,
+                frozenset(
+                    {
+                        SecurityFactAuthority.DEPLOYMENT,
+                        SecurityFactAuthority.ENFORCEMENT,
+                        SecurityFactAuthority.DATA_SOURCE,
+                    }
+                ),
+            ),
+            (
+                "sensitivity",
+                self.sensitivity,
+                DataSensitivity.UNKNOWN,
+                self.authorities.sensitivity,
+                frozenset(
+                    {
+                        SecurityFactAuthority.DEPLOYMENT,
+                        SecurityFactAuthority.DATA_SOURCE,
+                        SecurityFactAuthority.DETECTOR,
+                    }
+                ),
+            ),
+            (
+                "owner_scope",
+                self.owner_scope,
+                OwnerScope.UNKNOWN,
+                self.authorities.owner_scope,
+                frozenset(
+                    {
+                        SecurityFactAuthority.DEPLOYMENT,
+                        SecurityFactAuthority.AUTHENTICATION,
+                        SecurityFactAuthority.DATA_SOURCE,
+                    }
+                ),
+            ),
+            (
+                "destination",
+                self.destination,
+                SecurityDestination.UNKNOWN,
+                self.authorities.destination,
+                frozenset(
+                    {
+                        SecurityFactAuthority.DEPLOYMENT,
+                        SecurityFactAuthority.ENFORCEMENT,
+                    }
+                ),
+            ),
+            (
+                "authorization",
+                self.authorization,
+                FlowAuthorization.UNKNOWN,
+                self.authorities.authorization,
+                frozenset(
+                    {
+                        SecurityFactAuthority.DEPLOYMENT,
+                        SecurityFactAuthority.AUTHORIZATION_SERVICE,
+                    }
+                ),
+            ),
+        )
+        for name, value, unknown, authority, allowed_authorities in facts:
+            if value == unknown:
+                if authority is not SecurityFactAuthority.UNKNOWN:
+                    raise ValueError(f"unknown {name} cannot declare an authority")
+                continue
+            if authority is SecurityFactAuthority.UNKNOWN:
+                raise ValueError(f"{name} requires an explicit authority")
+            if authority not in allowed_authorities:
+                raise ValueError(f"{name} cannot use that authority")
+        if (
+            self.authorization is not FlowAuthorization.UNKNOWN
+            and self.destination is SecurityDestination.UNKNOWN
+        ):
+            raise ValueError("authorization requires a known destination")
+        return self
+
+    def with_enforcement_destination(
+        self,
+        destination: SecurityDestination,
+    ) -> Self:
+        """Return a validated per-boundary view with an observed sink class."""
+
+        if not isinstance(destination, SecurityDestination):
+            raise TypeError("destination must be a SecurityDestination")
+        if destination is SecurityDestination.UNKNOWN:
+            raise ValueError("an enforcement destination must be known")
+        values = self.model_dump(mode="python")
+        if self.destination is not destination:
+            values["authorization"] = FlowAuthorization.UNKNOWN
+        values["destination"] = destination
+        authorities = dict(values["authorities"])
+        if self.destination is not destination:
+            authorities["authorization"] = SecurityFactAuthority.UNKNOWN
+        authorities["destination"] = SecurityFactAuthority.ENFORCEMENT
+        values["authorities"] = authorities
+        return type(self).model_validate(values)
+
+    def policy_parameters(self) -> dict[str, str]:
+        """Project only closed scalar values into reserved MatchPlan parameters."""
+
+        return {
+            "security_trust_class": self.trust_class.value,
+            "security_sensitivity": self.sensitivity.value,
+            "security_owner_scope": self.owner_scope.value,
+            "security_destination": self.destination.value,
+            "security_authorization": self.authorization.value,
+        }
+
+
 class Action(StrEnum):
     """An enforcement action ordered from least to most restrictive."""
 
@@ -435,6 +650,7 @@ class PendingTrace(CanonicalModel):
     )
     primary_event_id: str = Field(min_length=1)
     attributes: dict[str, JsonValue] = Field(default_factory=dict)
+    security_context: FlowSecurityContext = Field(default_factory=FlowSecurityContext)
 
     @model_validator(mode="after")
     def validate_pending_events(self) -> Self:

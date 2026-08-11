@@ -8,6 +8,7 @@ from agent_guardrail.core.matcher import SnapshotMatcher
 from agent_guardrail.core.policy import CompiledPolicy
 from agent_guardrail.models import (
     ACTION_PRIORITY,
+    SECURITY_CONTEXT_PARAMETER_NAMES,
     Action,
     AnalysisError,
     AnalysisErrorCode,
@@ -50,7 +51,18 @@ class MatchPolicyAnalyzer:
     async def analyze_pending(self, pending: PendingTrace) -> Decision:
         """Analyze the whole pending snapshot before any Event is committed."""
 
-        report = await self._matcher.analyze_pending(pending)
+        declared_parameters = {
+            declaration.name for declaration in self.policy.match_plan.plan.parameters
+        }
+        security_parameters = {
+            name: value
+            for name, value in pending.security_context.policy_parameters().items()
+            if name in declared_parameters and name in SECURITY_CONTEXT_PARAMETER_NAMES
+        }
+        report = await self._matcher.analyze_pending(
+            pending,
+            parameters=security_parameters or None,
+        )
         violations = [
             self._finding_violation(finding, pending)
             for finding in report.findings

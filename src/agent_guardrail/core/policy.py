@@ -18,8 +18,12 @@ from agent_guardrail.core.authoring import (
     AuthorRule,
 )
 from agent_guardrail.core.capabilities import CompiledMatchPlan
-from agent_guardrail.core.match_plan import MatchLimits
-from agent_guardrail.models import Action, AnalysisScope
+from agent_guardrail.core.match_plan import MatchLimits, ParameterType
+from agent_guardrail.models import (
+    SECURITY_CONTEXT_PARAMETER_NAMES,
+    Action,
+    AnalysisScope,
+)
 
 
 class EnforcementConfig(AuthorModel):
@@ -69,6 +73,18 @@ class PolicyDocument(AuthorModel):
             for parameter in self.parameters.values()
         ):
             raise ValueError("production policy parameters must define defaults")
+        for name, parameter in self.parameters.items():
+            if name not in SECURITY_CONTEXT_PARAMETER_NAMES:
+                continue
+            if (
+                parameter.type is not ParameterType.STRING
+                or parameter.required
+                or parameter.default != "unknown"
+            ):
+                raise ValueError(
+                    "reserved security context parameters must be optional strings "
+                    "with the default 'unknown'"
+                )
         return self
 
     def analysis_policy(self) -> AuthorPolicy:

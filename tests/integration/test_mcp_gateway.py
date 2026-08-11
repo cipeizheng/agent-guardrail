@@ -7,9 +7,9 @@ import pytest
 
 from agent_guardrail.adapters.mcp import MCP_PROTOCOL_VERSION
 from agent_guardrail.gateway import GatewaySettings
-from agent_guardrail.models import Phase
+from agent_guardrail.models import Phase, SecurityDestination
 from agent_guardrail.runtime import GuardrailRuntime
-from tests.integration.test_gateway import POLICY_FILE, app_client
+from tests.integration.test_gateway import POLICY_FILE, RecordingAnalyzer, app_client
 from tests.integration.test_guarded_llm import analyzer_for_phase
 from tests.support import (
     FAKE_CN_MOBILE,
@@ -173,6 +173,29 @@ async def test_mcp_param_headers_are_forwarded_to_fixed_upstream() -> None:
     assert response.status_code == 200
     assert response.json()["result"]["content"][0]["text"] == "sent"
     assert len(requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_mcp_gateway_injects_tool_and_client_destinations() -> None:
+    analyzer = RecordingAnalyzer()
+    runtime = GuardrailRuntime(analyzer)
+    async with app_client(
+        lambda request: httpx.Response(200, json=tool_response("sent")),
+        settings=mcp_settings(),
+        runtime=runtime,
+    ) as (client, requests):
+        response = await client.post(
+            "/v1/mcp",
+            headers=request_headers(),
+            json=request_payload(),
+        )
+
+    assert response.status_code == 200
+    assert len(requests) == 1
+    assert analyzer.security_destinations == [
+        (Phase.PRE_TOOL, SecurityDestination.EXTERNAL_TOOL),
+        (Phase.POST_TOOL, SecurityDestination.CLIENT),
+    ]
 
 
 @pytest.mark.asyncio
