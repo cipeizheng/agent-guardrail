@@ -11,7 +11,7 @@ FastAPI Route
   → Provider Adapter
   → InputNormalizer / Canonical Tool boundary
   → request-scoped EnforcementSession
-  → embedded GuardrailRuntime
+  → embedded GuardrailRuntime / remote Core DecisionClient
   → fixed UpstreamClient
 ```
 
@@ -98,8 +98,9 @@ payload 或堆栈。
 
 ## 7. Policy 与上游
 
-当前 Policy 只来自启动配置 `AGENT_GUARDRAIL_POLICY_FILE`。请求不能上传 YAML/Python capability 或选择
-Policy。
+embedded 模式的 Policy 来自 Gateway 启动配置 `AGENT_GUARDRAIL_POLICY_FILE`；remote 模式的 Policy
+只读挂载到 Core，Gateway 不持有 Policy 或 Detector 资产。请求不能上传 YAML/Python capability 或选择
+Policy。远程协议与服务边界见[双容器设计](../design/remote-core-deployment.md)。
 
 OpenAI 上游认证支持：
 
@@ -132,9 +133,10 @@ Guardrail block 返回 HTTP 200 中 JSON-RPC Error `-32040`；不支持协议版
 
 ## 10. 资源与生命周期
 
-Gateway 限制 request/response bytes、上游 timeout、Trace Event、Violation、MatchPlan/capability 预算和
-HTTP 连接池。应用启动时创建一个 Runtime，并由 lifespan 关闭；每个受保护调用创建独立 Session，health、
-Policy query 和 MCP 非 Tool 方法不创建 Session。
+Gateway 限制 request/response bytes、Core 与上游 timeout、Trace Event、Violation、MatchPlan/capability
+预算和 HTTP 连接池。应用启动时创建 embedded 或 remote Runtime；remote 启动会认证 Core 并固定 Policy
+identity，readiness 会检查 Core 可达且 identity 未变化。每个受保护调用创建独立 Session，health、Policy
+query 和 MCP 非 Tool 方法不创建 Session。
 
 启动和 Settings 见[运行指南](../guides/operations.md)，接入示例见
 [Agent 与 Enforcement 接入](../guides/integration.md)。

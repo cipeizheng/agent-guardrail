@@ -9,6 +9,7 @@
 - typed/multi Event binding、derive、量词、顺序/精确 Relation 和 whole-pending Matcher；
 - PendingTrace batch 原子提交、EventOrigin、显式 provenance 和脱敏 Audit；
 - OpenAI 非流式、MCP `2026-07-28` 无状态 Gateway 与 Inline LLM/Tool Enforcement；
+- 固定 Policy 的无状态远程 Core、失败关闭 DecisionClient 与 Core/Gateway 双容器 Compose；
 - `pre_llm/pre_tool` 副作用前置，非流式 `post_llm` 完整检查后释放；
 - FlowSecurityContext 的 trust/sensitivity/owner/destination/authorization 专用可信通道；
 - I01–I14 生产行为测试、T01–T10 威胁基线和分项预算；
@@ -67,7 +68,7 @@ Fuzzy/embedding 需要比较目标，因此优先复用现有 Predicate 参数�
 ## 阶段 E：接入与部署
 
 - Framework 增量 InputNormalizer、OpenAI Agents SDK/LangGraph Adapter；
-- Dockerfile、非 root 单容器、healthcheck、只读 Policy mount、SBOM；
+- 为当前非 root 双容器构建补 SBOM、镜像签名、发布流水线和集群编排；
 - Policy 热加载、原子版本切换和回滚；
 - 跨请求 Session Store、tenant/run token、TTL/CAS 和 Monitor identity 持久化；
 - 多模态 Content、受控下载、OCR/媒体 Detector；
@@ -76,7 +77,6 @@ Fuzzy/embedding 需要比较目标，因此优先复用现有 Predicate 参数�
 ## 明确后置
 
 - 交互式 Tool `require_approval`、一次性授权凭证和完整 Sandbox；
-- 远程 Core/Decision Service；
 - Moderation、Copyright 等 content/compliance profile；
 - MCP subscriptions/listen；
 - 完整 Web UI 和分布式控制平面。

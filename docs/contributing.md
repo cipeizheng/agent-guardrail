@@ -28,9 +28,11 @@ flowchart TD
     Matcher --> Report[models/analysis.py]
     Analyzer --> Decision[models/core.py Decision]
     Runtime[runtime/] --> Analyzer
+    Remote[core_service/ remote HTTP] --> Runtime
     Gateway[gateway/] --> Session[enforcement/session.py]
     Inline[inline_llm.py + inline_tools.py] --> Session
     Session --> Runtime
+    Session --> Remote
     Session --> Security[FlowSecurityContext]
 ```
 
@@ -49,6 +51,7 @@ flowchart TD
 | v3 Policy Loader | `config/loader.py` |
 | Session 与 normalization | `enforcement/session.py`、`input_normalizer.py` |
 | OpenAI/MCP | `gateway/app.py`、`gateway/mcp.py`、`adapters/` |
+| 远程 Core/双容器 | `core_service/`、`runtime/remote.py`、`compose.yaml`、`docker/` |
 
 调试意外 allow/block：`Matcher Report → Decision Analyzer → Session commit`。关系未命中先看
 `Event.relations` 和 provenance 建立点，不根据 sequence 猜来源。副作用顺序从 Gateway/Wrapper 的 pre

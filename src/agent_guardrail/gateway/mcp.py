@@ -34,7 +34,7 @@ from agent_guardrail.models import (
     SecurityDestination,
     Trace,
 )
-from agent_guardrail.runtime import GuardrailRuntime
+from agent_guardrail.runtime import PolicyAnalyzer
 
 
 class MCPGateway:
@@ -44,7 +44,7 @@ class MCPGateway:
         self,
         *,
         settings: GatewaySettings,
-        runtime: GuardrailRuntime,
+        runtime: PolicyAnalyzer,
         upstream: MCPUpstream | None,
         audit: AuditSink,
         authenticator: GatewayAuthenticator,

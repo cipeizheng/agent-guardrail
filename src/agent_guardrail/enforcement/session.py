@@ -96,6 +96,7 @@ class EnforcementSession:
         self.id_factory = id_factory or (lambda: uuid4().hex)
         self.audit_failure_types: list[str] = []
         self._evaluation_lock = asyncio.Lock()
+        self._policy_identity: tuple[int, str] | None = None
 
     async def evaluate(
         self,
@@ -271,6 +272,18 @@ class EnforcementSession:
                 )
 
             self._validate_decision(decision, pending)
+            decision_policy_identity = (
+                decision.policy_version,
+                decision.policy_hash,
+            )
+            if self._policy_identity is None:
+                self._policy_identity = decision_policy_identity
+            elif self._policy_identity != decision_policy_identity:
+                raise GuardrailUnavailable(
+                    trace_id=self.trace.id,
+                    phase=phase,
+                    error_type="policy_identity_changed",
+                )
             if decision.blocked:
                 self.trace.append(self._blocked_event(decision, pending))
             else:

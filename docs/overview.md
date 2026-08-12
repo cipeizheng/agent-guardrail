@@ -54,6 +54,10 @@ block：丢弃原始 pending Event，只提交脱敏 Decision Event
 Runtime 管理 Analyzer 生命周期；Adapter 只处理 Provider/Framework 协议；Enforcement 控制何时允许副作用；
 Gateway 组合 HTTP、认证、固定上游和请求级 Session。
 
+Gateway 的 Decision backend 可以是进程内 `GuardrailRuntime`，也可以是独立 Core 容器中的同一 Runtime。
+远程模式传输封闭、版本化的 `PendingTrace → Decision`；Core 不持有 Provider Key、不调用 LLM/Tool，Gateway
+不挂载 Policy 或 Detector 资产并继续负责 Trace 原子提交、Audit 和副作用顺序。
+
 ## 3. Event、Trace 与来源
 
 长期策略 Event 是：

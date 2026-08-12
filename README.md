@@ -12,8 +12,9 @@ source/sink、owner、destination 和 authorization。当前架构、不变量�
 
 ## 当前状态
 
-Core v0.1.0 已提供 Inline LLM/Tool、OpenAI-compatible 非流式 Gateway 和 MCP `2026-07-28` 无状态
-Gateway。所有接入复用同一 Runtime/EnforcementSession 语义：`pre_llm/pre_tool` 通过前不发生受保护
+v0.1.0 已提供 Inline LLM/Tool、OpenAI-compatible 非流式 Gateway、MCP `2026-07-28` 无状态 Gateway，
+以及固定 Policy 的远程 Core。Gateway 可以嵌入 Runtime，也可以通过封闭的 `PendingTrace → Decision` 协议
+调用 Core；所有接入复用同一 Runtime/EnforcementSession 语义：`pre_llm/pre_tool` 通过前不发生受保护
 副作用，非流式 `post_llm/post_tool` 通过前不释放原始结果。
 
 默认 capability 的准确名称、覆盖范围和验证状态分别见[Capability 参考](docs/reference/capabilities.md)
@@ -36,7 +37,7 @@ Gateway。所有接入复用同一 Runtime/EnforcementSession 语义：`pre_llm/
 - 使用同一 Trace 内经过校验的来源边表达事件关系，不把时间先后当成数据流。
 - 原子分析本次新增的 pending Event，避免只匹配历史 Event 就重复阻断当前操作。
 - 同时提供内联 SDK、OpenAI HTTP Gateway 与 MCP HTTP Gateway。
-- 默认可完全本地运行，并为后续单容器 Docker 部署保持单进程拓扑。
+- 默认可完全本地运行，同时提供 Core + Gateway 两个职责分离的自托管容器。
 - Decision 结构可解释、可测试；包含 Violation 的 Decision 可通过可选 AuditSink 脱敏审计。
 
 ## 非目标
@@ -54,11 +55,28 @@ Gateway。所有接入复用同一 Runtime/EnforcementSession 语义：`pre_llm/
 - [安全模型](docs/security-model.md)
 - [Capability 状态矩阵](docs/capability-status.yaml)
 - [开发路线图](docs/roadmap.md)
+- [双容器运行指南](docs/guides/operations.md#2-双容器启动)
+
+## Docker 自托管
+
+运行拓扑固定为两个容器：Core 持有 Policy、Detector 与模型，Gateway 持有 Provider/MCP 凭据、Trace、
+Audit 与副作用顺序。CPU/CUDA 是 Core 配置，不是第三个容器。
+
+```bash
+cp .env.example .env
+# 填写 .env 中的 Key 与固定上游
+docker compose build
+docker compose up -d
+curl --fail http://127.0.0.1:8080/health/ready
+```
+
+Core 镜像在构建期预取并校验完整 `full_local_v1` 模型资产，首次构建会较慢；运行时不下载模型。Core 端口
+不发布到宿主，Policy 只挂载到 Core，Gateway 镜像不包含模型或扫描工具。详细配置、安全边界和 CUDA
+override 见[运行指南](docs/guides/operations.md)。
 
 ## 本地开发
 
 ```bash
-cd /home/chenzheng/agent-guardrail
 uv sync --extra gateway --dev
 uv run pytest
 uv run ruff check .
@@ -75,8 +93,8 @@ uv run agent-guardrail-prefetch-detectors
 ```
 
 预取命令只下载锁定到提交 `90c9989b1a342275dd0d1a95aad283c04e075671` 的提示注入模型文件，并逐项
-校验固定字节数和 SHA-256。Gateway 运行时不联网下载模型。Presidio 的英文 spaCy 模型由 `detectors`
-extra 固定安装，Semgrep 使用隔离的 `uv tool` 环境以避免与 Gateway 的 MCP v2 依赖冲突。
+校验固定字节数和 SHA-256。Runtime 不联网下载模型。Presidio 的英文 spaCy 模型由 `detectors` extra 固定
+安装，Semgrep 使用隔离的 `uv tool` 环境以避免与 Gateway 的 MCP v2 依赖冲突。
 
 ### VS Code / Pylance
 
@@ -119,7 +137,7 @@ async with runtime:
     result = await agent.run("Send the report by email")
 ```
 
-HTTP Gateway：
+HTTP Gateway 客户端：
 
 ```python
 client = OpenAI(
@@ -128,7 +146,7 @@ client = OpenAI(
 )
 ```
 
-先启动 Gateway：
+单进程 embedded 模式启动 Gateway：
 
 ```bash
 export AGENT_GUARDRAIL_POLICY_FILE="$PWD/examples/policies/secret-email.yaml"
@@ -181,3 +199,7 @@ async with Client("http://127.0.0.1:8080/v1/mcp", cache=None) as client:
 [当前架构合同](docs/current-architecture-contract.md)。低耦合契约由
 `tests/blackbox/external_mcp_agent.py` 和 `tests/integration/test_mcp_gateway_sdk.py` 使用官方 SDK v2
 经真实 HTTP 验证。
+
+## License
+
+本项目使用 [MIT License](LICENSE)。

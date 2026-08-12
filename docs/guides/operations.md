@@ -1,10 +1,10 @@
-# Gateway 运行指南
+# Gateway 与 Core 运行指南
 
-> 适合谁：启动和运维当前单进程 Gateway 的人。
-> 解决什么：安装、环境变量、Secret、Audit 和健康检查。
-> 不包含什么：未交付的 Docker/Compose 或多服务假想配置。
+> 适合谁：启动和运维 embedded Gateway 或 Core/Gateway 双容器的人。
+> 解决什么：安装、容器、环境变量、Secret、Audit 和健康检查。
+> 不包含什么：集群编排、Policy 热加载或跨请求 Session Store。
 
-## 1. 启动
+## 1. Embedded 启动
 
 ```bash
 uv sync --frozen --extra gateway --no-dev
@@ -12,7 +12,7 @@ uv run python -m agent_guardrail.gateway
 ```
 
 进程内包含 FastAPI Gateway、一个 GuardrailRuntime、固定 OpenAI/MCP 上游客户端和可选 JSONL AuditSink。
-当前不依赖数据库、远程 Core 或跨请求 Session Store。
+该 embedded 模式不依赖数据库、远程 Core 或跨请求 Session Store。
 
 ### 完整本地 Detector profile
 
@@ -33,7 +33,7 @@ uv run python -m agent_guardrail.gateway
 工具环境避免依赖冲突。
 
 资产预取固定模型 repository、commit、文件集合、字节数和 SHA-256；写入只在单个文件完整校验后原子完成。
-Gateway 构造 profile 时再次逐项校验，且强制 Transformers 离线读取该目录。运行时不下载模型，也不从
+Runtime 构造 profile 时再次逐项校验，且强制 Transformers 离线读取该目录。运行时不下载模型，也不从
 Policy 接受模型、规则、路径、命令或 device。缺失或不匹配会阻止启动。
 
 真实 profile 评估命令：
@@ -46,15 +46,54 @@ uv run --extra detectors pytest -vv tests/integration/test_full_local_detector_p
 
 该命令复用 `AGENT_GUARDRAIL_DETECTOR_ASSETS_DIR`，并要求 `semgrep` 在 `PATH` 中且版本严格匹配。
 
-## 2. 环境变量
+## 2. 双容器启动
+
+仓库只定义两个运行服务：`core` 持有 Policy、完整 Detector 资产和分析 Runtime；`gateway` 持有 Provider/
+MCP 配置、请求级 Trace、Audit 和副作用顺序。CPU/CUDA 是 Core 的运行配置，不会创建第三个服务。
+
+```bash
+cp .env.example .env
+# 编辑 .env 中的 Core 服务 Key、Gateway 客户端 Key 和 Provider 配置
+docker compose build
+docker compose up -d
+curl --fail http://127.0.0.1:8080/health/ready
+```
+
+Core 构建会安装 `full_local_v1` 的 Presidio/spaCy、固定 DeBERTa checkpoint、Semgrep 和 YARA，并在构建期
+下载后校验约 750 MB 的模型资产，因此首次构建较慢且镜像较大。运行时为离线模式。Compose 只发布 Gateway
+的 8080；Core 8090 只连接内部网络。Policy 只读挂载到 Core，Audit volume 只挂载到 Gateway，两个容器均
+non-root、只读 root filesystem、drop capabilities 并使用 `/tmp` tmpfs。
+
+Compose 私网内使用 HTTP。若 Core 与 Gateway 跨主机或跨非受控网络部署，必须在其间增加 TLS/mTLS 或等价
+的可信传输层；Bearer Key 不能替代链路机密性。
+
+默认用 CPU。CUDA 部署把 `AGENT_GUARDRAIL_CORE_PROMPT_MODEL_DEVICE=cuda`，并通过部署平台/NVIDIA
+Container Toolkit 只给现有 `core` 服务授予 GPU（例如 Compose override 中设置 `gpus: all`）；Gateway
+不需要 GPU。所用 PyTorch 构建和宿主驱动仍须支持目标 CUDA 环境，否则 Core 会失败启动。
+
+停止服务：
+
+```bash
+docker compose down
+```
+
+命名 Audit volume 会保留；上述命令不删除它。只有明确希望删除 Audit 时才另行执行带 `--volumes` 的清理。
+
+## 3. 环境变量
 
 字段、默认值和校验以 `GatewaySettings` 为事实来源：
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
+| `AGENT_GUARDRAIL_DECISION_BACKEND` | `embedded` | `embedded/remote` |
 | `AGENT_GUARDRAIL_HOST` | `127.0.0.1` | 监听地址 |
 | `AGENT_GUARDRAIL_PORT` | `8080` | 监听端口 |
-| `AGENT_GUARDRAIL_POLICY_FILE` | 必填 | v3 YAML Policy |
+| `AGENT_GUARDRAIL_POLICY_FILE` | embedded 必填 | v3 YAML Policy；remote 模式禁止 |
+| `AGENT_GUARDRAIL_CORE_URL` | remote 必填 | 固定 Core HTTP base URL |
+| `AGENT_GUARDRAIL_CORE_API_KEY` | remote 必填 | Gateway→Core 专用 Bearer Key |
+| `AGENT_GUARDRAIL_CORE_TIMEOUT_SECONDS` | `10` | 单次 Core 请求 timeout |
+| `AGENT_GUARDRAIL_CORE_MAX_REQUEST_BYTES` | `8388608` | 发往 Core 的 body 上限 |
+| `AGENT_GUARDRAIL_CORE_MAX_RESPONSE_BYTES` | `1048576` | Core 响应 body 上限 |
 | `AGENT_GUARDRAIL_UPSTREAM_BASE_URL` | LLM 模式必填 | 固定 OpenAI-compatible 上游 |
 | `AGENT_GUARDRAIL_UPSTREAM_ALLOWED_HOSTS` | 空 | JSON host allowlist |
 | `AGENT_GUARDRAIL_UPSTREAM_AUTH_MODE` | `server_managed` | `server_managed/pass_through` |
@@ -81,28 +120,36 @@ uv run --extra detectors pytest -vv tests/integration/test_full_local_detector_p
 至少配置一个 LLM 或 MCP 上游。固定 URL 不能含凭据、query 或 fragment；配置非空 host allowlist 时
 hostname 必须匹配。
 
-## 3. Secret
+Core 使用独立前缀：`AGENT_GUARDRAIL_CORE_POLICY_FILE` 与
+`AGENT_GUARDRAIL_CORE_API_KEY` 必填；`AGENT_GUARDRAIL_CORE_DETECTOR_PROFILE` 默认 `local`，双容器镜像
+默认覆盖为 `full_local_v1`；另有 `..._DETECTOR_ASSETS_DIR`、`..._PROMPT_MODEL_DEVICE`、
+`..._MAX_REQUEST_BYTES`、`..._HOST`、`..._PORT` 和 `..._LOG_LEVEL`。事实来源是 `CoreSettings`。
+
+## 4. Secret
 
 - 示例只写变量名，不含真实值。
 - 开发可使用已 gitignore 的 `.env`；生产使用部署平台 Secret。
 - Key 不进入 Trace、Finding、Violation、Audit、异常或访问日志。
 - `server_managed` 使用服务端 Key；`pass_through` 才转发客户端 Authorization。
+- Gateway→Core Key 必须与 Provider、MCP 和 Gateway Client Key 分离；Core 不配置任何上游 Key。
 
-## 4. Audit
+## 5. Audit
 
 设置 `AGENT_GUARDRAIL_AUDIT_PATH` 后，append-only JSONL 只保存含 Violation 的 Decision 摘要；普通 allow
 不逐条持久化。它不接收 Event payload、完整 prompt、Tool arguments 或 Detector 原文。
 
 当前没有内容取证模式。保存原始敏感内容必须先改变架构合同并定义访问权限、脱敏和保留期。
 
-## 5. Health 与可观测性
+## 6. Health 与可观测性
 
 - `GET /health/live`：进程和事件循环存活。
-- `GET /health/ready`：只报告 Runtime ready。
+- Gateway `GET /health/ready`：embedded 报告本地 Runtime；remote 同时验证 Core readiness 与启动时固定的
+  Policy identity。
+- Core `GET /health/ready`：报告固定 Policy、Registry、模型 warm-up 和 Runtime ready。
 
 Policy 编译、capability linking、Settings 和可选 Detector profile 在应用构造阶段失败会阻止启动。
-`full_local_v1` 构造会验证固定资产与 Semgrep 版本，并对模型做一次本地 warm-up；Readiness 不探测上游
-网络，也不验证 Audit 路径可写性。
+`full_local_v1` 构造会验证固定资产与 Semgrep 版本，并对模型做一次本地 warm-up。Readiness 不探测
+Provider/MCP 上游网络，也不验证 Audit 路径可写性。
 
-当前只有 Uvicorn 日志级别和可选 JSONL Audit，没有结构化应用日志、Metrics 或 OpenTelemetry。Docker、
-只读 Policy mount、非 root 镜像、SBOM、热加载和多服务部署只在[roadmap](../roadmap.md)安排。
+当前只有 Uvicorn 日志级别和可选 JSONL Audit，没有结构化应用日志、Metrics、OpenTelemetry、SBOM、镜像
+签名、热加载或集群编排；这些仍在[roadmap](../roadmap.md)安排。

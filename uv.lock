@@ -12,6 +12,11 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+core-server = [
+    { name = "fastapi" },
+    { name = "pydantic-settings" },
+    { name = "uvicorn", extra = ["standard"] },
+]
 detectors = [
     { name = "en-core-web-sm" },
     { name = "presidio-analyzer" },
@@ -48,21 +53,24 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "en-core-web-sm", marker = "extra == 'detectors'", url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" },
+    { name = "fastapi", marker = "extra == 'core-server'", specifier = ">=0.115,<1" },
     { name = "fastapi", marker = "extra == 'gateway'", specifier = ">=0.115,<1" },
     { name = "httpx", marker = "extra == 'gateway'", specifier = ">=0.28,<1" },
     { name = "jsonschema", marker = "extra == 'gateway'", specifier = ">=4.23,<5" },
     { name = "presidio-analyzer", marker = "extra == 'detectors'", specifier = "==2.2.363" },
     { name = "pydantic", specifier = ">=2.10,<3" },
+    { name = "pydantic-settings", marker = "extra == 'core-server'", specifier = ">=2.7,<3" },
     { name = "pydantic-settings", marker = "extra == 'gateway'", specifier = ">=2.7,<3" },
     { name = "pyyaml", specifier = ">=6.0,<7" },
     { name = "sentencepiece", marker = "extra == 'detectors'", specifier = "==0.2.2" },
     { name = "spacy", marker = "extra == 'detectors'", specifier = "==3.8.15" },
     { name = "torch", marker = "extra == 'detectors'", specifier = "==2.13.0" },
     { name = "transformers", marker = "extra == 'detectors'", specifier = "==4.57.6" },
+    { name = "uvicorn", extras = ["standard"], marker = "extra == 'core-server'", specifier = ">=0.34,<1" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'gateway'", specifier = ">=0.34,<1" },
     { name = "yara-python", marker = "extra == 'detectors'", specifier = "==4.5.4" },
 ]
-provides-extras = ["gateway", "detectors"]
+provides-extras = ["gateway", "core-server", "detectors"]
 
 [package.metadata.requires-dev]
 dev = [

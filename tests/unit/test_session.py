@@ -113,6 +113,23 @@ class CapturingAnalyzer:
         )
 
 
+class ChangingPolicyAnalyzer:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def analyze_pending(self, pending: PendingTrace) -> Decision:
+        self.calls += 1
+        return Decision(
+            action=Action.ALLOW,
+            trace_id=pending.trace.id,
+            event_id=pending.primary_event_id,
+            pending_event_ids=pending.event_ids,
+            phase=pending.primary_event.phase,
+            policy_version=self.calls,
+            policy_hash=f"policy-version-{self.calls}",
+        )
+
+
 @pytest.mark.asyncio
 async def test_session_rejects_invalid_kind_phase_mapping() -> None:
     session = EnforcementSession(analyzer=empty_analyzer(), trace=Trace(id="trace-1"))
@@ -170,6 +187,30 @@ def test_session_rejects_untyped_security_context() -> None:
             trace=Trace(id="trace-1"),
             security_context=cast(FlowSecurityContext, {"authorization": "allowed"}),
         )
+
+
+@pytest.mark.asyncio
+async def test_session_rejects_policy_identity_change_without_committing_batch() -> None:
+    trace = Trace(id="trace-1")
+    session = EnforcementSession(analyzer=ChangingPolicyAnalyzer(), trace=trace)
+    await session.evaluate(
+        kind=EventKind.MODEL_REQUEST,
+        phase=Phase.PRE_LLM,
+        payload=request_payload(),
+    )
+
+    with pytest.raises(GuardrailUnavailable) as unavailable:
+        await session.evaluate(
+            kind=EventKind.MODEL_RESPONSE,
+            phase=Phase.POST_LLM,
+            payload=cast(
+                dict[str, JsonValue],
+                ModelResponse(content="private response").model_dump(mode="json"),
+            ),
+        )
+
+    assert unavailable.value.error_type == "policy_identity_changed"
+    assert len(trace.events) == 1
 
 
 @pytest.mark.asyncio

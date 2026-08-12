@@ -75,6 +75,43 @@ def test_gateway_rejects_cuda_setting_without_model_profile() -> None:
         )
 
 
+def test_gateway_remote_backend_requires_core_and_forbids_local_assets() -> None:
+    with pytest.raises(ValidationError, match="core_url and core_api_key"):
+        GatewaySettings(
+            decision_backend="remote",
+            upstream_base_url="https://provider.example/v1",
+            upstream_api_key=SecretStr("upstream-key"),
+        )
+
+    settings = GatewaySettings(
+        decision_backend="remote",
+        core_url="http://core.internal:8090/",
+        core_api_key=SecretStr("core-key"),
+        upstream_base_url="https://provider.example/v1",
+        upstream_api_key=SecretStr("upstream-key"),
+    )
+    assert settings.core_url == "http://core.internal:8090"
+    assert settings.policy_file is None
+
+    with pytest.raises(ValidationError, match="must not mount a policy_file"):
+        GatewaySettings(
+            decision_backend="remote",
+            core_url="http://core.internal:8090",
+            core_api_key=SecretStr("core-key"),
+            policy_file=Path("policy.yaml"),
+            upstream_base_url="https://provider.example/v1",
+            upstream_api_key=SecretStr("upstream-key"),
+        )
+
+    with pytest.raises(ValidationError, match="dedicated service credential"):
+        GatewaySettings(
+            decision_backend="remote",
+            core_url="http://core.internal:8090",
+            core_api_key=SecretStr("shared-key"),
+            upstream_base_url="https://provider.example/v1",
+            upstream_api_key=SecretStr("shared-key"),
+        )
+
 @pytest.mark.asyncio
 async def test_jsonl_audit_contains_only_sanitized_decision_summary(tmp_path: Path) -> None:
     decision = await secret_analyzer().analyze_pending(

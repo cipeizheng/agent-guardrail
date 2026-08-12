@@ -23,6 +23,8 @@ strict version: 3 YAML → AuthorPolicy → immutable MatchPlan
 
 - OpenAI-compatible 非流式 `POST /v1/openai/chat/completions`。
 - MCP `2026-07-28` 无状态 `POST /v1/mcp`：`server/discover`、`ping`、`tools/list`、`tools/call`。
+- Gateway 可选择进程内 Runtime，或通过版本化内部 HTTP 协议调用固定 Policy 的无状态 Core；两种模式复用
+  同一 `PolicyAnalyzer.analyze_pending` 和唯一 v3 执行链。
 - Inline LLM/Tool Wrapper 必须共享一个请求/任务级 `EnforcementSession` 与 `Trace`。
 - 一等 MatchPlan Event：`MESSAGE`、`TOOL_CALL`、`TOOL_RESULT`；payload 封闭且有 Schema 硬上限。
 - 来源只存在于类型化 `Event.relations`；时间顺序不得冒充 `derived_from`。
@@ -52,7 +54,10 @@ strict version: 3 YAML → AuthorPolicy → immutable MatchPlan
 9. 日志、Error、Finding、Violation metadata 和 Audit 不得包含完整 Secret、原始 PII 或完整 prompt。
 10. Enforcement 来源参数只能引用同 Trace 中更早、已允许/记录的非 Decision Event。
 11. 生产模块不得导入 `agent_guardrail.testing`。
-12. 协议路由以 `gateway/app.py`、环境变量以 `GatewaySettings` 为事实来源。
+12. 外部协议路由以 `gateway/app.py`、Gateway 环境变量以 `GatewaySettings` 为事实来源；远程分析路由以
+    `core_service/app.py`、Core 环境变量以 `CoreSettings` 为事实来源。
+13. 远程模式中 Core 只分析完整 PendingTrace；Gateway 持有 Trace、Audit、Provider Key 和全部副作用。
+    Core 不可达、认证/协议/超限错误或 Policy identity 变化必须失败关闭。
 
 ## 5. 当前 capability 事实
 
@@ -69,10 +74,10 @@ strict version: 3 YAML → AuthorPolicy → immutable MatchPlan
 
 ## 6. 明确未交付
 
-Framework 可证明增量 identity、CEL/Invariant DSL、Docker/Compose、Policy 热加载、跨请求 Session Store、
-实时 LLM streaming、MCP subscriptions、Agents SDK/LangGraph Adapter、远程 Core、Sandbox、Event 级
+Framework 可证明增量 identity、CEL/Invariant DSL、Policy 热加载、跨请求 Session Store、
+实时 LLM streaming、MCP subscriptions、Agents SDK/LangGraph Adapter、Sandbox、Event 级
 Security Fact、principal/tenant/destination Registry、授权凭证、owner-aware 端到端 Policy、Redaction
-TransformationPlan，以及状态矩阵中标为 `planned` 的能力。
+TransformationPlan、SBOM/镜像签名/集群编排，以及状态矩阵中标为 `planned` 的能力。
 
 ## 7. 行为完成定义
 

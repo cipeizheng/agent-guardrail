@@ -26,6 +26,7 @@ Audit 数据的机密性与可追责性、分析服务的可用性和所有受�
 
 - 部署所有者及其只读 Policy、启动配置和 capability 注册清单；
 - 本项目 Runtime、EnforcementSession、InputNormalizer 和协议 Adapter 的实现；
+- 双容器部署中的 Core 实现、只读 Policy/模型资产以及 Gateway→Core 专用服务凭据；
 - 由可信 Enforcement Point 实际建立的 phase、Event origin 和类型化 Relation；
 - 只接收已经脱敏结构的 AuditSink。
 
@@ -39,6 +40,10 @@ Audit 数据的机密性与可追责性、分析服务的可用性和所有受�
 
 认证用户可以表达业务意图，但不能因此覆盖 system/developer Policy；`observed` 模型响应只证明响应经过
 Enforcement Point，不证明内容正确、安全或已获授权。
+
+远程 Core 的内部网络不是低敏通道：`PendingTrace` 可能包含完整 prompt、PII 或 Tool arguments。部署必须
+限制 Core 端口只对 Gateway 可达，并保护链路与节点；Core/Gateway 均不得记录协议 body。Core 不持有
+Provider/MCP 凭据，Gateway 不持有 Policy/模型，以缩小单容器泄露后的权限集合。
 
 ## 3. Source → Transform → Sink 模型
 

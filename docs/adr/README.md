@@ -11,6 +11,7 @@
 | ADR | 状态 | 作用 | 读取条件 |
 | --- | --- | --- | --- |
 | [0014](0014-current-architecture-baseline.md) | Accepted | 确立当前合同、事实来源和增量决策方式 | 修改架构合同、事实来源或 ADR 流程 |
+| [0015](0015-remote-core-service.md) | Accepted | 固定 Policy 的远程 Core、协议与失败关闭边界 | 修改 Core/Gateway 服务边界或远程协议 |
 
 ## 何时需要新 ADR
 

@@ -19,7 +19,13 @@ class GatewaySettings(BaseSettings):
         extra="ignore",
     )
 
-    policy_file: Path
+    decision_backend: Literal["embedded", "remote"] = "embedded"
+    policy_file: Path | None = None
+    core_url: str | None = None
+    core_api_key: SecretStr | None = None
+    core_timeout_seconds: float = Field(default=10.0, gt=0, le=120)
+    core_max_request_bytes: int = Field(default=8_388_608, ge=1_024, le=67_108_864)
+    core_max_response_bytes: int = Field(default=1_048_576, ge=1_024, le=16_777_216)
     upstream_base_url: str | None = None
     upstream_auth_mode: Literal["server_managed", "pass_through"] = "server_managed"
     upstream_api_key: SecretStr | None = None
@@ -61,6 +67,27 @@ class GatewaySettings(BaseSettings):
             raise ValueError("upstream_base_url cannot contain credentials, query, or fragment")
         return value.rstrip("/") + "/"
 
+    @field_validator("core_url")
+    @classmethod
+    def validate_core_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        parsed = urlsplit(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("core_url must be an absolute HTTP(S) URL")
+        if parsed.username or parsed.password or parsed.query or parsed.fragment:
+            raise ValueError("core_url cannot contain credentials, query, or fragment")
+        return value.rstrip("/")
+
+    @field_validator("core_api_key")
+    @classmethod
+    def validate_core_api_key(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is not None:
+            secret = value.get_secret_value()
+            if not secret or secret != secret.strip():
+                raise ValueError("core_api_key must be non-blank and trimmed")
+        return value
+
     @field_validator("mcp_upstream_url")
     @classmethod
     def validate_mcp_upstream_url(cls, value: str | None) -> str | None:
@@ -91,10 +118,47 @@ class GatewaySettings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_upstream_host(self) -> Self:
-        if self.detector_profile == "local" and self.prompt_model_device != "cpu":
-            raise ValueError("prompt_model_device requires detector_profile=full_local_v1")
-        if self.detector_profile == "full_local_v1" and self.detector_assets_dir is None:
-            raise ValueError("detector_assets_dir is required for full_local_v1")
+        if self.decision_backend == "embedded":
+            if self.policy_file is None:
+                raise ValueError("policy_file is required for the embedded decision backend")
+            if self.core_url is not None or self.core_api_key is not None:
+                raise ValueError("Core settings require decision_backend=remote")
+            if self.detector_profile == "local" and self.prompt_model_device != "cpu":
+                raise ValueError(
+                    "prompt_model_device requires detector_profile=full_local_v1"
+                )
+            if (
+                self.detector_profile == "full_local_v1"
+                and self.detector_assets_dir is None
+            ):
+                raise ValueError("detector_assets_dir is required for full_local_v1")
+        else:
+            if self.core_url is None or self.core_api_key is None:
+                raise ValueError("core_url and core_api_key are required for remote decisions")
+            if self.policy_file is not None:
+                raise ValueError("remote Gateway must not mount a policy_file")
+            if (
+                self.detector_profile != "local"
+                or self.prompt_model_device != "cpu"
+                or self.detector_assets_dir is not None
+            ):
+                raise ValueError("remote Gateway must not configure detector assets")
+            core_credential = self.core_api_key.get_secret_value()
+            other_credentials = [
+                *(key.get_secret_value() for key in self.gateway_api_keys),
+                *(
+                    (self.upstream_api_key.get_secret_value(),)
+                    if self.upstream_api_key is not None
+                    else ()
+                ),
+                *(
+                    (self.mcp_upstream_api_key.get_secret_value(),)
+                    if self.mcp_upstream_api_key is not None
+                    else ()
+                ),
+            ]
+            if core_credential in other_credentials:
+                raise ValueError("core_api_key must be a dedicated service credential")
         if self.upstream_base_url is None and self.mcp_upstream_url is None:
             raise ValueError("at least one LLM or MCP upstream must be configured")
         if self.upstream_base_url is not None:

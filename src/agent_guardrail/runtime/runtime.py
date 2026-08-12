@@ -113,6 +113,11 @@ class GuardrailRuntime:
         async with self._lifecycle_lock:
             self._state = RuntimeState.CLOSED
 
+    async def check_ready(self) -> bool:
+        """Return local readiness through the shared Gateway runtime facade."""
+
+        return self.ready
+
     async def evaluate(self, context: GuardrailContext) -> Decision:
         """Compatibility bridge for the v0.1 single-event decision endpoint."""
 

@@ -4,6 +4,8 @@ version = "0.1.0"
 description = "A small, explainable guardrail runtime and gateway for AI agents"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
+license = "MIT"
+license-files = ["LICENSE"]
 dependencies = [
     "pydantic>=2.10,<3",
     "pyyaml>=6.0,<7",
@@ -14,6 +16,11 @@ gateway = [
     "fastapi>=0.115,<1",
     "httpx>=0.28,<1",
     "jsonschema>=4.23,<5",
+    "pydantic-settings>=2.7,<3",
+    "uvicorn[standard]>=0.34,<1",
+]
+core-server = [
+    "fastapi>=0.115,<1",
     "pydantic-settings>=2.7,<3",
     "uvicorn[standard]>=0.34,<1",
 ]

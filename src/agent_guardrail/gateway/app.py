@@ -1,4 +1,4 @@
-"""FastAPI composition root for the embedded-runtime OpenAI and MCP Gateways."""
+"""FastAPI composition root for embedded or remote-runtime protocol Gateways."""
 
 from __future__ import annotations
 
@@ -40,13 +40,16 @@ from agent_guardrail.models import (
     SecurityDestination,
     Trace,
 )
-from agent_guardrail.runtime import GuardrailRuntime
+from agent_guardrail.runtime import GuardrailRuntime, RuntimeNotReadyError
+from agent_guardrail.runtime.remote import RemoteGuardrailRuntime
+
+DecisionRuntime = GuardrailRuntime | RemoteGuardrailRuntime
 
 
 @dataclass(frozen=True, slots=True)
 class GatewayServices:
     settings: GatewaySettings
-    runtime: GuardrailRuntime
+    runtime: DecisionRuntime
     adapter: OpenAIAdapter
     normalizer: InputNormalizer
     upstream: OpenAIUpstream | None
@@ -58,23 +61,48 @@ class GatewayServices:
 def create_app(
     settings: GatewaySettings,
     *,
-    runtime: GuardrailRuntime | None = None,
+    runtime: DecisionRuntime | None = None,
     upstream_http_client: httpx.AsyncClient | None = None,
+    core_http_client: httpx.AsyncClient | None = None,
     audit: AuditSink | None = None,
 ) -> FastAPI:
     """Create an app with explicit injectable process-scoped dependencies."""
 
     active_runtime = runtime
+    owns_core_http_client = False
     if active_runtime is None:
-        detector_registry = create_deployment_detector_registry(
-            settings.detector_profile,
-            prompt_model_device=settings.prompt_model_device,
-            detector_assets_dir=settings.detector_assets_dir,
-        )
-        active_runtime = GuardrailRuntime.from_policy_file(
-            settings.policy_file,
-            detector_registry=detector_registry,
-        )
+        if settings.decision_backend == "embedded":
+            detector_registry = create_deployment_detector_registry(
+                settings.detector_profile,
+                prompt_model_device=settings.prompt_model_device,
+                detector_assets_dir=settings.detector_assets_dir,
+            )
+            if settings.policy_file is None:  # Settings validation makes this unreachable.
+                raise ValueError("embedded Gateway requires a policy file")
+            active_runtime = GuardrailRuntime.from_policy_file(
+                settings.policy_file,
+                detector_registry=detector_registry,
+            )
+        else:
+            if settings.core_url is None or settings.core_api_key is None:
+                raise ValueError("remote Gateway requires Core configuration")
+            if core_http_client is None:
+                core_http_client = httpx.AsyncClient(
+                    follow_redirects=False,
+                    limits=httpx.Limits(
+                        max_connections=100,
+                        max_keepalive_connections=20,
+                    ),
+                )
+                owns_core_http_client = True
+            active_runtime = RemoteGuardrailRuntime(
+                base_url=settings.core_url,
+                api_key=settings.core_api_key.get_secret_value(),
+                timeout_seconds=settings.core_timeout_seconds,
+                max_request_bytes=settings.core_max_request_bytes,
+                max_response_bytes=settings.core_max_response_bytes,
+                client=core_http_client,
+            )
     active_audit = audit or (
         JsonlAuditSink(settings.audit_path) if settings.audit_path is not None else NullAuditSink()
     )
@@ -122,6 +150,8 @@ def create_app(
             if owns_http_client:
                 await http_client.aclose()
             await active_runtime.close()
+            if owns_core_http_client and core_http_client is not None:
+                await core_http_client.aclose()
 
     app = FastAPI(title="Agent Guardrail Gateway", version="0.1.0", lifespan=lifespan)
     app.state.gateway = services
@@ -132,7 +162,7 @@ def create_app(
 
     @app.get("/health/ready")
     async def ready() -> JSONResponse:
-        if services.runtime.ready:
+        if await services.runtime.check_ready():
             return JSONResponse({"status": "ready"})
         return _error_response(
             503,
@@ -146,7 +176,15 @@ def create_app(
         authentication_error = _authenticate(services, request)
         if authentication_error is not None:
             return authentication_error
-        info = services.runtime.policy_info
+        try:
+            info = services.runtime.policy_info
+        except RuntimeNotReadyError:
+            return _error_response(
+                503,
+                error_type="guardrail_unavailable",
+                code="runtime_not_ready",
+                message="Guardrail runtime is not ready.",
+            )
         return JSONResponse(
             {"version": info.version, "content_hash": info.content_hash},
         )
