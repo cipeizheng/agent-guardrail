@@ -1,8 +1,6 @@
 """Built-in deterministic detectors."""
 
-from agent_guardrail.detectors.dangerous_command import DangerousCommandDetector
 from agent_guardrail.detectors.hidden_content import HiddenContentDetector
-from agent_guardrail.detectors.jailbreak import JailbreakDetector
 from agent_guardrail.detectors.model_prompt_injection import (
     ModelPromptInjectionDetector,
     PromptInjectionClassifier,
@@ -28,6 +26,12 @@ from agent_guardrail.detectors.semgrep import (
     SemgrepProfile,
     SemgrepSeverity,
 )
+from agent_guardrail.detectors.similarity import (
+    EmbeddingBackend,
+    EmbeddingProfile,
+    IsSimilarDetector,
+    OpenAIEmbeddingBackend,
+)
 from agent_guardrail.detectors.unicode_security import UnicodeSecurityDetector
 from agent_guardrail.detectors.yara_injection import (
     YaraInjectionBackend,
@@ -39,10 +43,12 @@ from agent_guardrail.detectors.yara_injection import (
 )
 
 __all__ = [
-    "DangerousCommandDetector",
+    "EmbeddingBackend",
+    "EmbeddingProfile",
     "HiddenContentDetector",
-    "JailbreakDetector",
+    "IsSimilarDetector",
     "ModelPromptInjectionDetector",
+    "OpenAIEmbeddingBackend",
     "PIIBackend",
     "PIIBackendResult",
     "PIIDetector",

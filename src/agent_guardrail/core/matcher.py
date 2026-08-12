@@ -39,12 +39,17 @@ from agent_guardrail.core.match_plan import (
     PredicateCondition,
     QuantifierOperator,
     RelationOperator,
+    SimilarityCondition,
+    SimilarityThreshold,
     SplitLinesDerivation,
     ValueReference,
     ValueType,
 )
 from agent_guardrail.core.protocols import PredicateContext
-from agent_guardrail.core.registry import DetectorPolicyDescriptor
+from agent_guardrail.core.registry import (
+    DetectorPolicyDescriptor,
+    SimilarityPolicyDescriptor,
+)
 from agent_guardrail.models import (
     AnalysisError,
     AnalysisErrorCode,
@@ -53,6 +58,7 @@ from agent_guardrail.models import (
     Detection,
     DetectionContext,
     Event,
+    EventKind,
     EvidenceSource,
     Finding,
     FindingBinding,
@@ -138,8 +144,12 @@ class _CapabilityRuntime:
         self.detectors = {
             item.descriptor.name: item for item in compiled.detectors
         }
+        self.similarities = {
+            item.descriptor.name: item for item in compiled.similarities
+        }
         self.predicate_cache: dict[tuple[object, ...], bool] = {}
         self.detector_cache: dict[tuple[object, ...], tuple[Detection, ...]] = {}
+        self.similarity_cache: dict[tuple[object, ...], tuple[Detection, ...]] = {}
 
 
 class SnapshotMatcher:
@@ -762,6 +772,19 @@ async def _evaluate_condition(
             ledger=ledger,
             runtime=capability_runtime,
         )
+    if condition.similarity is not None:
+        if capability_runtime is None:  # pragma: no cover - pre-scanned by caller
+            raise RuntimeError("uncompiled Similarity reached evaluation")
+        return await _evaluate_similarity(
+            condition.similarity,
+            rule_id=rule_id,
+            trace_id=trace_id,
+            environment=environment,
+            derived=derived,
+            parameters=parameters,
+            ledger=ledger,
+            runtime=capability_runtime,
+        )
     if condition.quantify is not None:
         return await _evaluate_quantifier(condition, **nested)
     raise RuntimeError("validated MatchPlan condition has no operation")
@@ -1069,6 +1092,205 @@ async def _invoke_detector(
     return tuple(result)
 
 
+async def _evaluate_similarity(
+    condition: SimilarityCondition,
+    *,
+    rule_id: str,
+    trace_id: str,
+    environment: dict[str, _RuntimeValue],
+    derived: dict[str, _RuntimeValue],
+    parameters: dict[str, _RuntimeValue],
+    ledger: MatchCostLedger,
+    runtime: _CapabilityRuntime,
+) -> _ConditionResult:
+    compiled = runtime.similarities[condition.capability]
+    descriptor = compiled.descriptor
+    data_value = _resolve_value(condition.data, environment, derived, parameters)
+    target_value = _resolve_value(condition.target, environment, derived, parameters)
+    if data_value.value is _MISSING or target_value.value is _MISSING:
+        return _ConditionResult(False, complete=False)
+    data = _similarity_texts(data_value.value)
+    target = _similarity_texts(target_value.value)
+    if not data or not target:
+        raise _CapabilityFailure(
+            code=AnalysisErrorCode.CAPABILITY_ERROR,
+            message="Similarity input does not contain text",
+            capability=condition.capability,
+        )
+    if len(data) > descriptor.max_texts or len(target) > descriptor.max_texts:
+        raise _CapabilityFailure(
+            code=AnalysisErrorCode.RESOURCE_EXHAUSTED,
+            message="Similarity text count exceeds its published limit",
+            capability=condition.capability,
+        )
+    threshold = _similarity_threshold(condition.threshold)
+    encoded = _canonical_json_bytes((data, target, threshold), condition.capability)
+    _charge_capability_input(
+        rule_id=rule_id,
+        capability=condition.capability,
+        encoded_size=len(encoded),
+        descriptor_limit=descriptor.max_input_bytes,
+        calls_dimension=CostDimension.DETECTOR_CALLS,
+        bytes_dimension=CostDimension.DETECTOR_INPUT_BYTES,
+        ledger=ledger,
+    )
+    fallback_event = next(iter(_environment_events(environment)), None)
+    context_event = (
+        cast(Event, environment_event.value)
+        if (
+            environment_event := _runtime_event_by_id(environment, data_value.event_id)
+        )
+        is not None
+        else fallback_event
+    )
+    if context_event is None:  # pragma: no cover - top-level Event bindings are required
+        return _ConditionResult(False, complete=False)
+    context = DetectionContext(
+        trace_id=trace_id,
+        event_id=context_event.id,
+        phase=context_event.phase,
+    )
+    cache_key = (
+        condition.capability,
+        compiled.implementation.version,
+        sha256(encoded).digest(),
+        context.trace_id,
+        context.event_id,
+        context.phase.value,
+    )
+    if cache_key in runtime.similarity_cache:
+        detections = runtime.similarity_cache[cache_key]
+    else:
+        detections = await _invoke_similarity(
+            condition=condition,
+            data=data,
+            target=target,
+            threshold=threshold,
+            context=context,
+            descriptor=descriptor,
+            implementation=compiled.implementation,
+            rule_id=rule_id,
+            ledger=ledger,
+        )
+        runtime.similarity_cache[cache_key] = detections
+    if not detections:
+        return _ConditionResult(False)
+    facts = tuple(
+        _CapturedEvidence(
+            type=detection.type,
+            capability=condition.capability,
+            location=data_value.location,
+            masked_evidence=detection.masked_evidence,
+            fingerprint=detection.fingerprint,
+            confidence=detection.confidence,
+        )
+        for detection in detections
+    )
+    locations = (data_value.location,) if data_value.location is not None else ()
+    return _ConditionResult(
+        True,
+        captures=(
+            _Capture(
+                source=EvidenceProjectionSource.DETECTOR,
+                id=condition.id,
+                capability=condition.capability,
+                locations=locations,
+                facts=facts,
+            ),
+        ),
+    )
+
+
+async def _invoke_similarity(
+    *,
+    condition: SimilarityCondition,
+    data: tuple[str, ...],
+    target: tuple[str, ...],
+    threshold: float,
+    context: DetectionContext,
+    descriptor: SimilarityPolicyDescriptor,
+    implementation: object,
+    rule_id: str,
+    ledger: MatchCostLedger,
+) -> tuple[Detection, ...]:
+    ledger.consume(rule_id, CostDimension.DETECTOR_TIME_MS, descriptor.timeout_ms)
+    try:
+        async with asyncio.timeout(descriptor.timeout_ms / 1_000):
+            raw = await implementation.compare(  # type: ignore[attr-defined]
+                data,
+                target,
+                threshold,
+                context=context,
+            )
+    except TimeoutError as exc:
+        raise _CapabilityFailure(
+            code=descriptor.timeout_code,
+            message="Similarity capability timed out",
+            capability=condition.capability,
+            retryable=True,
+        ) from exc
+    except Exception as exc:
+        raise _CapabilityFailure(
+            code=descriptor.error_code,
+            message="Similarity capability execution failed",
+            capability=condition.capability,
+        ) from exc
+    if not isinstance(raw, (list, tuple)) or len(raw) > 1:
+        raise _invalid_similarity_result(condition.capability, descriptor)
+    result: list[Detection] = []
+    for detection in raw:
+        if (
+            not isinstance(detection, Detection)
+            or detection.detector != condition.capability
+            or detection.detector_version != implementation.version  # type: ignore[attr-defined]
+            or detection.type != descriptor.detection_type
+            or detection.start is not None
+            or detection.end is not None
+            or len(detection.masked_evidence) > 256
+            or detection.masked_evidence != detection.masked_evidence.strip()
+            or len(detection.fingerprint) > 128
+            or any(
+                character
+                not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+                for character in detection.fingerprint
+            )
+        ):
+            raise _invalid_similarity_result(condition.capability, descriptor)
+        result.append(detection)
+    return tuple(result)
+
+
+def _similarity_texts(value: object) -> tuple[str, ...]:
+    if type(value) is str:
+        return (value,)
+    if isinstance(value, Event):
+        if value.kind is EventKind.MESSAGE:
+            return _similarity_texts(value.payload.get("content"))
+        if value.kind is EventKind.TOOL_RESULT:
+            return _similarity_texts(value.payload.get("output"))
+        return ()
+    if type(value) is dict:
+        if value.get("type") == "text" and type(value.get("text")) is str:
+            return (cast(str, value["text"]),)
+        for key in ("content", "output"):
+            if key in value:
+                return _similarity_texts(value[key])
+        return ()
+    if isinstance(value, (list, tuple)):
+        return tuple(text for item in value for text in _similarity_texts(item))
+    return ()
+
+
+def _similarity_threshold(value: int | float | SimilarityThreshold) -> float:
+    if isinstance(value, (int, float)):
+        return float(value)
+    return {
+        SimilarityThreshold.MIGHT_RESEMBLE: 0.2,
+        SimilarityThreshold.SAME_TOPIC: 0.5,
+        SimilarityThreshold.VERY_SIMILAR: 0.8,
+    }[value]
+
+
 def _invalid_detector_result(
     capability: str,
     descriptor: DetectorPolicyDescriptor,
@@ -1076,6 +1298,17 @@ def _invalid_detector_result(
     return _CapabilityFailure(
         code=descriptor.error_code,
         message="Detector capability returned an invalid result",
+        capability=capability,
+    )
+
+
+def _invalid_similarity_result(
+    capability: str,
+    descriptor: SimilarityPolicyDescriptor,
+) -> _CapabilityFailure:
+    return _CapabilityFailure(
+        code=descriptor.error_code,
+        message="Similarity capability returned an invalid result",
         capability=capability,
     )
 
@@ -1730,6 +1963,8 @@ def _first_unavailable_capability(
         return EvidenceProjectionSource.PREDICATE, condition.predicate.capability
     if condition.detector is not None:
         return EvidenceProjectionSource.DETECTOR, condition.detector.capability
+    if condition.similarity is not None:
+        return EvidenceProjectionSource.DETECTOR, condition.similarity.capability
     if condition.all is not None:
         children = condition.all
     elif condition.any is not None:

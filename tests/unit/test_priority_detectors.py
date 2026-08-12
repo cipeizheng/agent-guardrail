@@ -156,7 +156,4 @@ def test_priority_detector_descriptors_are_bounded_and_explicit() -> None:
     model_descriptor = model.policy_descriptor("prompt_injection_model")
     assert model_descriptor.timeout_ms == 2_000
     assert model_descriptor.max_detections == 1
-    assert set(model_descriptor.detection_types) == {
-        "model_prompt_injection",
-        "model_jailbreak",
-    }
+    assert set(model_descriptor.detection_types) == {"model_prompt_injection"}

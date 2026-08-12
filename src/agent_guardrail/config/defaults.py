@@ -8,16 +8,12 @@ from agent_guardrail.core.registry import (
     DetectorRegistry,
     PredicatePolicyDescriptor,
     PredicateRegistry,
-)
-from agent_guardrail.detectors.dangerous_command import (
-    DANGEROUS_COMMAND_PATTERNS,
-    DangerousCommandDetector,
+    SimilarityPolicyDescriptor,
 )
 from agent_guardrail.detectors.hidden_content import (
     HIDDEN_CONTENT_TYPES,
     HiddenContentDetector,
 )
-from agent_guardrail.detectors.jailbreak import JAILBREAK_PATTERNS, JailbreakDetector
 from agent_guardrail.detectors.model_prompt_injection import (
     ModelPromptInjectionDetector,
     PromptInjectionClassifier,
@@ -37,13 +33,16 @@ from agent_guardrail.detectors.python_code import (
 )
 from agent_guardrail.detectors.secrets import SECRET_PATTERNS, SecretDetector
 from agent_guardrail.detectors.semgrep import SEMGREP_TYPES, SemgrepDetector
+from agent_guardrail.detectors.similarity import (
+    SIMILARITY_DETECTION_TYPE,
+    IsSimilarDetector,
+)
 from agent_guardrail.detectors.unicode_security import (
     UNICODE_SECURITY_TYPES,
     UnicodeSecurityDetector,
 )
 from agent_guardrail.detectors.yara_injection import YaraInjectionDetector
 from agent_guardrail.predicates import (
-    EmbeddingSimilarityPredicate,
     FuzzyContainsPredicate,
     LengthInRangePredicate,
     NumberInRangePredicate,
@@ -58,6 +57,7 @@ def create_detector_registry(
     prompt_threshold: float = 0.85,
     semgrep_detector: SemgrepDetector | None = None,
     yara_detector: YaraInjectionDetector | None = None,
+    similarity_detector: IsSimilarDetector | None = None,
 ) -> DetectorRegistry:
     """Create local capabilities plus explicitly injected deployment adapters.
 
@@ -112,24 +112,6 @@ def create_detector_registry(
         ),
     )
     registry.register(
-        DangerousCommandDetector(),
-        policy_descriptor=DetectorPolicyDescriptor(
-            name="dangerous_command",
-            allowed_encodings=frozenset({"text", "canonical_json"}),
-            detection_types=frozenset(pattern.type for pattern in DANGEROUS_COMMAND_PATTERNS),
-            max_input_bytes=16_384,
-        ),
-    )
-    registry.register(
-        JailbreakDetector(),
-        policy_descriptor=DetectorPolicyDescriptor(
-            name="jailbreak",
-            allowed_encodings=frozenset({"text", "canonical_json"}),
-            detection_types=frozenset(pattern.type for pattern in JAILBREAK_PATTERNS),
-            max_input_bytes=16_384,
-        ),
-    )
-    registry.register(
         PythonASTIPythonDetector(),
         policy_descriptor=DetectorPolicyDescriptor(
             name="python_ast_ipython",
@@ -156,9 +138,7 @@ def create_detector_registry(
             policy_descriptor=DetectorPolicyDescriptor(
                 name="prompt_injection_model",
                 allowed_encodings=frozenset({"text", "canonical_json"}),
-                detection_types=frozenset(
-                    {"model_prompt_injection", "model_jailbreak"}
-                ),
+                detection_types=frozenset({"model_prompt_injection"}),
                 max_input_bytes=16_384,
                 timeout_ms=2_000,
                 max_detections=1,
@@ -190,6 +170,17 @@ def create_detector_registry(
                 max_detections=yara_detector.profile.max_matches,
             ),
         )
+    if similarity_detector is not None:
+        registry.register_similarity(
+            similarity_detector,
+            policy_descriptor=SimilarityPolicyDescriptor(
+                name="is_similar",
+                detection_type=SIMILARITY_DETECTION_TYPE,
+                max_input_bytes=similarity_detector.profile.max_input_bytes,
+                max_texts=similarity_detector.profile.max_texts,
+                timeout_ms=5_000,
+            ),
+        )
     return registry
 
 
@@ -210,6 +201,12 @@ def create_model_detector_registry(
         prompt_classifier=classifier,
         prompt_threshold=threshold,
     )
+
+
+def create_similarity_detector_registry(detector: IsSimilarDetector) -> DetectorRegistry:
+    """Create the default registry plus one deployment-profiled text encoder."""
+
+    return create_detector_registry(similarity_detector=detector)
 
 
 def create_default_predicate_registry() -> PredicateRegistry:
@@ -246,15 +243,6 @@ def create_default_predicate_registry() -> PredicateRegistry:
             name="fuzzy_contains",
             argument_types=(ValueType.STRING, ValueType.STRING, ValueType.JSON),
             max_input_bytes=16_384,
-            timeout_ms=250,
-        ),
-    )
-    registry.register(
-        EmbeddingSimilarityPredicate(),
-        policy_descriptor=PredicatePolicyDescriptor(
-            name="embedding_similarity",
-            argument_types=(ValueType.ARRAY, ValueType.ARRAY, ValueType.JSON),
-            max_input_bytes=65_536,
             timeout_ms=250,
         ),
     )

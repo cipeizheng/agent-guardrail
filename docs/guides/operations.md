@@ -46,6 +46,42 @@ uv run --extra detectors pytest -vv tests/integration/test_full_local_detector_p
 
 该命令复用 `AGENT_GUARDRAIL_DETECTOR_ASSETS_DIR`，并要求 `semgrep` 在 `PATH` 中且版本严格匹配。
 
+### 可选 `is_similar` encoder profile
+
+`is_similar` 不在默认 profile 中隐式联网。需要该能力时，可信启动代码构造 embedding client，并把 backend
+与 profile 一起注入 Registry：
+
+```python
+from agent_guardrail.config import create_deployment_detector_registry
+from agent_guardrail.detectors import (
+    EmbeddingProfile,
+    OpenAIEmbeddingBackend,
+)
+
+detectors = create_deployment_detector_registry(
+    "local",
+    embedding_backend=OpenAIEmbeddingBackend(
+        openai_compatible_client,
+        backend_version="reviewed-client-v1",
+    ),
+    embedding_profile=EmbeddingProfile(
+        profile_id="production-semantic-v1",
+        profile_version="1",
+        model="text-embedding-3-large",
+    ),
+)
+```
+
+`openai_compatible_client` 必须提供异步 `embeddings.create`；其 endpoint/凭据由部署启动层创建，不进入
+Policy、Trace、Finding 或 Audit。
+backend 与 profile 必须同时提供；模型、profile identity 或资源上限变化会改变 Detector version。当前 CLI
+没有 embedding 凭据环境变量，使用该可选 adapter 的部署应在组合根显式注入上述 Registry。真实服务尚未纳入
+仓库可重复评测，因此能力矩阵保持 `adapter_only`。
+
+启用远程 backend 会把参与比较的 `data` 和 `target` 发送到该固定 endpoint；它不是本地零泄露能力。部署方
+必须把该 endpoint 作为获准的数据接收方并配置传输、保留和租户边界，或者注入本地 `EmbeddingBackend`。
+Policy 不能借此改写 endpoint/model/凭据，但这一限制不能替代部署侧的数据授权。
+
 ## 2. 双容器启动
 
 仓库只定义两个运行服务：`core` 持有 Policy、完整 Detector 资产和分析 Runtime；`gateway` 持有 Provider/

@@ -5,6 +5,7 @@ from agent_guardrail.config.defaults import (
     create_default_predicate_registry,
     create_detector_registry,
     create_model_detector_registry,
+    create_similarity_detector_registry,
 )
 from agent_guardrail.config.deployment import (
     DetectorDeploymentProfile,
@@ -22,6 +23,7 @@ __all__ = [
     "PromptModelDevice",
     "create_default_detector_registry",
     "create_model_detector_registry",
+    "create_similarity_detector_registry",
     "create_default_predicate_registry",
     "create_detector_registry",
     "create_deployment_detector_registry",

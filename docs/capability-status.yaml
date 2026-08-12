@@ -1,5 +1,5 @@
 schema_version: 1
-last_verified: "2026-08-12"
+last_verified: "2026-08-13"
 
 status_vocabulary:
   verified: 实际算法或声明的真实后端已运行，并满足完整行为完成定义。
@@ -37,10 +37,10 @@ priority_capabilities:
   - id: P0-D03
     name: pii
     kind: detector
-    status: baseline
+    status: verified
     threat_paths: [T01, T02, T05, T09]
     implementation: pii
-    note: 校验型本地规则及 full_local_v1 的 Presidio 2.2.363/spaCy 英文 person/location NER 已真实运行；中文身份证/手机号继续使用本地校验。多语言通用 NER 与更完整准确率语料尚未达到 roadmap 要求，因此保持 baseline。
+    note: 校验型本地规则及 full_local_v1 的 Presidio 2.2.363/spaCy 英文 person/location NER 已真实运行，覆盖并超过固定 Invariant 基线；中文身份证/手机号是额外本地校验能力，通用多语言 NER 不属于完成定义。
 
   - id: P0-D04
     name: prompt_injection_model
@@ -49,14 +49,6 @@ priority_capabilities:
     threat_paths: [T03, T04]
     implementation: prompt_injection_model
     note: full_local_v1 锁定 Protect AI DeBERTa v2 提交并已在 CPU 及 CUDA 13/GTX 1650 Ti 上运行安全、攻击、预算、脱敏和 pre_llm 零上游副作用评估；运行时不下载模型。
-
-  - id: P0-D05
-    name: jailbreak
-    kind: detector
-    status: baseline
-    threat_paths: [T03, T04]
-    implementation: jailbreak
-    note: 独立确定性高信号 heuristic 已实际运行；固定模式对多语言、改写和混淆攻击的覆盖尚未完成系统评测。
 
   - id: P0-D06
     name: yara_injection_signatures
@@ -74,13 +66,13 @@ priority_capabilities:
     implementation: fuzzy_contains
     note: 纯本地有界 Levenshtein substring、工作量上限和 Enforcement 路径已实际运行；不含语义模型 fallback。
 
-  - id: P1-P02
-    name: embedding_similarity
-    kind: predicate
-    status: baseline
+  - id: P1-D04
+    name: is_similar
+    kind: detector
+    status: adapter_only
     threat_paths: [T03, T04]
-    implementation: embedding_similarity
-    note: 有限数值向量余弦已实际运行；文本 embedding 必须在 Policy 执行外预计算，当前未交付 encoder profile。
+    implementation: is_similar
+    note: Invariant 的 string/list、max-pair、严格阈值和三个命名阈值已实现；EmbeddingProfile 固定 model，Policy 不能选择 model/endpoint/凭据；OpenAI-compatible adapter、预算、timeout、脱敏和 pre_llm 零副作用路径已测试，真实外部 embedding backend 尚未 smoke/eval。
 
   - id: P1-D01
     name: python_ast_ipython
@@ -112,13 +104,7 @@ other_current_capabilities:
     status: baseline
     threat_paths: [T03, T04]
     implementation: prompt_injection
-    note: 确定性高信号模式及 Enforcement 路径已实际运行；多语言、改写和语义攻击覆盖仍有限。
-  - name: dangerous_command
-    kind: detector
-    status: baseline
-    threat_paths: [T04]
-    implementation: dangerous_command
-    note: 固定高风险命令模式及 Enforcement 路径已实际运行；不是完整 shell parser 或 Sandbox。
+    note: 确定性高信号模式及 Enforcement 路径已实际运行；它是可解释的局部补充，复杂改写由已验证的模型 capability 或可选 is_similar profile 覆盖。
   - name: number_in_range
     kind: predicate
     status: verified

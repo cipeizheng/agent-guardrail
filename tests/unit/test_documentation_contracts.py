@@ -13,6 +13,7 @@ from agent_guardrail.config import (
     create_default_predicate_registry,
 )
 from agent_guardrail.detectors import (
+    IsSimilarDetector,
     ModelPromptInjectionDetector,
     SemgrepDetector,
     YaraInjectionDetector,
@@ -24,6 +25,7 @@ CLOSED_STATUSES = frozenset({"verified", "baseline", "adapter_only", "planned"})
 OPTIONAL_ADAPTER_NAMES = frozenset(
     {
         ModelPromptInjectionDetector.name,
+        IsSimilarDetector.name,
         SemgrepDetector.name,
         YaraInjectionDetector.name,
     }
@@ -50,8 +52,10 @@ def _sequence(value: object) -> list[object]:
 def _published_names(registry: object) -> frozenset[str]:
     """Read the closed policy surface for documentation drift tests."""
 
-    descriptors = _mapping(vars(registry)["_policy_descriptors"])
-    return frozenset(descriptors)
+    state = vars(registry)
+    descriptors = _mapping(state["_policy_descriptors"])
+    similarity = _mapping(state.get("_similarity_policy_descriptors", {}))
+    return frozenset((*descriptors, *similarity))
 
 
 def test_capability_status_covers_the_exact_published_catalog() -> None:

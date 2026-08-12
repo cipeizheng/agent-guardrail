@@ -20,13 +20,9 @@ Invariant/NeMo 的算法覆盖面。
 
 ## 阶段 A：P0 检测能力
 
-P0 的本地算法和安全 adapter 表面已经进入状态矩阵。`full_local_v1` 已运行 P0-D04 的锁定 checkpoint 和
-P0-D06 的真实 YARA ruleset。当前剩余工作按稳定 ID 收口覆盖面：
-
-1. `P0-D03 pii`：`full_local_v1` 已运行英文 Presidio/spaCy NER；继续补多语言通用 NER 与更完整准确率
-   语料，本地 checksum/context recognizer 继续独立维护。
-2. `P0-D05 jailbreak`：用安全、攻击、多语言、改写和混淆语料扩展并评测本地确定性 heuristic；
-   `prompt_injection_model` 的 `model_jailbreak` 输出属于 P0-D04，不会自动提升本地 `jailbreak` 状态。
+P0 的本地算法和安全 adapter 表面已经进入状态矩阵。`full_local_v1` 已运行 P0-D03 的英文
+Presidio/spaCy、P0-D04 的锁定 checkpoint 和 P0-D06 的真实 YARA ruleset。完成目标以固定 Invariant 基线
+对齐或超越为准，不再把通用多语言 NER 作为退出条件。独立 `jailbreak` 和 `dangerous_command` 已移除。
 
 `P0-D02 secrets` 的 Invariant provider 类别与误报过滤已经没有待实现代码；后续增加 provider 时继续升级
 同一 `secrets`，不创建平行的 `enhanced_secrets`。
@@ -36,17 +32,18 @@ P0-D06 的真实 YARA ruleset。当前剩余工作按稳定 ID 收口覆盖面�
 
 ## 阶段 B：P1 检测与结构能力
 
-P1 的纯本地 `fuzzy_contains`、向量余弦、Python AST/IPython 和 hidden content 已进入默认 Registry；
+P1 的纯本地 `fuzzy_contains`、Python AST/IPython 和 hidden content 已进入默认 Registry；
 `full_local_v1` 已运行隔离的 Semgrep 1.170.0 backend。剩余工作：
 
-1. `P1-P02 embedding_similarity`：设计 Policy 执行外的固定 text encoder/向量注入边界并做准确率、延迟
-   和 provenance 验证；当前 Predicate 仍只允许向量和阈值，不能选择或运行模型。
+1. `P1-D04 is_similar`：OpenAI-compatible embedding adapter、Invariant string/list max-pair 行为、命名阈值、
+   profile model 选择、预算、timeout、脱敏与 Enforcement 已实现；在目标部署上运行真实 embedding backend 的
+   安全/攻击/边界准确率、延迟和失败评测后，才能从 `adapter_only` 提升为 `verified`。
 
 `P1-P01 fuzzy_contains`、`P1-D01 python_ast_ipython` 和 `P1-D03 hidden_content` 后续只做算法维护；不再创建
 第二套 Detector 名称。
 
-Fuzzy/embedding 需要比较目标，因此优先复用现有 Predicate 参数，而不是为 YAML 增加新的 Detector 配置
-语言。Semgrep/YARA/模型只允许部署 profile 固定后端，Policy 仍不能获得文件、进程或网络选择权。
+`fuzzy_contains` 继续是纯 Predicate；`is_similar` 因执行 encoder I/O 使用专用 Similarity 条件和部署固定
+backend。Semgrep/YARA/模型只允许部署 profile 固定后端，Policy 仍不能获得文件、进程或网络选择权。
 
 ## 阶段 C：从 Detector fact 到威胁路径
 

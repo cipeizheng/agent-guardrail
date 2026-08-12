@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from agent_guardrail.core.match_plan import DetectorInputEncoding, ValueType
-from agent_guardrail.core.protocols import Detector, Predicate
+from agent_guardrail.core.protocols import Detector, Predicate, SimilarityDetector
 from agent_guardrail.models import AnalysisErrorCode
 
 
@@ -107,12 +107,44 @@ class PredicatePolicyDescriptor:
             raise RegistryError("Predicate evidence must use a static Policy mask")
 
 
+@dataclass(frozen=True, slots=True)
+class SimilarityPolicyDescriptor:
+    """Bounded surface for the specialized text-similarity Detector condition."""
+
+    name: str
+    detection_type: str
+    max_input_bytes: int = 65_536
+    max_texts: int = 128
+    timeout_ms: int = 5_000
+    error_code: AnalysisErrorCode = AnalysisErrorCode.CAPABILITY_ERROR
+    timeout_code: AnalysisErrorCode = AnalysisErrorCode.DETECTOR_TIMEOUT
+    evidence_policy: CapabilityEvidencePolicy = (
+        CapabilityEvidencePolicy.MASKED_DETECTION_ONLY
+    )
+
+    def __post_init__(self) -> None:
+        _validate_capability_name(self.name, "similarity policy descriptor")
+        if not _is_evidence_type(self.detection_type):
+            raise RegistryError("similarity policy descriptor detection type is invalid")
+        _validate_bound(self.max_input_bytes, 1, 8_388_608, "similarity input bytes")
+        _validate_bound(self.max_texts, 1, 128, "similarity text count")
+        _validate_bound(self.timeout_ms, 1, 60_000, "similarity timeout")
+        if self.error_code is not AnalysisErrorCode.CAPABILITY_ERROR:
+            raise RegistryError("Similarity execution errors must use capability_error")
+        if self.timeout_code is not AnalysisErrorCode.DETECTOR_TIMEOUT:
+            raise RegistryError("Similarity timeouts must use detector_timeout")
+        if self.evidence_policy is not CapabilityEvidencePolicy.MASKED_DETECTION_ONLY:
+            raise RegistryError("Similarity evidence must use masked Detection fields")
+
+
 class DetectorRegistry:
     """An injected collection of local detector implementations."""
 
     def __init__(self) -> None:
         self._detectors: dict[str, Detector] = {}
         self._policy_descriptors: dict[str, DetectorPolicyDescriptor] = {}
+        self._similarity_detectors: dict[str, SimilarityDetector] = {}
+        self._similarity_policy_descriptors: dict[str, SimilarityPolicyDescriptor] = {}
 
     def register(
         self,
@@ -120,7 +152,7 @@ class DetectorRegistry:
         *,
         policy_descriptor: DetectorPolicyDescriptor | None = None,
     ) -> None:
-        if detector.name in self._detectors:
+        if detector.name in self._detectors or detector.name in self._similarity_detectors:
             raise RegistryError(f"detector is already registered: {detector.name}")
         if policy_descriptor is not None and policy_descriptor.name != detector.name:
             raise RegistryError("detector policy descriptor must name its detector")
@@ -142,6 +174,36 @@ class DetectorRegistry:
             return self._policy_descriptors[name]
         except KeyError as exc:
             raise RegistryError(f"detector is not available to structured policy: {name}") from exc
+
+    def register_similarity(
+        self,
+        detector: SimilarityDetector,
+        *,
+        policy_descriptor: SimilarityPolicyDescriptor,
+    ) -> None:
+        """Publish one specialized semantic-similarity implementation."""
+
+        if detector.name in self._detectors or detector.name in self._similarity_detectors:
+            raise RegistryError(f"detector is already registered: {detector.name}")
+        if policy_descriptor.name != detector.name:
+            raise RegistryError("similarity policy descriptor must name its detector")
+        self._similarity_detectors[detector.name] = detector
+        self._similarity_policy_descriptors[detector.name] = policy_descriptor
+
+    def get_similarity(self, name: str) -> SimilarityDetector:
+        try:
+            return self._similarity_detectors[name]
+        except KeyError as exc:
+            raise UnknownDetectorError(f"unknown similarity detector: {name}") from exc
+
+    def similarity_policy_descriptor(self, name: str) -> SimilarityPolicyDescriptor:
+        self.get_similarity(name)
+        try:
+            return self._similarity_policy_descriptors[name]
+        except KeyError as exc:
+            raise RegistryError(
+                f"similarity detector is not available to structured policy: {name}"
+            ) from exc
 
 
 class PredicateRegistry:

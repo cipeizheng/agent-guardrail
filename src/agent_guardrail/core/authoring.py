@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
+from math import isfinite
 from typing import Literal, Self
 
 from pydantic import (
@@ -51,6 +52,8 @@ from agent_guardrail.core.match_plan import (
     QuantifierPlan,
     RelationCondition,
     RelationOperator,
+    SimilarityCondition,
+    SimilarityThreshold,
     SplitLinesDerivation,
     ValueReference,
     ValueType,
@@ -172,6 +175,24 @@ class AuthorCapabilityDetector(AuthorModel):
     types_any: tuple[StrictStr, ...] = Field(default=(), max_length=64)
 
 
+class AuthorSimilarity(AuthorModel):
+    """Invariant-compatible is_similar call without a Policy-selected model."""
+
+    id: StrictStr = Field(pattern=_IDENTIFIER_PATTERN)
+    capability: StrictStr = Field(pattern=r"^[a-z][a-z0-9_]{0,127}$")
+    data: AuthorValue
+    target: AuthorValue
+    threshold: StrictFloat | SimilarityThreshold = SimilarityThreshold.MIGHT_RESEMBLE
+
+    @model_validator(mode="after")
+    def validate_threshold(self) -> Self:
+        if isinstance(self.threshold, float) and (
+            not isfinite(self.threshold) or not 0.0 <= self.threshold <= 1.0
+        ):
+            raise ValueError("author similarity threshold must be in [0, 1]")
+        return self
+
+
 class AuthorPredicateUse(AuthorModel):
     name: StrictStr = Field(pattern=_IDENTIFIER_PATTERN)
     arguments: dict[StrictStr, AuthorValue] = Field(
@@ -241,6 +262,7 @@ class AuthorCondition(AuthorModel):
     tool: AuthorToolMatch | None = None
     predicate: AuthorCapabilityPredicate | None = None
     detector: AuthorCapabilityDetector | None = None
+    similarity: AuthorSimilarity | None = None
     use: AuthorPredicateUse | None = None
     quantify: AuthorQuantifier | None = None
 
@@ -256,6 +278,7 @@ class AuthorCondition(AuthorModel):
             self.tool,
             self.predicate,
             self.detector,
+            self.similarity,
             self.use,
             self.quantify,
         )
@@ -528,6 +551,17 @@ def _compile_condition(
                     for item in detector.inputs
                 ),
                 types_any=detector.types_any,
+            )
+        )
+    if condition.similarity is not None:
+        similarity = condition.similarity
+        return MatchCondition(
+            similarity=SimilarityCondition(
+                id=similarity.id,
+                capability=similarity.capability,
+                data=_compile_value(similarity.data, substitutions),
+                target=_compile_value(similarity.target, substitutions),
+                threshold=similarity.threshold,
             )
         )
     if condition.use is not None:

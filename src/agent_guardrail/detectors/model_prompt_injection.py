@@ -23,13 +23,10 @@ class PromptInjectionScore:
     """One normalized classifier result with no input or model-generated prose."""
 
     score: float
-    label: str = "prompt_injection"
 
     def __post_init__(self) -> None:
         if not isinstance(self.score, float) or not 0.0 <= self.score <= 1.0:
             raise ValueError("prompt-injection score must be a float in [0, 1]")
-        if self.label not in {"prompt_injection", "jailbreak"}:
-            raise ValueError("prompt-injection label is not supported")
 
 
 @runtime_checkable
@@ -46,7 +43,7 @@ class ModelPromptInjectionDetector:
     """Turn a bounded classifier score into an audit-safe Detector fact."""
 
     name = "prompt_injection_model"
-    adapter_version = "2"
+    adapter_version = "3"
 
     def __init__(
         self,
@@ -84,7 +81,7 @@ class ModelPromptInjectionDetector:
             raise TypeError("classifier returned an invalid score")
         if score.score <= self._threshold:
             return []
-        detection_type = f"model_{score.label}"
+        detection_type = "model_prompt_injection"
         span = (0, len(text)) if text else None
         fingerprint = occurrence_fingerprint(
             context=context,
@@ -122,7 +119,7 @@ class TransformersPipelineClassifier:
         model_name: str,
         model_version: str,
         injection_labels: frozenset[str] = frozenset(
-            {"injection", "prompt_injection", "jailbreak", "label_1"}
+            {"injection", "prompt_injection", "label_1"}
         ),
         max_length: int = 512,
     ) -> None:
@@ -170,14 +167,8 @@ class TransformersPipelineClassifier:
         ]
         if not matching:
             return PromptInjectionScore(score=0.0)
-        # A backend may return equally scored classes in any order. Keep the
-        # safety-relevant type stable by preferring jailbreak on an exact tie.
-        label, score = max(
-            matching,
-            key=lambda item: (item[1], item[0].lower() == "jailbreak"),
-        )
-        normalized_label = "jailbreak" if label.lower() == "jailbreak" else "prompt_injection"
-        return PromptInjectionScore(score=score, label=normalized_label)
+        _, score = max(matching, key=lambda item: item[1])
+        return PromptInjectionScore(score=score)
 
 
 def _pipeline_candidates(raw: object) -> tuple[tuple[str, float], ...]:

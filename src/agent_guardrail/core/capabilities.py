@@ -25,13 +25,14 @@ from agent_guardrail.core.match_plan import (
     ValueReference,
     ValueType,
 )
-from agent_guardrail.core.protocols import Detector, Predicate
+from agent_guardrail.core.protocols import Detector, Predicate, SimilarityDetector
 from agent_guardrail.core.registry import (
     DetectorPolicyDescriptor,
     DetectorRegistry,
     PredicatePolicyDescriptor,
     PredicateRegistry,
     RegistryError,
+    SimilarityPolicyDescriptor,
 )
 
 
@@ -52,12 +53,19 @@ class CompiledDetectorCapability:
 
 
 @dataclass(frozen=True, slots=True)
+class CompiledSimilarityCapability:
+    descriptor: SimilarityPolicyDescriptor
+    implementation: SimilarityDetector
+
+
+@dataclass(frozen=True, slots=True)
 class CompiledMatchPlan:
     """A pure MatchPlan paired with explicit, trusted deployment capabilities."""
 
     plan: MatchPlan
     predicates: tuple[CompiledPredicateCapability, ...] = ()
     detectors: tuple[CompiledDetectorCapability, ...] = ()
+    similarities: tuple[CompiledSimilarityCapability, ...] = ()
 
 
 def compile_match_plan_capabilities(
@@ -70,6 +78,7 @@ def compile_match_plan_capabilities(
 
     compiled_predicates: dict[str, CompiledPredicateCapability] = {}
     compiled_detectors: dict[str, CompiledDetectorCapability] = {}
+    compiled_similarities: dict[str, CompiledSimilarityCapability] = {}
     parameter_types = {
         parameter.name: _parameter_value_type(parameter.type)
         for parameter in plan.parameters
@@ -98,11 +107,13 @@ def compile_match_plan_capabilities(
             detector_registry=detectors,
             compiled_predicates=compiled_predicates,
             compiled_detectors=compiled_detectors,
+            compiled_similarities=compiled_similarities,
         )
     return CompiledMatchPlan(
         plan=plan,
         predicates=tuple(compiled_predicates.values()),
         detectors=tuple(compiled_detectors.values()),
+        similarities=tuple(compiled_similarities.values()),
     )
 
 
@@ -117,6 +128,7 @@ def _compile_condition(
     detector_registry: DetectorRegistry,
     compiled_predicates: dict[str, CompiledPredicateCapability],
     compiled_detectors: dict[str, CompiledDetectorCapability],
+    compiled_similarities: dict[str, CompiledSimilarityCapability],
 ) -> None:
     nested = {
         "rule": rule,
@@ -127,6 +139,7 @@ def _compile_condition(
         "detector_registry": detector_registry,
         "compiled_predicates": compiled_predicates,
         "compiled_detectors": compiled_detectors,
+        "compiled_similarities": compiled_similarities,
     }
     if condition.all is not None:
         for child in condition.all:
@@ -242,6 +255,59 @@ def _compile_condition(
         compiled_detectors.setdefault(
             node.capability,
             CompiledDetectorCapability(descriptor, implementation),
+        )
+        return
+    if condition.similarity is not None:
+        node = condition.similarity
+        try:
+            descriptor = detector_registry.similarity_policy_descriptor(node.capability)
+            implementation = detector_registry.get_similarity(node.capability)
+        except RegistryError as exc:
+            raise CapabilityCompilationError(
+                f"rule {rule.id!r} references an unavailable Similarity capability: "
+                f"{node.capability}"
+            ) from exc
+        _validate_implementation_identity(
+            implementation.name,
+            implementation.version,
+            descriptor.name,
+            "Similarity",
+        )
+        for reference in (node.data, node.target):
+            actual = _infer_value_type(
+                reference,
+                binding_types=binding_types,
+                event_bindings=event_bindings,
+                parameter_types=parameter_types,
+            )
+            if actual not in {
+                None,
+                ValueType.STRING,
+                ValueType.ARRAY,
+                ValueType.OBJECT,
+                ValueType.JSON,
+            }:
+                raise CapabilityCompilationError(
+                    f"rule {rule.id!r} Similarity {node.capability!r} has an "
+                    "incompatible text input type"
+                )
+            if (
+                isinstance(reference, LiteralValue)
+                and type(reference.value) is not str
+            ) or (
+                isinstance(reference, LiteralListValue)
+                and (
+                    not reference.items
+                    or any(type(item) is not str for item in reference.items)
+                )
+            ):
+                raise CapabilityCompilationError(
+                    f"rule {rule.id!r} Similarity {node.capability!r} requires "
+                    "non-empty string literals"
+                )
+        compiled_similarities.setdefault(
+            node.capability,
+            CompiledSimilarityCapability(descriptor, implementation),
         )
 
 

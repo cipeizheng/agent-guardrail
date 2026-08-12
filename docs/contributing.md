@@ -78,9 +78,10 @@ Decision 开始检查。
 - `test_session.py`：batch 原子性、block、异常和可信来源；
 - `test_security_detectors.py` / `test_priority_detectors.py`：既有 Detector 算法边界；
 - `test_secret_detector_parity.py` / `test_pii_detector.py` / `test_prompt_detector_parity.py`：
-  Secret、PII、Prompt/Jailbreak/模型适配边界；
+  Secret、PII、Prompt/模型适配边界；
 - `test_code_detector_parity.py`：Python/IPython、hidden content、Semgrep 和 YARA 边界；
-- `test_builtin_predicates.py` / `test_similarity_predicates.py`：基础与 fuzzy/vector Predicate 边界；
+- `test_builtin_predicates.py` / `test_similarity_predicates.py`：基础与 fuzzy Predicate 边界；
+- `test_similarity_detector.py`：Invariant `is_similar`、profile model、backend、timeout、脱敏和 Enforcement；
 - `test_alignment_registries.py` / `test_invariant_detector_alignment.py`：默认/可选 Registry、
   MatchPlan→Decision→Enforcement 对齐路径；
 - `test_documentation_contracts.py`：状态目录封闭词汇、Registry 名称覆盖和本地文档链接；

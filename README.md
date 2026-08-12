@@ -20,13 +20,13 @@ v0.1.0 已提供 Inline LLM/Tool、OpenAI-compatible 非流式 Gateway、MCP `20
 默认 capability 的准确名称、覆盖范围和验证状态分别见[Capability 参考](docs/reference/capabilities.md)
 与[状态矩阵](docs/capability-status.yaml)；未来工作只在[roadmap](docs/roadmap.md)维护。
 
-当前默认 Registry 发布 8 个本地 Detector：`secrets`、`pii`、`prompt_injection`、`jailbreak`、
-`dangerous_command`、`unicode_security`、`python_ast_ipython`、`hidden_content`；以及 5 个纯 Predicate：
-`number_in_range`、`length_in_range`、`url_host_allowed`、`fuzzy_contains`、`embedding_similarity`。
-`prompt_injection_model`、带 Presidio/PIIBackend 的 `pii`、`semgrep` 和 `yara_injection_signatures` 只在
-部署代码固定 backend/profile 并显式注入后发布。内置 `full_local_v1` profile 已真实运行 Presidio/spaCy、
-锁定 checkpoint 的 DeBERTa、Semgrep CLI 和 yara-python；文本 embedding 仍在 Policy 执行外预计算。
-项目不把 adapter fake 测试写成真实后端已验证。
+当前默认 Registry 发布 6 个本地 Detector：`secrets`、`pii`、`prompt_injection`、`unicode_security`、
+`python_ast_ipython`、`hidden_content`；以及 4 个纯 Predicate：`number_in_range`、`length_in_range`、
+`url_host_allowed`、`fuzzy_contains`。`prompt_injection_model`、带 Presidio/PIIBackend 的 `pii`、`semgrep`、
+`yara_injection_signatures` 和文本语义 `is_similar` 只在部署代码固定 backend/profile 并显式注入后发布。
+内置 `full_local_v1` profile 已真实运行 Presidio/spaCy、锁定 checkpoint 的 DeBERTa、Semgrep CLI 和
+yara-python；`is_similar` 已交付 OpenAI-compatible embedding adapter，但真实服务 smoke/eval 前保持
+`adapter_only`。项目不把 adapter fake 测试写成真实后端已验证。
 
 ## 核心目标
 

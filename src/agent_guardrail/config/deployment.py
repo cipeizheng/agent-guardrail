@@ -23,6 +23,9 @@ from agent_guardrail.config.defaults import (
 )
 from agent_guardrail.core import DetectorRegistry
 from agent_guardrail.detectors import (
+    EmbeddingBackend,
+    EmbeddingProfile,
+    IsSimilarDetector,
     PresidioAnalyzerBackend,
     SemgrepCLIBackend,
     SemgrepDetector,
@@ -124,6 +127,8 @@ def create_deployment_detector_registry(
     *,
     prompt_model_device: PromptModelDevice | str = PromptModelDevice.CPU,
     detector_assets_dir: Path | None = None,
+    embedding_backend: EmbeddingBackend | None = None,
+    embedding_profile: EmbeddingProfile | None = None,
 ) -> DetectorRegistry:
     """Construct one deployment profile without allowing Policy-driven choices."""
 
@@ -132,10 +137,21 @@ def create_deployment_detector_registry(
         selected_device = PromptModelDevice(prompt_model_device)
     except ValueError as exc:
         raise DetectorProfileError("unknown Detector deployment profile setting") from exc
+    if (embedding_backend is None) != (embedding_profile is None):
+        raise DetectorProfileError(
+            "embedding backend and embedding profile must be configured together"
+        )
+    similarity_detector = (
+        IsSimilarDetector(embedding_backend, profile=embedding_profile)
+        if embedding_backend is not None and embedding_profile is not None
+        else None
+    )
     if selected_profile is DetectorDeploymentProfile.LOCAL:
         if selected_device is not PromptModelDevice.CPU:
             raise DetectorProfileError("prompt model device requires the full_local_v1 profile")
-        return create_default_detector_registry()
+        if similarity_detector is None:
+            return create_default_detector_registry()
+        return create_detector_registry(similarity_detector=similarity_detector)
     if detector_assets_dir is None:
         raise DetectorProfileError("full_local_v1 requires a Detector assets directory")
 
@@ -152,6 +168,7 @@ def create_deployment_detector_registry(
         prompt_threshold=0.85,
         semgrep_detector=semgrep_detector,
         yara_detector=yara_detector,
+        similarity_detector=similarity_detector,
     )
 
 

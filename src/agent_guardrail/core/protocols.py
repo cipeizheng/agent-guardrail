@@ -24,6 +24,22 @@ class Detector(Protocol):
     ) -> list[Detection]: ...
 
 
+class SimilarityDetector(Protocol):
+    """Compare two bounded text collections using a deployment-fixed encoder."""
+
+    name: str
+    version: str
+
+    async def compare(
+        self,
+        data: tuple[str, ...],
+        target: tuple[str, ...],
+        threshold: float,
+        *,
+        context: DetectionContext,
+    ) -> list[Detection]: ...
+
+
 @dataclass(frozen=True, slots=True)
 class PredicateContext:
     """Minimal, payload-free context exposed to a trusted Predicate."""

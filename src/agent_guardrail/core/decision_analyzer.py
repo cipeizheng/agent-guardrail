@@ -32,7 +32,7 @@ class MatchPolicyAnalyzer:
         self._actions = {binding.rule_id: binding.action for binding in policy.actions}
         self._detector_versions = {
             capability.descriptor.name: capability.implementation.version
-            for capability in policy.match_plan.detectors
+            for capability in (*policy.match_plan.detectors, *policy.match_plan.similarities)
         }
         self._matcher = SnapshotMatcher(
             policy.match_plan,

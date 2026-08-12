@@ -2,7 +2,7 @@
 
 > 状态：日常实现的短合同。治理方式由
 > [ADR-0014](adr/0014-current-architecture-baseline.md) 确立；ADR-0001–0013 已移出当前文档树，不是实现输入。
-> 最后核对：2026-08-12，版本 `0.1.0`。
+> 最后核对：2026-08-13，版本 `0.1.0`。
 
 ## 1. 当前生产链
 
@@ -61,14 +61,14 @@ strict version: 3 YAML → AuthorPolicy → immutable MatchPlan
 
 ## 5. 当前 capability 事实
 
-- 默认 Detector：`secrets`、`pii`、`prompt_injection`、`jailbreak`、`dangerous_command`、
-  `unicode_security`、`python_ast_ipython`、`hidden_content`。
-- 默认 Predicate：`number_in_range`、`length_in_range`、`url_host_allowed`、`fuzzy_contains`、
-  `embedding_similarity`；默认 embedding 只做纯数值向量余弦。
-- `prompt_injection_model`、带外部 backend 的 `pii`、`semgrep` 和 `yara_injection_signatures` 只有部署代码
-  显式注入后才发布。内置部署 profile `full_local_v1` 固定并离线加载 Presidio/spaCy、锁定提交的
-  DeBERTa、Semgrep 1.170.0 与包内 YARA ruleset；Policy 不能选择 profile、模型、文件、设备或进程参数。
-  文本 embedding 必须在 Policy 执行外预先计算。
+- 默认 Detector：`secrets`、`pii`、`prompt_injection`、`unicode_security`、`python_ast_ipython`、
+  `hidden_content`。
+- 默认 Predicate：`number_in_range`、`length_in_range`、`url_host_allowed`、`fuzzy_contains`。
+- `prompt_injection_model`、带外部 backend 的 `pii`、`semgrep`、`yara_injection_signatures` 和
+  `is_similar` 只有部署代码显式注入后才发布。内置部署 profile `full_local_v1` 固定并离线加载
+  Presidio/spaCy、锁定提交的 DeBERTa、Semgrep 1.170.0 与包内 YARA ruleset。`is_similar` 的
+  `EmbeddingProfile` 由部署方选择 encoder model、identity 和资源上限，Policy 只能提供 data、target 和
+  threshold，不能选择 model、endpoint 或凭据。
 - 运行时实际发布名称以默认 Registry 为事实来源；交付验证状态、稳定 roadmap ID 和完成定义以
   [`capability-status.yaml`](capability-status.yaml) 为事实来源。
 

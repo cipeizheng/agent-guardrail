@@ -10,6 +10,7 @@ from agent_guardrail.core.capabilities import (
     CompiledDetectorCapability,
     CompiledMatchPlan,
     CompiledPredicateCapability,
+    CompiledSimilarityCapability,
     compile_match_plan_capabilities,
 )
 from agent_guardrail.core.decision_analyzer import MatchPolicyAnalyzer
@@ -31,23 +32,31 @@ from agent_guardrail.core.policy import (
     PolicyDocument,
     RuleAction,
 )
-from agent_guardrail.core.protocols import Detector, Predicate, PredicateContext
+from agent_guardrail.core.protocols import (
+    Detector,
+    Predicate,
+    PredicateContext,
+    SimilarityDetector,
+)
 from agent_guardrail.core.registry import (
     CapabilityEvidencePolicy,
     DetectorPolicyDescriptor,
     DetectorRegistry,
     PredicatePolicyDescriptor,
     PredicateRegistry,
+    SimilarityPolicyDescriptor,
 )
 
 __all__ = [
     "Detector",
     "Predicate",
     "PredicateContext",
+    "SimilarityDetector",
     "DetectorPolicyDescriptor",
     "DetectorRegistry",
     "PredicatePolicyDescriptor",
     "PredicateRegistry",
+    "SimilarityPolicyDescriptor",
     "CompiledPolicy",
     "EnforcementConfig",
     "MatchPolicyAnalyzer",
@@ -71,5 +80,6 @@ __all__ = [
     "CompiledDetectorCapability",
     "CompiledMatchPlan",
     "CompiledPredicateCapability",
+    "CompiledSimilarityCapability",
     "compile_match_plan_capabilities",
 ]

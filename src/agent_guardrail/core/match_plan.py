@@ -7,6 +7,7 @@ invoke capabilities, maintain Monitor state, or participate in Enforcement.
 from __future__ import annotations
 
 from enum import StrEnum
+from math import isfinite
 from typing import Annotated, Literal, Self, cast
 
 from pydantic import (
@@ -131,6 +132,14 @@ class DetectorInputEncoding(StrEnum):
 
     TEXT = "text"
     CANONICAL_JSON = "canonical_json"
+
+
+class SimilarityThreshold(StrEnum):
+    """Invariant-compatible named semantic-similarity thresholds."""
+
+    MIGHT_RESEMBLE = "might_resemble"
+    SAME_TOPIC = "same_topic"
+    VERY_SIMILAR = "very_similar"
 
 
 class ParameterDeclaration(MatchPlanModel):
@@ -331,6 +340,24 @@ class DetectorCondition(MatchPlanModel):
         return self
 
 
+class SimilarityCondition(MatchPlanModel):
+    """Compare dynamic text with Policy-declared targets using a fixed model profile."""
+
+    id: StrictStr = Field(pattern=_IDENTIFIER_PATTERN)
+    capability: StrictStr = Field(pattern=_CAPABILITY_PATTERN)
+    data: ValueReference
+    target: ValueReference
+    threshold: StrictFloat | SimilarityThreshold = SimilarityThreshold.MIGHT_RESEMBLE
+
+    @model_validator(mode="after")
+    def validate_threshold(self) -> Self:
+        if isinstance(self.threshold, float) and (
+            not isfinite(self.threshold) or not 0.0 <= self.threshold <= 1.0
+        ):
+            raise ValueError("MatchPlan similarity threshold must be in [0, 1]")
+        return self
+
+
 class CountBounds(MatchPlanModel):
     minimum: StrictInt | None = Field(default=None, ge=0)
     maximum: StrictInt | None = Field(default=None, ge=0)
@@ -385,6 +412,7 @@ class MatchCondition(MatchPlanModel):
     relation: RelationCondition | None = None
     predicate: PredicateCondition | None = None
     detector: DetectorCondition | None = None
+    similarity: SimilarityCondition | None = None
     quantify: QuantifierPlan | None = None
 
     @model_validator(mode="after")
@@ -398,6 +426,7 @@ class MatchCondition(MatchPlanModel):
             self.relation,
             self.predicate,
             self.detector,
+            self.similarity,
             self.quantify,
         )
         if sum(operation is not None for operation in operations) != 1:
@@ -898,6 +927,25 @@ def _validate_condition(
             EvidenceProjectionSource.DETECTOR,
         )
         return
+    if condition.similarity is not None:
+        _validate_value_reference(
+            condition.similarity.data,
+            bindings=bindings,
+            events=events,
+            derived=derived,
+        )
+        _validate_value_reference(
+            condition.similarity.target,
+            bindings=bindings,
+            events=events,
+            derived=derived,
+        )
+        _add_named_source(
+            named_sources,
+            condition.similarity.id,
+            EvidenceProjectionSource.DETECTOR,
+        )
+        return
     if condition.quantify is not None:
         if quantifier_depth >= MAX_QUANTIFIER_DEPTH:
             raise ValueError("MatchPlan quantifier nesting exceeds its depth limit")
@@ -1012,6 +1060,10 @@ def _collect_condition_parameters(condition: MatchCondition, references: set[str
     if condition.detector is not None:
         for detector_input in condition.detector.inputs:
             _collect_value_parameters(detector_input.value, references)
+        return
+    if condition.similarity is not None:
+        _collect_value_parameters(condition.similarity.data, references)
+        _collect_value_parameters(condition.similarity.target, references)
         return
     if condition.quantify is not None:
         if isinstance(condition.quantify.binding, CollectionBinding):

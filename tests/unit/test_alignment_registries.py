@@ -7,7 +7,6 @@ from agent_guardrail.config import (
     create_default_predicate_registry,
     create_detector_registry,
 )
-from agent_guardrail.core.match_plan import ValueType
 from agent_guardrail.detectors import (
     PIIBackendResult,
     PIIEntityType,
@@ -97,7 +96,6 @@ def test_default_registries_publish_all_local_alignment_capabilities() -> None:
         "secrets",
         "pii",
         "prompt_injection",
-        "jailbreak",
         "python_ast_ipython",
         "hidden_content",
     ):
@@ -121,15 +119,6 @@ def test_default_registries_publish_all_local_alignment_capabilities() -> None:
     ).detection_types
 
     assert predicates.policy_descriptor("fuzzy_contains").timeout_ms == 250
-    assert (
-        predicates.policy_descriptor("embedding_similarity").max_input_bytes
-        == 65_536
-    )
-    assert predicates.policy_descriptor("embedding_similarity").argument_types == (
-        ValueType.ARRAY,
-        ValueType.ARRAY,
-        ValueType.JSON,
-    )
 
 
 def test_deployment_registry_combines_only_explicitly_injected_adapters() -> None:
