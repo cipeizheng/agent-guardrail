@@ -23,8 +23,9 @@ Gateway。所有接入复用同一 Runtime/EnforcementSession 语义：`pre_llm/
 `dangerous_command`、`unicode_security`、`python_ast_ipython`、`hidden_content`；以及 5 个纯 Predicate：
 `number_in_range`、`length_in_range`、`url_host_allowed`、`fuzzy_contains`、`embedding_similarity`。
 `prompt_injection_model`、带 Presidio/PIIBackend 的 `pii`、`semgrep` 和 `yara_injection_signatures` 只在
-部署代码固定 backend/profile 并显式注入后发布；文本 embedding 在 Policy 执行外预计算。项目不把
-adapter fake 测试写成真实后端已验证。
+部署代码固定 backend/profile 并显式注入后发布。内置 `full_local_v1` profile 已真实运行 Presidio/spaCy、
+锁定 checkpoint 的 DeBERTa、Semgrep CLI 和 yara-python；文本 embedding 仍在 Policy 执行外预计算。
+项目不把 adapter fake 测试写成真实后端已验证。
 
 ## 核心目标
 
@@ -63,6 +64,19 @@ uv run pytest
 uv run ruff check .
 uv run pyright
 ```
+
+安装并准备完整本地 Detector profile：
+
+```bash
+uv sync --frozen --extra gateway --extra detectors --no-dev
+uv tool install semgrep==1.170.0
+export AGENT_GUARDRAIL_DETECTOR_ASSETS_DIR=/var/lib/agent-guardrail/detectors
+uv run agent-guardrail-prefetch-detectors
+```
+
+预取命令只下载锁定到提交 `90c9989b1a342275dd0d1a95aad283c04e075671` 的提示注入模型文件，并逐项
+校验固定字节数和 SHA-256。Gateway 运行时不联网下载模型。Presidio 的英文 spaCy 模型由 `detectors`
+extra 固定安装，Semgrep 使用隔离的 `uv tool` 环境以避免与 Gateway 的 MCP v2 依赖冲突。
 
 ### VS Code / Pylance
 
@@ -123,6 +137,18 @@ export AGENT_GUARDRAIL_UPSTREAM_API_KEY="your-provider-key"
 export AGENT_GUARDRAIL_GATEWAY_API_KEYS='["your-gateway-key"]'
 uv run --extra gateway python -m agent_guardrail.gateway
 ```
+
+启用完整本地 Detector profile 时再设置：
+
+```bash
+export AGENT_GUARDRAIL_DETECTOR_PROFILE=full_local_v1
+export AGENT_GUARDRAIL_DETECTOR_ASSETS_DIR=/var/lib/agent-guardrail/detectors
+export AGENT_GUARDRAIL_PROMPT_MODEL_DEVICE=cuda  # 或 cpu
+uv run --extra gateway --extra detectors python -m agent_guardrail.gateway
+```
+
+`full_local_v1` 缺少任一依赖、固定模型文件、正确 Semgrep 版本或所选 CUDA 设备时会拒绝启动。模型、规则、
+文件和设备都是进程级部署配置，Policy YAML 仍不能选择或替换它们。
 
 Agent 无需导入本项目。低耦合契约由
 `tests/blackbox/external_openai_agent.py` 和

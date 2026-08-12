@@ -42,6 +42,39 @@ def test_gateway_settings_load_prefixed_environment(monkeypatch: pytest.MonkeyPa
     assert settings.gateway_api_keys[0].get_secret_value() == "client-key"
 
 
+def test_gateway_settings_load_fixed_detector_profile(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENT_GUARDRAIL_POLICY_FILE", "policy.yaml")
+    monkeypatch.setenv("AGENT_GUARDRAIL_UPSTREAM_BASE_URL", "https://provider.example/v1")
+    monkeypatch.setenv("AGENT_GUARDRAIL_UPSTREAM_API_KEY", "upstream-key")
+    monkeypatch.setenv("AGENT_GUARDRAIL_DETECTOR_PROFILE", "full_local_v1")
+    monkeypatch.setenv("AGENT_GUARDRAIL_PROMPT_MODEL_DEVICE", "cuda")
+    monkeypatch.setenv("AGENT_GUARDRAIL_DETECTOR_ASSETS_DIR", "/opt/detector-assets")
+
+    settings = GatewaySettings()  # pyright: ignore[reportCallIssue]
+
+    assert settings.detector_profile == "full_local_v1"
+    assert settings.prompt_model_device == "cuda"
+    assert settings.detector_assets_dir == Path("/opt/detector-assets")
+
+
+def test_gateway_rejects_cuda_setting_without_model_profile() -> None:
+    with pytest.raises(ValidationError, match="prompt_model_device"):
+        GatewaySettings(
+            policy_file=Path("policy.yaml"),
+            upstream_base_url="https://provider.example/v1",
+            upstream_api_key=SecretStr("upstream-key"),
+            prompt_model_device="cuda",
+        )
+
+    with pytest.raises(ValidationError, match="detector_assets_dir"):
+        GatewaySettings(
+            policy_file=Path("policy.yaml"),
+            upstream_base_url="https://provider.example/v1",
+            upstream_api_key=SecretStr("upstream-key"),
+            detector_profile="full_local_v1",
+        )
+
+
 @pytest.mark.asyncio
 async def test_jsonl_audit_contains_only_sanitized_decision_summary(tmp_path: Path) -> None:
     decision = await secret_analyzer().analyze_pending(

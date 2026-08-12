@@ -40,15 +40,15 @@ priority_capabilities:
     status: baseline
     threat_paths: [T01, T02, T05, T09]
     implementation: pii
-    note: 校验型本地规则和 Presidio 固定 profile adapter 已实现；person/location 等真实 NER checkpoint 尚未运行，不能标为 verified。
+    note: 校验型本地规则及 full_local_v1 的 Presidio 2.2.363/spaCy 英文 person/location NER 已真实运行；中文身份证/手机号继续使用本地校验。多语言通用 NER 与更完整准确率语料尚未达到 roadmap 要求，因此保持 baseline。
 
   - id: P0-D04
     name: prompt_injection_model
     kind: detector
-    status: adapter_only
+    status: verified
     threat_paths: [T03, T04]
     implementation: prompt_injection_model
-    note: classifier/pipeline 适配和 Enforcement 已测试；未运行真实 checkpoint。
+    note: full_local_v1 锁定 Protect AI DeBERTa v2 提交并已在 CPU 及 CUDA 13/GTX 1650 Ti 上运行安全、攻击、预算、脱敏和 pre_llm 零上游副作用评估；运行时不下载模型。
 
   - id: P0-D05
     name: jailbreak
@@ -61,10 +61,10 @@ priority_capabilities:
   - id: P0-D06
     name: yara_injection_signatures
     kind: detector
-    status: adapter_only
+    status: verified
     threat_paths: [T03, T04]
     implementation: yara_injection_signatures
-    note: 预编译 backend/profile、有限规则映射、预算、脱敏和 Enforcement 已测试；未运行真实 YARA ruleset。
+    note: full_local_v1 包内固定 ruleset 已由 yara-python 4.5.4 真实编译和运行，覆盖安全/攻击、UTF-8 span、原生 timeout、结果上限、脱敏和 Enforcement 路径。
 
   - id: P1-P01
     name: fuzzy_contains
@@ -93,10 +93,10 @@ priority_capabilities:
   - id: P1-D02
     name: semgrep
     kind: detector
-    status: adapter_only
+    status: verified
     threat_paths: [T04]
     implementation: semgrep
-    note: 固定 ruleset profile、有限结构化结果、失败脱敏和 Enforcement 已测试；未运行隔离的真实 Semgrep backend。
+    note: 外部隔离 Semgrep 1.170.0 与包内固定 Python ruleset 已真实运行；私有临时目录、关闭 metrics/version check、输出上限、4.8 秒硬终止、取消进程组清理、UTF-8 span 和脱敏路径已验证。
 
   - id: P1-D03
     name: hidden_content

@@ -111,7 +111,7 @@ Event/Tool/来源语境。
 限定 type 并与 prompt/source 语境组合。结构合法但超过解码上限的编码候选只报告
 `encoded_content_oversized`。
 
-## 6. 部署固定的可选 adapter
+## 6. 部署固定的可选 Detector profile
 
 `create_model_detector_registry(classifier, threshold=...)` 在默认目录外发布 `prompt_injection_model`，公开
 `model_prompt_injection/model_jailbreak`，输入 16 KiB、deadline 2 秒、最多一个结果。
@@ -121,7 +121,17 @@ Event/Tool/来源语境。
 模型输出文本写入 Detection。同步推理在线程中执行；Matcher timeout 可以停止等待，但不能强制终止底层
 线程，所以需要强隔离时应由部署层提供可取消进程/服务 backend。
 
-当前只验证 adapter 与执行合同，没有捆绑或评测真实 checkpoint，因此状态是 `adapter_only`。
+`full_local_v1` 使用同一 adapter 合同，固定加载：
+
+- Presidio 2.2.363、spaCy 3.8 和 `en_core_web_sm` 3.8.0，用于英文 person/location 等 NER；
+- `protectai/deberta-v3-base-prompt-injection-v2` 的提交
+  `90c9989b1a342275dd0d1a95aad283c04e075671`，本地 PyTorch 推理，阈值 0.85；
+- 外部隔离安装且版本严格为 1.170.0 的 Semgrep CLI，以及包内固定 Python ruleset；
+- yara-python 4.5.4，以及包内固定 injection ruleset。
+
+该 profile 已运行真实后端评估；准确状态仍以状态矩阵为准。默认 profile 是 `local`，不会加载这些可选
+依赖。固定 checkpoint 不表示模型对所有语言和改写攻击都无漏报，Detector fact 仍须与可信 source/sink
+语境组合。
 
 需要组合多个可选 backend 时使用：
 
@@ -141,14 +151,17 @@ detectors = create_detector_registry(
   只能停止等待，不能强制终止底层线程。
 - `semgrep` 的 `SemgrepDetector` 只接受固定 `SemgrepProfile` 与 backend 的结构化 finding。Policy 不能选择
   语言、规则、文件、工作目录或进程；只接受 `text` encoding，rule identity 只进入 payload-free
-  fingerprint。backend 必须把原生 line/column 或 byte location 归一化为 Python 字符 offset。
+  fingerprint。`SemgrepCLIBackend` 在私有临时目录运行，关闭 metrics/version check，限制输入、规则、
+  stdout/stderr 和 finding 数，timeout/取消时终止整个进程组，并把原生 byte location 归一化为 Python
+  字符 offset。
 - `yara_injection_signatures` 的 `YaraInjectionDetector` 只接受预编译 backend 和
   `YaraInjectionProfile` 的有限 rule→type 映射；Policy 不能上传/编译规则，descriptor 只发布该 profile
   实际绑定的 type，rule ID 不进入 evidence。yara-python 的 byte offset 必须先转换为 Python 字符 offset；
   无法可靠转换时返回无 span 的 match。
 
-`semgrep`、`yara_injection_signatures`、带 Presidio backend 的 `pii` 和 `prompt_injection_model` 当前都没有
-随项目运行真实 backend；fake 测试只证明 linking、预算、错误脱敏和 Enforcement 合同，具体状态见状态矩阵。
+安装、资产校验、CPU/CUDA 选择和 Gateway 环境变量见[运行指南](../guides/operations.md)。运行时不会下载
+模型；固定资产缺失、SHA-256 不符、Semgrep 版本不符或 CUDA 不可用时，profile 构造失败并阻止启动。
+Policy YAML 不能设置这些值。
 
 文本 embedding 不在 Predicate 内执行。部署必须在 Policy 执行外用固定模型预先得到向量，再把有限向量交给
 `embedding_similarity`；当前没有发布文本 encoder adapter，因此整体状态仍是 `baseline`。

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 import json
 from dataclasses import dataclass
 from hashlib import sha256
@@ -18,6 +20,7 @@ YARA_INJECTION_TYPES = frozenset(
         "yara_xss",
     }
 )
+MAX_YARA_INPUT_BYTES = 16_384
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,6 +104,99 @@ class YaraInjectionBackend(Protocol):
         self,
         text: str,
     ) -> list[YaraSignatureMatch] | tuple[YaraSignatureMatch, ...]: ...
+
+
+class YaraPythonBackend:
+    """Adapt precompiled yara-python rules with native and result bounds."""
+
+    name = "yara-python"
+
+    def __init__(
+        self,
+        rules: object,
+        *,
+        engine_version: str,
+        ruleset_digest: str,
+        max_matches: int = 64,
+        native_timeout_seconds: int = 1,
+    ) -> None:
+        match = getattr(rules, "match", None)
+        if not callable(match):
+            raise TypeError("compiled YARA rules must provide a callable match method")
+        _validate_identity(engine_version, "YARA engine version")
+        if (
+            not isinstance(ruleset_digest, str)
+            or len(ruleset_digest) != 64
+            or any(character not in "0123456789abcdef" for character in ruleset_digest)
+        ):
+            raise ValueError("YARA ruleset digest must be a lowercase SHA-256")
+        if (
+            isinstance(max_matches, bool)
+            or not isinstance(max_matches, int)
+            or not 1 <= max_matches <= 64
+        ):
+            raise ValueError("YARA max matches must be an integer in [1, 64]")
+        if (
+            isinstance(native_timeout_seconds, bool)
+            or not isinstance(native_timeout_seconds, int)
+            or not 1 <= native_timeout_seconds <= 30
+        ):
+            raise ValueError("YARA native timeout must be an integer in [1, 30]")
+        self.version = f"{engine_version}+rules.{ruleset_digest[:12]}"
+        self._match = match
+        self._max_matches = max_matches
+        self._native_timeout_seconds = native_timeout_seconds
+
+    async def match(self, text: str) -> list[YaraSignatureMatch]:
+        encoded = text.encode("utf-8")
+        if len(encoded) > MAX_YARA_INPUT_BYTES:
+            raise ValueError("YARA input exceeds its hard byte bound")
+        raw = await asyncio.to_thread(
+            self._match,
+            data=encoded,
+            timeout=self._native_timeout_seconds,
+        )
+        if inspect.isawaitable(raw):
+            raw = await raw
+        if type(raw) is not list:
+            raise TypeError("YARA backend returned an invalid result collection")
+
+        normalized: list[YaraSignatureMatch] = []
+        for raw_match in raw:
+            rule_id = getattr(raw_match, "rule", None)
+            strings = getattr(raw_match, "strings", None)
+            if not isinstance(rule_id, str):
+                raise TypeError("YARA backend returned an invalid rule id")
+            _validate_rule_id(rule_id)
+            if type(strings) is not list:
+                raise TypeError("YARA backend returned invalid string matches")
+            spans: set[tuple[int, int]] = set()
+            for string_match in strings:
+                instances = getattr(string_match, "instances", None)
+                if type(instances) is not list:
+                    raise TypeError("YARA backend returned invalid string instances")
+                for instance in instances:
+                    offset = getattr(instance, "offset", None)
+                    matched_length = getattr(instance, "matched_length", None)
+                    spans.add(
+                        _yara_character_span(
+                            encoded,
+                            offset=offset,
+                            matched_length=matched_length,
+                        )
+                    )
+            if spans:
+                for start, end in sorted(spans):
+                    normalized.append(
+                        YaraSignatureMatch(rule_id=rule_id, start=start, end=end)
+                    )
+                    if len(normalized) > self._max_matches:
+                        raise ValueError("YARA backend result limit exceeded")
+            else:
+                normalized.append(YaraSignatureMatch(rule_id=rule_id))
+                if len(normalized) > self._max_matches:
+                    raise ValueError("YARA backend result limit exceeded")
+        return normalized
 
 
 class YaraInjectionDetector:
@@ -294,3 +390,27 @@ def _validate_span(start: int | None, end: int | None) -> None:
         or end <= start
     ):
         raise ValueError("YARA match span is invalid")
+
+
+def _yara_character_span(
+    encoded: bytes,
+    *,
+    offset: object,
+    matched_length: object,
+) -> tuple[int, int]:
+    if (
+        isinstance(offset, bool)
+        or isinstance(matched_length, bool)
+        or not isinstance(offset, int)
+        or not isinstance(matched_length, int)
+        or offset < 0
+        or matched_length <= 0
+        or offset + matched_length > len(encoded)
+    ):
+        raise ValueError("YARA backend returned an invalid byte span")
+    try:
+        start = len(encoded[:offset].decode("utf-8"))
+        end = len(encoded[: offset + matched_length].decode("utf-8"))
+    except UnicodeDecodeError as exc:
+        raise ValueError("YARA returned a non-character-aligned byte span") from exc
+    return start, end

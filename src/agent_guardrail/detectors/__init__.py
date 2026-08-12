@@ -22,6 +22,7 @@ from agent_guardrail.detectors.python_code import PythonASTIPythonDetector
 from agent_guardrail.detectors.secrets import SecretDetector
 from agent_guardrail.detectors.semgrep import (
     SemgrepBackend,
+    SemgrepCLIBackend,
     SemgrepDetector,
     SemgrepFinding,
     SemgrepProfile,
@@ -32,6 +33,7 @@ from agent_guardrail.detectors.yara_injection import (
     YaraInjectionBackend,
     YaraInjectionDetector,
     YaraInjectionProfile,
+    YaraPythonBackend,
     YaraRuleBinding,
     YaraSignatureMatch,
 )
@@ -53,6 +55,7 @@ __all__ = [
     "PythonASTIPythonDetector",
     "SecretDetector",
     "SemgrepBackend",
+    "SemgrepCLIBackend",
     "SemgrepDetector",
     "SemgrepFinding",
     "SemgrepProfile",
@@ -62,6 +65,7 @@ __all__ = [
     "YaraInjectionBackend",
     "YaraInjectionDetector",
     "YaraInjectionProfile",
+    "YaraPythonBackend",
     "YaraRuleBinding",
     "YaraSignatureMatch",
 ]

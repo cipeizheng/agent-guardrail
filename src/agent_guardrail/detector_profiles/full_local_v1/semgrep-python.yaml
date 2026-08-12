@@ -1,0 +1,30 @@
+rules:
+  - id: agent-guardrail.python.dynamic-execution
+    languages: [python]
+    severity: ERROR
+    message: Dynamic Python execution can run untrusted code.
+    patterns:
+      - pattern-either:
+          - pattern: eval(...)
+          - pattern: exec(...)
+
+  - id: agent-guardrail.python.os-command
+    languages: [python]
+    severity: ERROR
+    message: Direct operating-system command execution is security-sensitive.
+    patterns:
+      - pattern-either:
+          - pattern: os.system(...)
+          - pattern: os.popen(...)
+
+  - id: agent-guardrail.python.subprocess-shell
+    languages: [python]
+    severity: WARNING
+    message: A subprocess with shell=True can interpret attacker-controlled shell syntax.
+    pattern: subprocess.$FUNC(..., shell=True, ...)
+
+  - id: agent-guardrail.python.destructive-delete
+    languages: [python]
+    severity: WARNING
+    message: Recursive deletion is a protected side effect.
+    pattern: shutil.rmtree(...)

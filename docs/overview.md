@@ -88,8 +88,8 @@ YAML 只能引用部署方注册并发布 descriptor 的 Predicate/Detector。Pr
 
 默认 Registry 只包含本地确定性算法。`prompt_injection_model`、带外部 backend 的 `pii`、`semgrep` 和
 `yara_injection_signatures` 必须由部署启动代码绑定固定 backend/profile 后显式发布；Policy 只能看到稳定
-capability 名称和有限类型，不能看到或更换 profile。文本 embedding 在 Policy 执行外预计算，Predicate
-只接收有限向量。
+capability 名称和有限类型，不能看到或更换 profile。内置 `full_local_v1` 是一个已真实运行的固定部署
+profile；默认仍为 `local`。文本 embedding 在 Policy 执行外预计算，Predicate 只接收有限向量。
 
 ## 6. Enforcement 保证
 

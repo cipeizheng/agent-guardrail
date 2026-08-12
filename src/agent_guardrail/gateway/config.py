@@ -35,6 +35,9 @@ class GatewaySettings(BaseSettings):
     max_trace_events: int = Field(default=16, ge=2, le=1_000)
     upstream_timeout_seconds: float = Field(default=60.0, gt=0, le=600)
     evaluate_endpoint_enabled: bool = False
+    detector_profile: Literal["local", "full_local_v1"] = "local"
+    prompt_model_device: Literal["cpu", "cuda"] = "cpu"
+    detector_assets_dir: Path | None = None
     mcp_upstream_url: str | None = None
     mcp_upstream_auth_mode: Literal["none", "server_managed", "pass_through"] = "none"
     mcp_upstream_api_key: SecretStr | None = None
@@ -88,6 +91,10 @@ class GatewaySettings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_upstream_host(self) -> Self:
+        if self.detector_profile == "local" and self.prompt_model_device != "cpu":
+            raise ValueError("prompt_model_device requires detector_profile=full_local_v1")
+        if self.detector_profile == "full_local_v1" and self.detector_assets_dir is None:
+            raise ValueError("detector_assets_dir is required for full_local_v1")
         if self.upstream_base_url is None and self.mcp_upstream_url is None:
             raise ValueError("at least one LLM or MCP upstream must be configured")
         if self.upstream_base_url is not None:

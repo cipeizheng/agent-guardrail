@@ -19,16 +19,13 @@ Invariant/NeMo 的算法覆盖面。
 
 ## 阶段 A：P0 检测能力
 
-P0 的本地算法和安全 adapter 表面已经进入状态矩阵。当前剩余工作按稳定 ID 收口真实后端验证：
+P0 的本地算法和安全 adapter 表面已经进入状态矩阵。`full_local_v1` 已运行 P0-D04 的锁定 checkpoint 和
+P0-D06 的真实 YARA ruleset。当前剩余工作按稳定 ID 收口覆盖面：
 
-1. `P0-D03 pii`：在固定部署 profile 中运行真实 Presidio/NER checkpoint 与多语言安全/攻击语料；本地
-   checksum/context recognizer 继续独立维护。
-2. `P0-D04 prompt_injection_model`：运行锁定的真实 checkpoint 和攻击/安全语料，把状态从
-   `adapter_only` 提升为 `verified`。
-3. `P0-D05 jailbreak`：用安全、攻击、多语言、改写和混淆语料扩展并评测本地确定性 heuristic；
+1. `P0-D03 pii`：`full_local_v1` 已运行英文 Presidio/spaCy NER；继续补多语言通用 NER 与更完整准确率
+   语料，本地 checksum/context recognizer 继续独立维护。
+2. `P0-D05 jailbreak`：用安全、攻击、多语言、改写和混淆语料扩展并评测本地确定性 heuristic；
    `prompt_injection_model` 的 `model_jailbreak` 输出属于 P0-D04，不会自动提升本地 `jailbreak` 状态。
-4. `P0-D06 yara_injection_signatures`：用部署方预编译的真实 ruleset 做 smoke/eval 和残留资源检查；YAML
-   仍不能上传规则或选择文件。
 
 `P0-D02 secrets` 的 Invariant provider 类别与误报过滤已经没有待实现代码；后续增加 provider 时继续升级
 同一 `secrets`，不创建平行的 `enhanced_secrets`。
@@ -38,11 +35,11 @@ P0 的本地算法和安全 adapter 表面已经进入状态矩阵。当前剩�
 
 ## 阶段 B：P1 检测与结构能力
 
-P1 的纯本地 `fuzzy_contains`、向量余弦、Python AST/IPython 和 hidden content 已进入默认 Registry。剩余工作：
+P1 的纯本地 `fuzzy_contains`、向量余弦、Python AST/IPython 和 hidden content 已进入默认 Registry；
+`full_local_v1` 已运行隔离的 Semgrep 1.170.0 backend。剩余工作：
 
 1. `P1-P02 embedding_similarity`：设计 Policy 执行外的固定 text encoder/向量注入边界并做准确率、延迟
    和 provenance 验证；当前 Predicate 仍只允许向量和阈值，不能选择或运行模型。
-2. `P1-D02 semgrep`：运行固定语言/规则的隔离 backend，验证 timeout、输出上限、取消和进程残留边界。
 
 `P1-P01 fuzzy_contains`、`P1-D01 python_ast_ipython` 和 `P1-D03 hidden_content` 后续只做算法维护；不再创建
 第二套 Detector 名称。

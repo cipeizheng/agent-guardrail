@@ -172,7 +172,7 @@ def create_detector_registry(
                 allowed_encodings=frozenset({"text"}),
                 detection_types=SEMGREP_TYPES,
                 max_input_bytes=16_384,
-                timeout_ms=2_000,
+                timeout_ms=5_000,
                 max_detections=semgrep_detector.profile.max_findings,
             ),
         )

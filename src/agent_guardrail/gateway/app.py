@@ -16,6 +16,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from agent_guardrail.adapters.openai import OpenAIAdapter, OpenAIAdapterError
+from agent_guardrail.config import create_deployment_detector_registry
 from agent_guardrail.enforcement import (
     AuditSink,
     EnforcementSession,
@@ -63,7 +64,17 @@ def create_app(
 ) -> FastAPI:
     """Create an app with explicit injectable process-scoped dependencies."""
 
-    active_runtime = runtime or GuardrailRuntime.from_policy_file(settings.policy_file)
+    active_runtime = runtime
+    if active_runtime is None:
+        detector_registry = create_deployment_detector_registry(
+            settings.detector_profile,
+            prompt_model_device=settings.prompt_model_device,
+            detector_assets_dir=settings.detector_assets_dir,
+        )
+        active_runtime = GuardrailRuntime.from_policy_file(
+            settings.policy_file,
+            detector_registry=detector_registry,
+        )
     active_audit = audit or (
         JsonlAuditSink(settings.audit_path) if settings.audit_path is not None else NullAuditSink()
     )
