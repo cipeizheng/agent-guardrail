@@ -41,6 +41,7 @@ Policy 作者指南 → Capability 参考
 - [分析引擎参考](reference/analysis-engine.md)：MatchPlan、Matcher、Monitor、Finding 和预算。
 - [开发与代码阅读指南](contributing.md)：代码地图、测试、review 和质量门。
 - [Invariant 对齐基线](design/invariant-alignment.md)：I01–I14 映射和有意差异。
+- [Invariant Detector 对齐合同](design/invariant-detector-alignment.md)：算法映射、固定 backend 和脱敏边界。
 
 ## 治理与规划
 

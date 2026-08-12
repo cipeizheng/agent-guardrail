@@ -69,6 +69,12 @@ async def test_unicode_security_fingerprint_is_bound_to_event_not_payload() -> N
     assert "a\u202eb" not in first[0].model_dump_json()
 
 
+@pytest.mark.asyncio
+async def test_unicode_security_fails_on_result_overflow() -> None:
+    with pytest.raises(ValueError, match="result limit"):
+        await UnicodeSecurityDetector().detect("\u202e" * 65, context=_context())
+
+
 @dataclass(slots=True)
 class _Classifier:
     result: PromptInjectionScore

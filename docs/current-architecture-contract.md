@@ -56,9 +56,12 @@ strict version: 3 YAML → AuthorPolicy → immutable MatchPlan
 
 ## 5. 当前 capability 事实
 
-- 默认 Detector：`secrets`、`pii`、`prompt_injection`、`dangerous_command`、`unicode_security`。
-- 默认 Predicate：`number_in_range`、`length_in_range`、`url_host_allowed`。
-- `prompt_injection_model` 当前是 `adapter_only`，不代表真实模型已验证。
+- 默认 Detector：`secrets`、`pii`、`prompt_injection`、`jailbreak`、`dangerous_command`、
+  `unicode_security`、`python_ast_ipython`、`hidden_content`。
+- 默认 Predicate：`number_in_range`、`length_in_range`、`url_host_allowed`、`fuzzy_contains`、
+  `embedding_similarity`；默认 embedding 只做纯数值向量余弦。
+- `prompt_injection_model`、Semgrep、YARA 和 Presidio NER 只有部署代码显式注入后才发布；adapter 测试不代表
+  真实模型、ruleset 或 backend 已验证。文本 embedding 必须在 Policy 执行外预先计算。
 - 运行时实际发布名称以默认 Registry 为事实来源；交付验证状态、稳定 roadmap ID 和完成定义以
   [`capability-status.yaml`](capability-status.yaml) 为事实来源。
 

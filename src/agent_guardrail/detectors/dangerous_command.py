@@ -108,7 +108,7 @@ class DangerousCommandDetector:
     """Detect reviewed destructive and shell-execution shapes."""
 
     name = "dangerous_command"
-    version = "1"
+    version = "2"
 
     async def detect(
         self,

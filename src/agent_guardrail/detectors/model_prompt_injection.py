@@ -4,12 +4,18 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from collections.abc import Callable, Mapping, Sequence
+import json
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from hashlib import sha256
-from typing import Protocol, runtime_checkable
+from typing import Protocol, TypeGuard, runtime_checkable
 
+from agent_guardrail.detectors._patterns import occurrence_fingerprint
 from agent_guardrail.models import Detection, DetectionContext
+
+MAX_MODEL_PROMPT_BYTES = 16_384
+MAX_PIPELINE_CANDIDATES = 64
+MAX_PIPELINE_LABEL_CHARS = 64
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,7 +46,7 @@ class ModelPromptInjectionDetector:
     """Turn a bounded classifier score into an audit-safe Detector fact."""
 
     name = "prompt_injection_model"
-    version = "1"
+    adapter_version = "2"
 
     def __init__(
         self,
@@ -52,10 +58,18 @@ class ModelPromptInjectionDetector:
             raise TypeError("classifier must implement PromptInjectionClassifier")
         if not isinstance(threshold, float) or not 0.0 < threshold <= 1.0:
             raise ValueError("threshold must be a float in (0, 1]")
-        if not classifier.name or not classifier.version:
-            raise ValueError("classifier identity must be non-empty")
+        _validate_identity(classifier.name, "classifier name")
+        _validate_identity(classifier.version, "classifier version")
         self._classifier = classifier
         self._threshold = threshold
+        identity = sha256(
+            json.dumps(
+                (classifier.name, classifier.version, threshold),
+                ensure_ascii=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()[:12]
+        self.version = f"{self.adapter_version}-{identity}"
 
     async def detect(
         self,
@@ -63,18 +77,23 @@ class ModelPromptInjectionDetector:
         *,
         context: DetectionContext,
     ) -> list[Detection]:
+        if len(text.encode("utf-8")) > MAX_MODEL_PROMPT_BYTES:
+            raise ValueError("model prompt input exceeds its hard byte bound")
         score = await self._classifier.classify(text)
         if not isinstance(score, PromptInjectionScore):
             raise TypeError("classifier returned an invalid score")
-        if score.score < self._threshold:
+        if score.score <= self._threshold:
             return []
         detection_type = f"model_{score.label}"
-        material = (
-            f"{self.name}:{self.version}:{self._classifier.name}:"
-            f"{self._classifier.version}:{context.trace_id}:{context.event_id}:"
-            f"{context.phase.value}:{detection_type}"
+        span = (0, len(text)) if text else None
+        fingerprint = occurrence_fingerprint(
+            context=context,
+            detector=self.name,
+            detector_version=self.version,
+            detection_type=detection_type,
+            start=span[0] if span is not None else 0,
+            end=span[1] if span is not None else 0,
         )
-        fingerprint = sha256(material.encode("utf-8")).hexdigest()[:16]
         common = {
             "type": detection_type,
             "detector": self.name,
@@ -83,8 +102,8 @@ class ModelPromptInjectionDetector:
             "masked_evidence": f"<{self.name}:{detection_type}:{fingerprint}>",
             "fingerprint": fingerprint,
         }
-        if text:
-            return [Detection(**common, start=0, end=len(text))]
+        if span is not None:
+            return [Detection(**common, start=span[0], end=span[1])]
         return [Detection(**common)]
 
 
@@ -109,16 +128,29 @@ class TransformersPipelineClassifier:
     ) -> None:
         if not callable(pipeline):
             raise TypeError("pipeline must be callable")
-        if not model_name or not model_version:
-            raise ValueError("model identity must be non-empty")
-        if not injection_labels or any(not label for label in injection_labels):
+        _validate_identity(model_name, "model name")
+        _validate_identity(model_version, "model version")
+        if not injection_labels or any(
+            not isinstance(label, str)
+            or not label.strip()
+            or len(label) > 64
+            or label != label.strip()
+            for label in injection_labels
+        ):
             raise ValueError("injection_labels must be non-empty")
         if isinstance(max_length, bool) or not 1 <= max_length <= 8192:
             raise ValueError("max_length is outside its hard bounds")
+        normalized_labels = frozenset(label.lower() for label in injection_labels)
+        profile_material = json.dumps(
+            (model_version, sorted(normalized_labels), max_length),
+            ensure_ascii=True,
+            separators=(",", ":"),
+        )
+        profile_identity = sha256(profile_material.encode("utf-8")).hexdigest()[:12]
         self.name = model_name
-        self.version = model_version
+        self.version = f"pipeline-{profile_identity}"
         self._pipeline = pipeline
-        self._injection_labels = frozenset(label.lower() for label in injection_labels)
+        self._injection_labels = normalized_labels
         self._max_length = max_length
 
     async def classify(self, text: str) -> PromptInjectionScore:
@@ -138,16 +170,27 @@ class TransformersPipelineClassifier:
         ]
         if not matching:
             return PromptInjectionScore(score=0.0)
-        label, score = max(matching, key=lambda item: item[1])
+        # A backend may return equally scored classes in any order. Keep the
+        # safety-relevant type stable by preferring jailbreak on an exact tie.
+        label, score = max(
+            matching,
+            key=lambda item: (item[1], item[0].lower() == "jailbreak"),
+        )
         normalized_label = "jailbreak" if label.lower() == "jailbreak" else "prompt_injection"
         return PromptInjectionScore(score=score, label=normalized_label)
 
 
 def _pipeline_candidates(raw: object) -> tuple[tuple[str, float], ...]:
     value = raw
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
-        if len(value) == 1 and isinstance(value[0], Sequence):
+    if isinstance(value, (list, tuple)) and not _is_builtin_sequence(value):
+        raise TypeError("pipeline result collection must be a built-in list or tuple")
+    if _is_builtin_sequence(value):
+        if len(value) > MAX_PIPELINE_CANDIDATES:
+            raise ValueError("pipeline result exceeds its candidate limit")
+        if len(value) == 1 and _is_builtin_sequence(value[0]):
             value = value[0]
+            if len(value) > MAX_PIPELINE_CANDIDATES:
+                raise ValueError("pipeline result exceeds its candidate limit")
         items = value
     else:
         items = (value,)
@@ -157,7 +200,33 @@ def _pipeline_candidates(raw: object) -> tuple[tuple[str, float], ...]:
             raise TypeError("pipeline result must contain mappings")
         label = item.get("label")
         score = item.get("score")
-        if not isinstance(label, str) or type(score) is not float or not 0.0 <= score <= 1.0:
+        if (
+            not isinstance(label, str)
+            or not label.strip()
+            or label != label.strip()
+            or len(label) > MAX_PIPELINE_LABEL_CHARS
+            or type(score) is not float
+            or not 0.0 <= score <= 1.0
+        ):
             raise TypeError("pipeline result has an invalid label or score")
         candidates.append((label, score))
+    if not candidates:
+        raise TypeError("pipeline result must contain at least one score")
     return tuple(candidates)
+
+
+def _is_builtin_sequence(
+    value: object,
+) -> TypeGuard[list[object] | tuple[object, ...]]:
+    return type(value) is list or type(value) is tuple
+
+
+def _validate_identity(value: object, subject: str) -> None:
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value) > 128
+        or value != value.strip()
+        or any(character in value for character in ("\x00", "\r", "\n"))
+    ):
+        raise ValueError(f"{subject} is invalid")

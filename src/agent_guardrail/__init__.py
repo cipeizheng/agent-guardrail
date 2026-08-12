@@ -3,6 +3,7 @@
 from agent_guardrail.config import (
     create_default_detector_registry,
     create_default_predicate_registry,
+    create_detector_registry,
     create_model_detector_registry,
     load_policy_file,
     load_policy_yaml,
@@ -72,6 +73,7 @@ __all__ = [
     "Trace",
     "create_default_detector_registry",
     "create_default_predicate_registry",
+    "create_detector_registry",
     "create_model_detector_registry",
     "load_policy_file",
     "load_policy_yaml",

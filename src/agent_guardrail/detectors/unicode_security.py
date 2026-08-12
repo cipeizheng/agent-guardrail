@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from agent_guardrail.detectors._patterns import occurrence_fingerprint
 from agent_guardrail.models import Detection, DetectionContext
 
+MAX_UNICODE_SECURITY_DETECTIONS = 64
+
 # Newline, carriage return, and horizontal tab are ordinary text layout. Other
 # C0/C1 controls remain security-relevant facts.
 _ALLOWED_TEXT_CONTROLS = frozenset({"\t", "\n", "\r"})
@@ -99,7 +101,7 @@ class UnicodeSecurityDetector:
     """Report Unicode facts that can hide or visually reorder security text."""
 
     name = "unicode_security"
-    version = "1"
+    version = "2"
 
     async def detect(
         self,
@@ -120,6 +122,8 @@ class UnicodeSecurityDetector:
                 for occupied_start, occupied_end in occupied
             ):
                 continue
+            if len(detections) >= MAX_UNICODE_SECURITY_DETECTIONS:
+                raise ValueError("Unicode security detector result limit exceeded")
             fingerprint = occurrence_fingerprint(
                 context=context,
                 detector=self.name,

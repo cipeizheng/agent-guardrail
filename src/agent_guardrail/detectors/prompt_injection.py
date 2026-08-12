@@ -24,6 +24,17 @@ PROMPT_INJECTION_PATTERNS: tuple[DetectionPattern, ...] = (
     DetectionPattern(
         type="instruction_override",
         regex=re.compile(
+            r"\b(?:do\s+not|don['’]t|never)\s+(?:follow|obey|use)\b.{0,56}"
+            r"\b(?:system|developer|previous|prior|above|earlier)\b.{0,40}"
+            r"\b(?:instructions?|prompts?|rules?|messages?)\b",
+            _FLAGS,
+        ),
+        confidence=0.92,
+        priority=20,
+    ),
+    DetectionPattern(
+        type="instruction_override",
+        regex=re.compile(
             r"(?:忽略|无视|忘记|覆盖|绕过).{0,24}"
             r"(?:之前|先前|以上|上面|系统|开发者).{0,16}"
             r"(?:指令|提示词?|规则|消息)",
@@ -40,6 +51,18 @@ PROMPT_INJECTION_PATTERNS: tuple[DetectionPattern, ...] = (
             _FLAGS,
         ),
         confidence=0.91,
+        priority=10,
+    ),
+    DetectionPattern(
+        type="system_prompt_exfiltration",
+        regex=re.compile(
+            r"\b(?:(?:tell\s+me|provide|transcribe)\b.{0,40}"
+            r"\b(?:your|the\s+(?:hidden|original|full))\b.{0,20}|"
+            r"what\s+(?:is|are)\s+(?:your|the\s+(?:hidden|original|full))\s+)"
+            r"(?:system|developer)\s+(?:prompt|message|instructions?)\b",
+            _FLAGS,
+        ),
+        confidence=0.9,
         priority=10,
     ),
     DetectionPattern(
@@ -79,6 +102,16 @@ PROMPT_INJECTION_PATTERNS: tuple[DetectionPattern, ...] = (
         confidence=0.98,
         priority=30,
     ),
+    DetectionPattern(
+        type="control_token_injection",
+        regex=re.compile(
+            r"(?:\[INST\]\s*<<SYS>>|</s>\s*<s>\s*\[INST\]|"
+            r"<\|eot_id\|>\s*<\|start_header_id\|>\s*(?:system|developer)\b)",
+            _FLAGS,
+        ),
+        confidence=0.98,
+        priority=30,
+    ),
 )
 
 
@@ -86,7 +119,7 @@ class PromptInjectionDetector:
     """Detect reviewed prompt-override shapes; this is not a semantic classifier."""
 
     name = "prompt_injection"
-    version = "1"
+    version = "2"
 
     async def detect(
         self,

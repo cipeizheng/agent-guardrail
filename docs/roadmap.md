@@ -19,27 +19,32 @@ Invariant/NeMo 的算法覆盖面。
 
 ## 阶段 A：P0 检测能力
 
-这是当前唯一开发主线。按稳定 ID 完成：
+P0 的本地算法和安全 adapter 表面已经进入状态矩阵。当前剩余工作按稳定 ID 收口真实后端验证：
 
-1. `P0-D02 enhanced_secrets`：对齐 detect-secrets 类别与误报过滤，保留脱敏 span/fingerprint。
-2. `P0-D03 contextual_multilingual_pii`：本地 Presidio 类规则和多语言/NER profile；区分真实后端与 adapter。
-3. `P0-D04 model_prompt_injection`：运行锁定的真实 checkpoint 和攻击/安全语料，把状态从
+1. `P0-D03 pii`：在固定部署 profile 中运行真实 Presidio/NER checkpoint 与多语言安全/攻击语料；本地
+   checksum/context recognizer 继续独立维护。
+2. `P0-D04 model_prompt_injection`：运行锁定的真实 checkpoint 和攻击/安全语料，把状态从
    `adapter_only` 提升为 `verified`。
-4. `P0-D05 jailbreak`：确定性高信号 heuristic 与独立模型 profile，分别报告事实。
-5. `P0-D06 yara_injection_signatures`：部署方固定并预编译规则；YAML 不能上传规则或选择文件。
+3. `P0-D05 jailbreak`：评测独立模型 profile；确定性高信号 heuristic 继续只报告有限事实。
+4. `P0-D06 yara_injection_signatures`：用部署方预编译的真实 ruleset 做 smoke/eval 和残留资源检查；YAML
+   仍不能上传规则或选择文件。
+
+`P0-D02 secrets` 的 Invariant provider 类别与误报过滤已经没有待实现代码；后续增加 provider 时继续升级
+同一 `secrets`，不创建平行的 `enhanced_secrets`。
 
 每项退出条件：真实算法/后端运行，正常/攻击/边界/失败/预算/脱敏测试，Registry→MatchPlan→Decision
 集成，以及 pre block 的上游副作用为 0。Detector hit 仍只是事实，不能单独宣称威胁路径完成。
 
 ## 阶段 B：P1 检测与结构能力
 
-P0 完成后依次实现：
+P1 的纯本地 `fuzzy_contains`、向量余弦、Python AST/IPython 和 hidden content 已进入默认 Registry。剩余工作：
 
-1. `P1-P01 fuzzy_contains`：有界编辑距离/模糊包含 Predicate，目标和阈值来自有限参数。
-2. `P1-P02 embedding_similarity`：本地或明确部署 profile 的 embedding，相似度计算保持纯且有界。
-3. `P1-D01 python_ast_ipython`：Python AST/IPython 结构、语法错误和危险节点事实。
-4. `P1-D02 semgrep`：固定语言/规则的隔离 backend，验证 timeout、输出上限和进程残留边界。
-5. `P1-D03 hidden_content`：隐藏 HTML、不可见样式、注释和有界编码内容事实。
+1. `P1-P02 embedding_similarity`：设计 Policy 执行外的固定 text encoder/向量注入边界并做准确率、延迟
+   和 provenance 验证；当前 Predicate 仍只允许向量和阈值，不能选择或运行模型。
+2. `P1-D02 semgrep`：运行固定语言/规则的隔离 backend，验证 timeout、输出上限、取消和进程残留边界。
+
+`P1-P01 fuzzy_contains`、`P1-D01 python_ast_ipython` 和 `P1-D03 hidden_content` 后续只做算法维护；不再创建
+第二套 Detector 名称。
 
 Fuzzy/embedding 需要比较目标，因此优先复用现有 Predicate 参数，而不是为 YAML 增加新的 Detector 配置
 语言。Semgrep/YARA/模型只允许部署 profile 固定后端，Policy 仍不能获得文件、进程或网络选择权。

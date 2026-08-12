@@ -64,6 +64,8 @@ version。
 | `number_in_range` | `value, minimum, maximum` | 有限 JSON 数值处于闭区间 | 512 B |
 | `length_in_range` | `value, minimum, maximum` | 字符、数组元素或对象键数量处于闭区间 | 16 KiB |
 | `url_host_allowed` | `url, allowed_hosts` | HTTP(S) 规范化 host 命中 allowlist | 8 KiB |
+| `fuzzy_contains` | `search_text, query, threshold` | 有界字面 Levenshtein substring | 16 KiB |
+| `embedding_similarity` | `left_vector, right_vector, threshold` | 稳定余弦值严格大于阈值；向量有限且非零 | 64 KiB |
 
 Range Predicate 拒绝布尔值、非有限浮点、负长度边界和 `minimum > maximum`。不适用的 Event 值返回 false；
 非法策略边界进入 `capability_error`。
@@ -72,15 +74,24 @@ URL allowlist 支持精确 host 和 `*.example.test` 子域形式；wildcard 不
 非法端口/host 和非 HTTP(S) scheme。它不做 DNS、私网、rebind、重定向、路径或响应来源检查，因此不能
 单独宣称完成 SSRF 防护。
 
+`fuzzy_contains` 把 query 当字面量，不解释正则；query 最多 256 字符/1 KiB，编辑距离最多 10，动态规划
+最多 262,144 cells。它不调用语义模型，也不在失败后退化到远程服务。
+
+默认 `embedding_similarity` 只接受最多 8,192 维的有限数值数组，拒绝空、零、维度不等和非有限向量。
+阈值都必须是 `[0, 1]` 内的有限数值；非法参数进入 `capability_error`，不能作为 false 静默放行。
+
 ## 5. 默认 Detector
 
 | 名称 | detection type 摘要 | 编码 | 输入上限 |
 | --- | --- | --- | ---: |
-| `secrets` | private key、GitHub/OpenAI/Bearer/assigned secret | canonical JSON | 16 KiB |
-| `pii` | email、北美电话、US SSN、卡号、中国身份证/手机号 | canonical JSON | 16 KiB |
+| `secrets` | private key、GitHub、AWS、Azure、Slack、OpenAI、Bearer、assigned secret | text、canonical JSON | 16 KiB |
+| `pii` | email、国际/中美电话、SSN/ITIN、卡号、中国身份证、IBAN、IP、crypto、银行号、护照/驾照、NHS | text、canonical JSON | 16 KiB |
 | `prompt_injection` | instruction/system prompt/role/control token | text、canonical JSON | 16 KiB |
+| `jailbreak` | persona、developer mode、安全绕过、双响应、拒绝抑制 | text、canonical JSON | 16 KiB |
 | `dangerous_command` | 文件/磁盘破坏、下载执行、反向 shell、混淆执行 | text、canonical JSON | 16 KiB |
 | `unicode_security` | bidi、zero-width、format/control、有限混合脚本混淆 | text、canonical JSON | 16 KiB |
+| `python_ast_ipython` | import/builtin/call、syntax error、IPython 与有限危险代码类别 | text | 16 KiB |
+| `hidden_content` | HTML alt/meta/comment/hidden/CSS 与有界 Base64/百分号/实体编码 | text、canonical JSON | 16 KiB |
 
 固定模式 Detector 是启发式事实，会有漏报和误报。Rule 应结合 Event kind、phase、origin、Tool 和显式
 Relation；必要时用 `types_any` 限定类型。
@@ -88,19 +99,58 @@ Relation；必要时用 `types_any` 限定类型。
 `unicode_security` 按原始 code point 分类，普通换行、回车和 tab 不命中。混合脚本只在同一字母数字 token
 同时包含 Latin 与审查过的 Greek/Cyrillic ASCII lookalike 时命中，不把普通中文或单一脚本文本标成攻击。
 
-所有 Detector 返回 span、类型、置信度、上下文绑定 fingerprint 和遮罩，不返回命中原文。
+所有 Detector 返回有限类型、置信度、上下文绑定 fingerprint 和遮罩；有可靠 Python 字符位置时才返回 span，
+否则只报告整字段事实。它们都不返回命中原文。
 
-## 6. 可选模型 Prompt Injection
+`python_ast_ipython` 只解析和有限预处理输入，不 import 或执行被检测代码。它把任意 module/function 名称
+归约为封闭类别；`python_import/python_builtin/python_function_call` 是结构事实，危险类别仍需 Policy 结合
+Event/Tool/来源语境。
+
+`hidden_content` 对编码内容只做单轮、本地、有界解码，并且不保留编码前后的内容。普通 body text/可见样式
+不命中；`html_alt_text/html_metadata_content` 只是不可见或替代文本的结构事实，并不表示内容恶意，Rule 应
+限定 type 并与 prompt/source 语境组合。结构合法但超过解码上限的编码候选只报告
+`encoded_content_oversized`。
+
+## 6. 部署固定的可选 adapter
 
 `create_model_detector_registry(classifier, threshold=...)` 在默认目录外发布 `prompt_injection_model`，公开
 `model_prompt_injection/model_jailbreak`，输入 16 KiB、deadline 2 秒、最多一个结果。
 
-部署代码固定 classifier、模型 identity/version、阈值和 label mapping。内置
+部署代码固定 classifier、模型 identity/version、严格大于阈值的判定和 label mapping。内置
 `TransformersPipelineClassifier` 只包装已经加载的 pipeline，不 import Transformers、不下载模型，也不把
 模型输出文本写入 Detection。同步推理在线程中执行；Matcher timeout 可以停止等待，但不能强制终止底层
 线程，所以需要强隔离时应由部署层提供可取消进程/服务 backend。
 
 当前只验证 adapter 与执行合同，没有捆绑或评测真实 checkpoint，因此状态是 `adapter_only`。
+
+需要组合多个可选 backend 时使用：
+
+```python
+detectors = create_detector_registry(
+    pii_backend=pinned_pii_backend,
+    prompt_classifier=pinned_prompt_classifier,
+    semgrep_detector=pinned_semgrep_detector,
+    yara_detector=pinned_yara_detector,
+)
+```
+
+- `PIIBackend` 只能返回有限 `PIIBackendResult`；内置 `PresidioAnalyzerBackend` 包装部署时已经加载的
+  AnalyzerEngine、固定 language/threshold/label map，不 import 或下载模型。默认 Registry 只发布本地规则；
+  注入 backend 后才发布该固定 profile 映射的 `person/location/nrp/organization/date_time/medical_license/url`
+  等 NER 类型。backend span 必须是原输入的 Python 字符 offset；Presidio 同步分析也在线程中执行，timeout
+  只能停止等待，不能强制终止底层线程。
+- `SemgrepDetector` 只接受固定 `SemgrepProfile` 与 backend 的结构化 finding。Policy 不能选择语言、规则、
+  文件、工作目录或进程；只接受 `text` encoding，rule identity 只进入 payload-free fingerprint。backend 必须
+  把原生 line/column 或 byte location 归一化为 Python 字符 offset。
+- `YaraInjectionDetector` 只接受预编译 backend 和 `YaraInjectionProfile` 的有限 rule→type 映射；Policy 不能
+  上传/编译规则，descriptor 只发布该 profile 实际绑定的 type，rule ID 不进入 evidence。yara-python 的 byte
+  offset 必须先转换为 Python 字符 offset；无法可靠转换时返回无 span 的 match。
+
+Semgrep、YARA、Presidio NER 和 prompt 模型当前都没有随项目运行真实 backend；fake 测试只证明 linking、
+预算、错误脱敏和 Enforcement 合同，具体状态见状态矩阵。
+
+文本 embedding 不在 Predicate 内执行。部署必须在 Policy 执行外用固定模型预先得到向量，再把有限向量交给
+`embedding_similarity`；当前没有发布文本 encoder adapter，因此整体状态仍是 `baseline`。
 
 ## 7. 示例与状态
 

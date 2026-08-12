@@ -7,6 +7,7 @@ import asyncio
 import pytest
 from pydantic import JsonValue
 
+from agent_guardrail.config import create_default_predicate_registry
 from agent_guardrail.core import (
     CapabilityCompilationError,
     CompiledMatchPlan,
@@ -27,6 +28,7 @@ from agent_guardrail.core.match_plan import (
     EventBinding,
     EvidenceProjection,
     EvidenceProjectionSource,
+    LiteralListValue,
     LiteralValue,
     MatchCondition,
     MatchLimitOverrides,
@@ -500,6 +502,25 @@ def test_i12_compiler_rejects_unregistered_and_incompatible_capabilities() -> No
     )
     with pytest.raises(CapabilityCompilationError, match="argument type"):
         _compile(plan(bad_type), predicates=registry)
+
+    invalid_embedding = rule(
+        where=MatchCondition(
+            predicate=PredicateCondition(
+                id="vector_similarity",
+                capability="embedding_similarity",
+                arguments=(
+                    LiteralValue(value="not-a-vector"),
+                    LiteralListValue(items=(1.0, 0.0)),
+                    LiteralValue(value=0.9),
+                ),
+            )
+        )
+    )
+    with pytest.raises(CapabilityCompilationError, match="argument type"):
+        _compile(
+            plan(invalid_embedding),
+            predicates=create_default_predicate_registry(),
+        )
 
     detector = _MarkerDetector()
     detector_registry = _detector_registry(detector)

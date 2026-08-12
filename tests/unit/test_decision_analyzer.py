@@ -154,7 +154,7 @@ async def test_finding_maps_detector_evidence_without_raw_secret() -> None:
     assert decision.action is Action.BLOCK
     assert decision.violations[0].event_ids == ("e1",)
     assert decision.violations[0].evidence[0].detector == "secrets"
-    assert decision.violations[0].evidence[0].detector_version == "1"
+    assert decision.violations[0].evidence[0].detector_version == "2"
     assert FAKE_SECRET not in decision.model_dump_json()
 
 

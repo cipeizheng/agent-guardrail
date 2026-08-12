@@ -27,20 +27,20 @@ priority_capabilities:
     note: 控制、格式、双向、零宽和有限混合脚本混淆检测已实际运行。
 
   - id: P0-D02
-    name: enhanced_secrets
+    name: secrets
     kind: detector
-    status: planned
+    status: verified
     threat_paths: [T01, T02, T05, T09]
-    baseline_capability: secrets
-    note: 当前固定模式 secrets 只是基础能力，不等于 detect-secrets 对齐。
+    implementation: secrets
+    note: Invariant 的 GitHub/AWS/Azure/Slack 类别及既有 private/OpenAI/Bearer/assigned 规则、校验、误报过滤和脱敏 Enforcement 路径已实际运行。
 
   - id: P0-D03
-    name: contextual_multilingual_pii
+    name: pii
     kind: detector
-    status: planned
+    status: baseline
     threat_paths: [T01, T02, T05, T09]
-    baseline_capability: pii
-    note: 当前邮箱、电话、SSN、卡号和中国身份证/手机号只是基础能力，不含 Presidio/GLiNER NER。
+    implementation: pii
+    note: 校验型本地规则和 Presidio 固定 profile adapter 已实现；PERSON/LOCATION 等真实 NER checkpoint 尚未运行，不能标为 verified。
 
   - id: P0-D04
     name: model_prompt_injection
@@ -53,52 +53,60 @@ priority_capabilities:
   - id: P0-D05
     name: jailbreak
     kind: detector
-    status: planned
+    status: baseline
     threat_paths: [T03, T04]
+    implementation: jailbreak
+    note: 独立确定性高信号 heuristic 已实际运行；模型事实复用尚未验证真实 checkpoint 的 prompt_injection_model adapter。
 
   - id: P0-D06
     name: yara_injection_signatures
     kind: detector
-    status: planned
+    status: adapter_only
     threat_paths: [T03, T04]
+    implementation: yara_injection_signatures
+    note: 预编译 backend/profile、有限规则映射、预算、脱敏和 Enforcement 已测试；未运行真实 YARA ruleset。
 
   - id: P1-P01
     name: fuzzy_contains
     kind: predicate
-    status: planned
+    status: verified
     threat_paths: [T03, T04]
+    implementation: fuzzy_contains
+    note: 纯本地有界 Levenshtein substring、工作量上限和 Enforcement 路径已实际运行；不含语义模型 fallback。
 
   - id: P1-P02
     name: embedding_similarity
     kind: predicate
-    status: planned
+    status: baseline
     threat_paths: [T03, T04]
+    implementation: embedding_similarity
+    note: 有限数值向量余弦已实际运行；文本 embedding 必须在 Policy 执行外预计算，当前未交付 encoder profile。
 
   - id: P1-D01
     name: python_ast_ipython
     kind: detector
-    status: planned
+    status: verified
     threat_paths: [T04]
+    implementation: python_ast_ipython
+    note: 本地 AST/IPython 结构、危险类别、语法错误、span、上限和 Enforcement 已实际运行，输入从不执行。
 
   - id: P1-D02
     name: semgrep
     kind: detector
-    status: planned
+    status: adapter_only
     threat_paths: [T04]
+    implementation: semgrep
+    note: 固定 ruleset profile、有限结构化结果、失败脱敏和 Enforcement 已测试；未运行隔离的真实 Semgrep backend。
 
   - id: P1-D03
     name: hidden_content
     kind: detector
-    status: planned
+    status: verified
     threat_paths: [T03, T04, T07]
+    implementation: hidden_content
+    note: 隐藏 HTML、不可见 CSS、注释及有界 Base64/百分号/HTML 实体检测和 Enforcement 已实际运行。
 
 other_current_capabilities:
-  - name: secrets
-    kind: detector
-    status: baseline
-  - name: pii
-    kind: detector
-    status: baseline
   - name: prompt_injection
     kind: detector
     status: baseline

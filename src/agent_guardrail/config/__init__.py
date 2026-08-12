@@ -3,6 +3,7 @@
 from agent_guardrail.config.defaults import (
     create_default_detector_registry,
     create_default_predicate_registry,
+    create_detector_registry,
     create_model_detector_registry,
 )
 from agent_guardrail.config.loader import PolicyLoadError, load_policy_file, load_policy_yaml
@@ -13,6 +14,7 @@ __all__ = [
     "create_default_detector_registry",
     "create_model_detector_registry",
     "create_default_predicate_registry",
+    "create_detector_registry",
     "load_policy_file",
     "load_policy_yaml",
     "load_match_plan_file",

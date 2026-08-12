@@ -19,6 +19,11 @@ Gateway。所有接入复用同一 Runtime/EnforcementSession 语义：`pre_llm/
 默认 capability 的准确名称、覆盖范围和验证状态分别见[Capability 参考](docs/reference/capabilities.md)
 与[状态矩阵](docs/capability-status.yaml)；未来工作只在[roadmap](docs/roadmap.md)维护。
 
+当前默认 Registry 已包含 Invariant 对齐的本地 secrets/PII、prompt injection、jailbreak、Python AST/IPython、
+hidden content，以及 fuzzy/向量 embedding Predicate。模型 Prompt/PII、Semgrep 和 YARA 只在部署代码固定
+backend/profile 并显式注入后发布；文本 embedding 在 Policy 执行外预计算。项目不把 adapter fake 测试写成
+真实后端已验证。
+
 ## 核心目标
 
 - 在 LLM 调用和工具执行前后提供明确检查点。
