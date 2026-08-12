@@ -1,15 +1,32 @@
 [project]
 name = "agent-guardrail"
 version = "0.1.0"
-description = "A small, explainable guardrail runtime and gateway for AI agents"
+description = "An explainable policy analyzer and enforcement gateway for AI agents"
 readme = "README.md"
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.12"
 license = "MIT"
 license-files = ["LICENSE"]
+keywords = ["ai-agents", "guardrails", "policy", "llm-security", "mcp"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+    "Typing :: Typed",
+]
 dependencies = [
     "pydantic>=2.10,<3",
     "pyyaml>=6.0,<7",
 ]
+
+[project.urls]
+Homepage = "https://github.com/cipeizheng/agent-guardrail"
+Documentation = "https://github.com/cipeizheng/agent-guardrail/tree/main/docs"
+Repository = "https://github.com/cipeizheng/agent-guardrail.git"
+Issues = "https://github.com/cipeizheng/agent-guardrail/issues"
 
 [project.optional-dependencies]
 gateway = [

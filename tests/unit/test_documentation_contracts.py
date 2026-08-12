@@ -33,6 +33,7 @@ OPTIONAL_ADAPTER_NAMES = frozenset(
 MARKDOWN_LINK = re.compile(r"\[[^\]]+\]\((?P<target>[^)]+)\)")
 CATALOG_DOCUMENTS = (
     ROOT / "README.md",
+    ROOT / "README.zh-CN.md",
     ROOT / "docs" / "current-architecture-contract.md",
     ROOT / "docs" / "reference" / "capabilities.md",
 )
@@ -95,6 +96,8 @@ def test_local_markdown_links_resolve_inside_the_repository() -> None:
     documents = (
         ROOT / "AGENTS.md",
         ROOT / "README.md",
+        ROOT / "README.zh-CN.md",
+        ROOT / "CONTRIBUTING.md",
         *(ROOT / "docs").rglob("*.md"),
     )
     root = ROOT.resolve()
@@ -110,3 +113,19 @@ def test_local_markdown_links_resolve_inside_the_repository() -> None:
             resolved = (document.parent / path_text).resolve()
             assert resolved.is_relative_to(root), f"external local link in {document}: {target}"
             assert resolved.exists(), f"broken local link in {document}: {target}"
+
+
+def test_public_readmes_expose_a_bidirectional_language_switch() -> None:
+    english = (ROOT / "README.md").read_text(encoding="utf-8")
+    chinese = (ROOT / "README.zh-CN.md").read_text(encoding="utf-8")
+
+    assert "[简体中文](README.zh-CN.md)" in english
+    assert "[English](README.md)" in chinese
+    for path in (
+        "docs/current-architecture-contract.md",
+        "docs/capability-status.yaml",
+        "docs/security-model.md",
+        "CONTRIBUTING.md",
+    ):
+        assert path in english
+        assert path in chinese

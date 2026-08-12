@@ -1,205 +1,265 @@
 # Agent Guardrail
 
-一个面向 AI Agent 的 Invariant 风格、可解释 Policy Analyzer 与 Enforcement Gateway。
+**An explainable policy analyzer and enforcement gateway for AI agents.**
 
-项目使用一等 Event、显式 Relation 和 `past + pending` whole-pending 分析。唯一生产 Policy 是严格
-`version: 3` YAML，经 AuthorPolicy、MatchPlan、可信 capability linking 和有界 SnapshotMatcher 生成
-AnalysisReport，再失败安全地投影为 Decision。YAML 不能执行 Python、import、callback 或 I/O。
+English | [简体中文](README.zh-CN.md)
 
-核心保护目标是用户的数据、意图和资源。Detector 只产生事实；完整安全判断还必须结合可信
-source/sink、owner、destination 和 authorization。当前架构、不变量与未交付边界以
-[当前架构合同](docs/current-architecture-contract.md)为准。
+[![Version](https://img.shields.io/badge/version-0.1.0-3b82f6)](pyproject.toml)
+[![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)](pyproject.toml)
+[![Status](https://img.shields.io/badge/status-alpha-f59e0b)](docs/roadmap.md)
+[![License](https://img.shields.io/badge/license-MIT-22c55e)](LICENSE)
 
-## 当前状态
+Agent Guardrail places explicit, fail-safe policy checks before and after LLM and tool
+boundaries. It compiles a strict YAML policy into an immutable match plan, analyzes typed agent
+events, and returns an explainable decision before protected data or side effects are released.
 
-v0.1.0 已提供 Inline LLM/Tool、OpenAI-compatible 非流式 Gateway、MCP `2026-07-28` 无状态 Gateway，
-以及固定 Policy 的远程 Core。Gateway 可以嵌入 Runtime，也可以通过封闭的 `PendingTrace → Decision` 协议
-调用 Core；所有接入复用同一 Runtime/EnforcementSession 语义：`pre_llm/pre_tool` 通过前不发生受保护
-副作用，非流式 `post_llm/post_tool` 通过前不释放原始结果。
+The project focuses on three assets: **user data, user intent, and user resources**. Detector hits
+are evidence, not security decisions by themselves; policies combine those facts with trusted
+source, destination, ownership, and authorization context.
 
-默认 capability 的准确名称、覆盖范围和验证状态分别见[Capability 参考](docs/reference/capabilities.md)
-与[状态矩阵](docs/capability-status.yaml)；未来工作只在[roadmap](docs/roadmap.md)维护。
+> **Project status — v0.1.0 alpha.** The core runtime, Inline wrappers, non-streaming
+> OpenAI-compatible Gateway, stateless MCP Gateway, and remote Core path are implemented and
+> tested. This release is not a complete sandbox, streaming proxy, or multi-tenant control plane.
 
-当前默认 Registry 发布 6 个本地 Detector：`secrets`、`pii`、`prompt_injection`、`unicode_security`、
-`python_ast_ipython`、`hidden_content`；以及 4 个纯 Predicate：`number_in_range`、`length_in_range`、
-`url_host_allowed`、`fuzzy_contains`。`prompt_injection_model`、带 Presidio/PIIBackend 的 `pii`、`semgrep`、
-`yara_injection_signatures` 和文本语义 `is_similar` 只在部署代码固定 backend/profile 并显式注入后发布。
-内置 `full_local_v1` profile 已真实运行 Presidio/spaCy、锁定 checkpoint 的 DeBERTa、Semgrep CLI 和
-yara-python；`is_similar` 已交付 OpenAI-compatible embedding adapter，但真实服务 smoke/eval 前保持
-`adapter_only`。项目不把 adapter fake 测试写成真实后端已验证。
+## Why Agent Guardrail?
 
-## 核心目标
+- **Enforcement, not just detection.** A blocked `pre_llm` request never reaches the model; a
+  blocked `pre_tool` request never executes the tool.
+- **One auditable policy chain.** Strict `version: 3` YAML becomes `MatchPlan → AnalysisReport →
+  Decision`; there is no second production interpreter.
+- **No executable policy payloads.** YAML cannot import Python, register callbacks, select files,
+  choose network endpoints, or acquire arbitrary I/O permissions.
+- **Typed traces and explicit relations.** Messages, tool calls, and tool results are immutable
+  events. Temporal order is never silently treated as provenance.
+- **Deployment-owned capabilities.** Models, rulesets, processes, and credentials are selected by
+  the deployment, while Policy sees only reviewed capability names and bounded parameters.
+- **Redacted by construction.** Findings, violations, errors, and optional audit records contain
+  structured, masked evidence instead of raw secrets, PII, or prompts.
 
-- 在 LLM 调用和工具执行前后提供明确检查点。
-- 保证 `pre_tool` 返回 `block` 时工具绝不执行。
-- 将 Detector、Finding、Decision 与 Enforcement 分离。
-- 使用统一 Event/Trace 模型隔离不同 Agent 和模型供应商格式。
-- 使用同一 Trace 内经过校验的来源边表达事件关系，不把时间先后当成数据流。
-- 原子分析本次新增的 pending Event，避免只匹配历史 Event 就重复阻断当前操作。
-- 同时提供内联 SDK、OpenAI HTTP Gateway 与 MCP HTTP Gateway。
-- 默认可完全本地运行，同时提供 Core + Gateway 两个职责分离的自托管容器。
-- Decision 结构可解释、可测试；包含 Violation 的 Decision 可通过可选 AuditSink 脱敏审计。
+## Architecture
 
-## 非目标
-
-- 当前版本不交付 CEL 或 Invariant Policy Language。
-- 当前版本不支持 Python Rule 或任意 Python 策略上传。
-- 当前不支持 LLM 实时流式响应安全拦截；MCP 请求级 SSE 会完整、有界缓冲后再做 `post_tool`。
-- 当前不提供完整 Web UI、多租户或分布式控制平面。
-- 用 LLM 生成未经验证就直接启用的策略。
-
-## 文档
-
-- [文档导航](docs/README.md)
-- [当前架构合同](docs/current-architecture-contract.md)
-- [安全模型](docs/security-model.md)
-- [Capability 状态矩阵](docs/capability-status.yaml)
-- [开发路线图](docs/roadmap.md)
-- [双容器运行指南](docs/guides/operations.md#2-双容器启动)
-
-## Docker 自托管
-
-运行拓扑固定为两个容器：Core 持有 Policy、Detector 与模型，Gateway 持有 Provider/MCP 凭据、Trace、
-Audit 与副作用顺序。CPU/CUDA 是 Core 配置，不是第三个容器。
-
-```bash
-cp .env.example .env
-# 填写 .env 中的 Key 与固定上游
-docker compose build
-docker compose up -d
-curl --fail http://127.0.0.1:8080/health/ready
+```mermaid
+flowchart LR
+    A[Agent or client] --> B[Inline / OpenAI / MCP adapter]
+    B --> C[EnforcementSession]
+    C -->|PendingTrace| D[Embedded Runtime or Remote Core]
+    D --> E[Policy v3 → MatchPlan → SnapshotMatcher]
+    E -->|AnalysisReport| F[Decision Analyzer]
+    F -->|allow / log / block| C
+    C -->|pre allow / post release| G[LLM or Tool boundary]
+    C -->|redacted violations| H[(Audit)]
 ```
 
-Core 镜像在构建期预取并校验完整 `full_local_v1` 模型资产，首次构建会较慢；运行时不下载模型。Core 端口
-不发布到宿主，Policy 只挂载到 Core，Gateway 镜像不包含模型或扫描工具。详细配置、安全边界和 CUDA
-override 见[运行指南](docs/guides/operations.md)。
+The same policy semantics are reused at four enforcement points:
 
-## 本地开发
-
-```bash
-uv sync --extra gateway --dev
-uv run pytest
-uv run ruff check .
-uv run pyright
+```text
+request → pre_llm → LLM → post_llm → Agent → pre_tool → Tool → post_tool → Agent
 ```
 
-安装并准备完整本地 Detector profile：
+Analysis always sees the committed trace plus the complete pending event batch. Allow and log
+decisions atomically commit that batch; block discards the raw pending events and commits only a
+sanitized decision event.
+
+## Quick start
+
+Requirements: Python 3.12 or later and [uv](https://docs.astral.sh/uv/).
+
+```bash
+git clone https://github.com/cipeizheng/agent-guardrail.git
+cd agent-guardrail
+uv sync --frozen --extra gateway --dev
+uv run python examples/secret_email_demo.py
+```
+
+The demo uses a deterministic fake model and tool, so it needs no API key. The important output is:
+
+```text
+blocked at: post_llm
+llm executions: 1
+send_email executions: 0
+```
+
+The model proposed a tool call containing a secret, but the guarded email tool was never executed.
+
+## A policy is data, not code
+
+This policy blocks a `send_email` tool call when its arguments contain secret material:
+
+```yaml
+version: 3
+
+engine:
+  on_analysis_error: block
+  on_detector_timeout: block
+
+scopes: [pending]
+
+rules:
+  - id: prevent-secret-email
+    action: block
+    events:
+      call:
+        kind: tool_call
+        domain: pending
+        phases: [post_llm, pre_tool]
+    where:
+      all:
+        - tool: {binding: call, name: send_email}
+        - detector:
+            id: secret_scan
+            capability: secrets
+            inputs:
+              - value: {field: [call, payload, arguments]}
+                encoding: canonical_json
+    finding:
+      code: secret_exfiltration
+      message: The tool call contains secret material.
+      subjects: [call]
+      evidence: [{source: detector, id: secret_scan}]
+```
+
+The loader rejects duplicate keys, unknown fields, loose types, YAML aliases/tags, invalid
+references, and unavailable capabilities before a runtime is activated. See the
+[Policy authoring guide](docs/guides/policy-authoring.md) for bindings, relations, quantifiers,
+derived values, findings, budgets, and trusted security parameters.
+
+## Integration options
+
+| Integration | Best fit | Current guarantee |
+| --- | --- | --- |
+| Inline wrappers | You can inject LLM and tool interfaces | Mediates calls passing through the shared task-level session |
+| OpenAI-compatible Gateway | The agent can change its OpenAI base URL | Checks complete requests and non-streaming responses |
+| MCP Gateway | Tools are exposed by a fixed MCP server | Checks every stateless `tools/call` before and after execution |
+| Remote Core | Policy and detector assets must be isolated from the edge | Gateway owns traffic and side effects; Core analyzes complete `PendingTrace` values |
+| Docker Compose | Self-hosted Core + Gateway | Read-only containers, private Core network, separated provider and Core credentials |
+
+For an OpenAI client, the agent only changes its base URL:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    api_key="gateway-key",
+    base_url="http://127.0.0.1:8080/v1/openai",
+)
+```
+
+For MCP Python SDK v2:
+
+```python
+from mcp import Client
+
+async with Client("http://127.0.0.1:8080/v1/mcp", cache=None) as client:
+    result = await client.call_tool("send_email", {"to": "outside@example.com"})
+```
+
+See the [integration guide](docs/guides/integration.md) and
+[Gateway protocol reference](docs/reference/gateway-protocol.md) for lifecycle and protocol
+details.
+
+## Capabilities
+
+The default `local` registry performs no model downloads and publishes:
+
+- Detectors: `secrets`, `pii`, `prompt_injection`, `unicode_security`,
+  `python_ast_ipython`, and `hidden_content`.
+- Pure predicates: `number_in_range`, `length_in_range`, `url_host_allowed`, and
+  `fuzzy_contains`.
+
+Deployment-fixed optional capabilities are deliberately separate:
+
+| Availability | Capability | Backend boundary |
+| --- | --- | --- |
+| `full_local_v1` | `prompt_injection_model` | Pinned Protect AI DeBERTa checkpoint, local CPU/CUDA inference |
+| `full_local_v1` | enhanced `pii` | Pinned Presidio/spaCy English NER plus local validators |
+| `full_local_v1` | `semgrep` | Isolated, version-pinned CLI and bundled Python ruleset |
+| `full_local_v1` | `yara_injection_signatures` | Pinned yara-python, bundled ruleset, and fixed rule-to-type mapping |
+| Explicit injection | `is_similar` | Deployment-selected `EmbeddingProfile` and async embedding backend |
+
+`is_similar` currently has `adapter_only` status: its schema, budgets, timeout behavior,
+redaction, and enforcement path are tested, but a real external embedding service has not been
+accepted as verified. The exact, non-marketing status of every capability lives in the
+[capability matrix](docs/capability-status.yaml).
+
+## Deployment profiles
+
+### Default local profile
+
+The default profile is lightweight and deterministic. It does not load Transformers, Presidio,
+Semgrep, YARA, or a remote embedding client.
+
+### Full local profile
+
+`full_local_v1` pins and verifies its detector dependencies and model assets before startup:
 
 ```bash
 uv sync --frozen --extra gateway --extra detectors --no-dev
 uv tool install semgrep==1.170.0
 export AGENT_GUARDRAIL_DETECTOR_ASSETS_DIR=/var/lib/agent-guardrail/detectors
 uv run agent-guardrail-prefetch-detectors
-```
-
-预取命令只下载锁定到提交 `90c9989b1a342275dd0d1a95aad283c04e075671` 的提示注入模型文件，并逐项
-校验固定字节数和 SHA-256。Runtime 不联网下载模型。Presidio 的英文 spaCy 模型由 `detectors` extra 固定
-安装，Semgrep 使用隔离的 `uv tool` 环境以避免与 Gateway 的 MCP v2 依赖冲突。
-
-### VS Code / Pylance
-
-仓库已将解释器固定为 `${workspaceFolder}/.venv/bin/python`，并将 `src` 加入 Pylance 和
-Pyright 分析路径。首次打开仓库时，如果状态栏仍显示其他 Python：
-
-1. 执行 `Python: Select Interpreter`。
-2. 选择项目内 `.venv/bin/python`。
-3. 执行 `Developer: Reload Window` 或 `Pylance: Restart Language Server`。
-
-请直接以 `agent-guardrail` 为 VS Code workspace 根目录打开，不要只打开单个 Python 文件。
-
-只安装 Gateway 运行依赖（不安装开发工具）：
-
-```bash
-uv sync --frozen --extra gateway --no-dev
-```
-
-运行不需要 API Key 的 Secret 外发阻断演示：
-
-```bash
-uv run python examples/secret_email_demo.py
-```
-
-演示中的模型和 `send_email` 都是确定性的 Fake；最终输出必须显示
-`send_email executions: 0`，且 Decision 中只包含 Secret 类型、指纹和遮罩证据。
-
-## 使用方式
-
-内联 Agent：
-
-```python
-runtime = GuardrailRuntime.from_policy_file("examples/policies/secret-email.yaml")
-
-async with runtime:
-    session = EnforcementSession(analyzer=runtime, trace=Trace(id="task-1"))
-    llm = GuardedLLMClient(inner=provider, session=session)
-    tools = GuardedToolExecutor(inner=tool_executor, session=session)
-    agent = SomeAgent(llm=llm, tools=tools)
-    result = await agent.run("Send the report by email")
-```
-
-HTTP Gateway 客户端：
-
-```python
-client = OpenAI(
-    api_key=os.environ["GATEWAY_API_KEY"],
-    base_url="http://localhost:8080/v1/openai",
-)
-```
-
-单进程 embedded 模式启动 Gateway：
-
-```bash
-export AGENT_GUARDRAIL_POLICY_FILE="$PWD/examples/policies/secret-email.yaml"
-export AGENT_GUARDRAIL_UPSTREAM_BASE_URL="https://api.openai.com/v1"
-export AGENT_GUARDRAIL_UPSTREAM_API_KEY="your-provider-key"
-export AGENT_GUARDRAIL_GATEWAY_API_KEYS='["your-gateway-key"]'
-uv run --extra gateway python -m agent_guardrail.gateway
-```
-
-启用完整本地 Detector profile 时再设置：
-
-```bash
 export AGENT_GUARDRAIL_DETECTOR_PROFILE=full_local_v1
-export AGENT_GUARDRAIL_DETECTOR_ASSETS_DIR=/var/lib/agent-guardrail/detectors
-export AGENT_GUARDRAIL_PROMPT_MODEL_DEVICE=cuda  # 或 cpu
-uv run --extra gateway --extra detectors python -m agent_guardrail.gateway
 ```
 
-`full_local_v1` 缺少任一依赖、固定模型文件、正确 Semgrep 版本或所选 CUDA 设备时会拒绝启动。模型、规则、
-文件和设备都是进程级部署配置，Policy YAML 仍不能选择或替换它们。
+Runtime startup fails if required assets, versions, checksums, or the selected CUDA device do not
+match the profile. Policy YAML still cannot replace those choices.
 
-Agent 无需导入本项目。低耦合契约由
-`tests/blackbox/external_openai_agent.py` 和
-`tests/integration/test_external_agent_base_url.py` 验证：外部 Agent 只导入官方 `openai` 包并修改
-`base_url`；被阻断的 ToolCall 不会到达 Agent。Inline Wrapper 继续作为可控制进程内依赖注入时的
-可选接入方式。
-
-MCP Gateway（当前协议 `2026-07-28`）：
+### Docker Compose
 
 ```bash
-export AGENT_GUARDRAIL_POLICY_FILE="$PWD/examples/policies/secret-email.yaml"
-export AGENT_GUARDRAIL_MCP_UPSTREAM_URL="https://mcp.example.com/mcp"
-export AGENT_GUARDRAIL_MCP_UPSTREAM_ALLOWED_HOSTS='["mcp.example.com"]'
-uv run --extra gateway python -m agent_guardrail.gateway
+cp .env.example .env
+# Replace every placeholder in .env.
+docker compose build
+docker compose up -d
+curl --fail http://127.0.0.1:8080/health/ready
 ```
 
-使用官方 MCP Python SDK v2 时，Agent 侧只改 URL：
+The Core image includes the full detector profile and is intentionally large. Read the
+[operations guide](docs/guides/operations.md) before using it outside a local environment.
 
-```python
-from mcp import Client
+## Current boundaries
 
-async with Client("http://127.0.0.1:8080/v1/mcp", cache=None) as client:
-    tools = await client.list_tools()
-    result = await client.call_tool("send_email", {"to": "outside@example.com", "body": "..."})
+Agent Guardrail only mediates traffic that passes through its wrappers or gateways. It does not
+currently provide:
+
+- real-time LLM streaming enforcement;
+- cross-request session state or policy hot reload;
+- a complete multi-tenant identity and authorization control plane;
+- a sandbox or interception for direct shell, function, filesystem, or arbitrary HTTP access;
+- a web management UI or distributed policy service;
+- moderation, copyright, or OCR capabilities.
+
+A detector hit is not proof of malicious intent, data ownership, or authorization. Production
+rules should combine detector facts with trusted source/sink context. The authoritative boundaries
+are maintained in the [current architecture contract](docs/current-architecture-contract.md) and
+[security model](docs/security-model.md).
+
+## Documentation
+
+| Read this | When you need to... |
+| --- | --- |
+| [Documentation map](docs/README.md) | Choose the shortest reading path for a task |
+| [Architecture overview](docs/overview.md) | Understand Event, MatchPlan, Runtime, and Enforcement |
+| [Policy authoring](docs/guides/policy-authoring.md) | Write strict production YAML policies |
+| [Capability reference](docs/reference/capabilities.md) | Use detectors, predicates, and optional backends |
+| [Integration guide](docs/guides/integration.md) | Connect an Agent, OpenAI client, or MCP client |
+| [Operations guide](docs/guides/operations.md) | Configure secrets, profiles, Docker, audit, and health |
+| [Security model](docs/security-model.md) | Review assets, trust boundaries, and T01–T10 |
+| [Roadmap](docs/roadmap.md) | See planned work without confusing it with shipped behavior |
+
+## Development
+
+```bash
+uv sync --frozen --extra gateway --dev
+uv run pytest --cov=agent_guardrail --cov-report=term-missing
+uv run ruff check .
+uv run pyright
+uv build
+git diff --check
 ```
 
-当前只接受 `server/discover`、`ping`、`tools/list` 和 `tools/call`。它不实现旧版
-`initialize`、`Mcp-Session-Id`、GET SSE stream 或 DELETE session，也不支持订阅和实时 progress；
-协议合同见[Gateway 协议参考](docs/reference/gateway-protocol.md)和
-[当前架构合同](docs/current-architecture-contract.md)。低耦合契约由
-`tests/blackbox/external_mcp_agent.py` 和 `tests/integration/test_mcp_gateway_sdk.py` 使用官方 SDK v2
-经真实 HTTP 验证。
+Contributions are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md); architecture and safety
+changes must preserve the contracts documented in the repository.
 
 ## License
 
-本项目使用 [MIT License](LICENSE)。
+Agent Guardrail is available under the [MIT License](LICENSE).
