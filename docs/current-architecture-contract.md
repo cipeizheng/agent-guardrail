@@ -2,7 +2,7 @@
 
 > 状态：日常实现的短合同。治理方式由
 > [ADR-0014](adr/0014-current-architecture-baseline.md) 确立；ADR-0001–0013 已移出当前文档树，不是实现输入。
-> 最后核对：2026-08-11，版本 `0.1.0`。
+> 最后核对：2026-08-12，版本 `0.1.0`。
 
 ## 1. 当前生产链
 
@@ -60,8 +60,9 @@ strict version: 3 YAML → AuthorPolicy → immutable MatchPlan
   `unicode_security`、`python_ast_ipython`、`hidden_content`。
 - 默认 Predicate：`number_in_range`、`length_in_range`、`url_host_allowed`、`fuzzy_contains`、
   `embedding_similarity`；默认 embedding 只做纯数值向量余弦。
-- `prompt_injection_model`、Semgrep、YARA 和 Presidio NER 只有部署代码显式注入后才发布；adapter 测试不代表
-  真实模型、ruleset 或 backend 已验证。文本 embedding 必须在 Policy 执行外预先计算。
+- `prompt_injection_model`、带外部 backend 的 `pii`、`semgrep` 和 `yara_injection_signatures` 只有部署代码
+  显式注入后才发布；adapter 测试不代表真实模型、ruleset 或 backend 已验证。文本 embedding 必须在
+  Policy 执行外预先计算。
 - 运行时实际发布名称以默认 Registry 为事实来源；交付验证状态、稳定 roadmap ID 和完成定义以
   [`capability-status.yaml`](capability-status.yaml) 为事实来源。
 

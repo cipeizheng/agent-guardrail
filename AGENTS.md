@@ -20,7 +20,6 @@
 ## 工作规则
 
 - 当前实现、不可破坏约束、事实来源和未交付范围以 current architecture contract 为准。
-- ADR-0001–0013 已移出当前文档树且没有规范权；改变当前架构合同时新增短 ADR，并同步合同和索引。
 - 非 ADR 文档必须区分“当前实现”“设计合同”“后续规划”，不得把 target、adapter 或模拟测试写成
   verified 能力。
 - Capability 状态只能使用状态矩阵的封闭词汇；`adapter_only`、`baseline` 和 `planned` 不得写成

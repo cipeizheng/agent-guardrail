@@ -17,8 +17,9 @@ strict version: 3 YAML
   → CompiledPolicy
 ```
 
-独立 SDK 还可用 `version: 1` 作者 YAML 或类型化 Python `AuthorPolicy` 生成 action-free MatchPlan。所有入口
-复用同一个 `compile_author_policy()`；Python API 不能绕过 Schema、引用校验或预算。
+独立 SDK 的 `load_match_plan_yaml()` 还可用 `version: 1` 作者 YAML，类型化 Python `AuthorPolicy` 也可生成
+action-free MatchPlan；二者都不是 Gateway/Runtime 的生产 Policy Loader，也不携带 action。所有作者入口复用
+同一个 `compile_author_policy()`；Python API 不能绕过 Schema、引用校验或预算。
 
 ## 2. 完整生产示例
 
@@ -155,8 +156,9 @@ attributes、metadata、HTTP 或 Provider payload 不能覆盖。生产其他参
 
 ## 8. 加载与安全边界
 
-Loader 原子拒绝 duplicate key、YAML anchor/alias、显式 tag、未知字段、宽松类型、旧版本、错误引用和
-未发布 capability。整个文件通过后才返回不可变 Plan/Policy，不会激活部分 Rule。
+生产 Loader 原子拒绝 duplicate key、YAML anchor/alias、显式 tag、未知字段、宽松类型、非 `version: 3`、
+错误引用和未发布 capability。独立 `load_match_plan_yaml()` 只接受 action-free `version: 1` 作者格式；两条
+入口都必须整个文件通过后才返回不可变 Plan/Policy，不会激活部分 Rule。
 
 Policy 不能声明 Python module/callable、正则代码、handler 或 I/O。新增算法先实现并审查 capability，再由
 部署代码注册；外部 YAML 只能引用公开 descriptor 名称。

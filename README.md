@@ -19,10 +19,12 @@ Gateway。所有接入复用同一 Runtime/EnforcementSession 语义：`pre_llm/
 默认 capability 的准确名称、覆盖范围和验证状态分别见[Capability 参考](docs/reference/capabilities.md)
 与[状态矩阵](docs/capability-status.yaml)；未来工作只在[roadmap](docs/roadmap.md)维护。
 
-当前默认 Registry 已包含 Invariant 对齐的本地 secrets/PII、prompt injection、jailbreak、Python AST/IPython、
-hidden content，以及 fuzzy/向量 embedding Predicate。模型 Prompt/PII、Semgrep 和 YARA 只在部署代码固定
-backend/profile 并显式注入后发布；文本 embedding 在 Policy 执行外预计算。项目不把 adapter fake 测试写成
-真实后端已验证。
+当前默认 Registry 发布 8 个本地 Detector：`secrets`、`pii`、`prompt_injection`、`jailbreak`、
+`dangerous_command`、`unicode_security`、`python_ast_ipython`、`hidden_content`；以及 5 个纯 Predicate：
+`number_in_range`、`length_in_range`、`url_host_allowed`、`fuzzy_contains`、`embedding_similarity`。
+`prompt_injection_model`、带 Presidio/PIIBackend 的 `pii`、`semgrep` 和 `yara_injection_signatures` 只在
+部署代码固定 backend/profile 并显式注入后发布；文本 embedding 在 Policy 执行外预计算。项目不把
+adapter fake 测试写成真实后端已验证。
 
 ## 核心目标
 

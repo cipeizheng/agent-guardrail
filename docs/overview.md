@@ -86,9 +86,10 @@ YAML 只能引用部署方注册并发布 descriptor 的 Predicate/Detector。Pr
 输入编码、字节、deadline、结果类型、数量和 evidence 均受 descriptor 与 MatchPlan 预算约束。Policy
 不能指定 module、模型地址、文件、进程、网络 endpoint 或实现参数。
 
-默认 Registry 只包含本地确定性算法。模型 Prompt/PII、Semgrep 和 YARA 必须由部署启动代码绑定固定
-backend/profile 后显式发布；Policy 只能看到稳定 capability 名称和有限类型，不能看到或更换 profile。
-文本 embedding 在 Policy 执行外预计算，Predicate 只接收有限向量。
+默认 Registry 只包含本地确定性算法。`prompt_injection_model`、带外部 backend 的 `pii`、`semgrep` 和
+`yara_injection_signatures` 必须由部署启动代码绑定固定 backend/profile 后显式发布；Policy 只能看到稳定
+capability 名称和有限类型，不能看到或更换 profile。文本 embedding 在 Policy 执行外预计算，Predicate
+只接收有限向量。
 
 ## 6. Enforcement 保证
 

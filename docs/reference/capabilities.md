@@ -134,20 +134,21 @@ detectors = create_detector_registry(
 )
 ```
 
-- `PIIBackend` 只能返回有限 `PIIBackendResult`；内置 `PresidioAnalyzerBackend` 包装部署时已经加载的
-  AnalyzerEngine、固定 language/threshold/label map，不 import 或下载模型。默认 Registry 只发布本地规则；
+- `pii` 的 `PIIBackend` 只能返回有限 `PIIBackendResult`；内置 `PresidioAnalyzerBackend` 包装部署时已经
+  加载的 AnalyzerEngine、固定 language/threshold/label map，不 import 或下载模型。默认 Registry 只发布本地规则；
   注入 backend 后才发布该固定 profile 映射的 `person/location/nrp/organization/date_time/medical_license/url`
   等 NER 类型。backend span 必须是原输入的 Python 字符 offset；Presidio 同步分析也在线程中执行，timeout
   只能停止等待，不能强制终止底层线程。
-- `SemgrepDetector` 只接受固定 `SemgrepProfile` 与 backend 的结构化 finding。Policy 不能选择语言、规则、
-  文件、工作目录或进程；只接受 `text` encoding，rule identity 只进入 payload-free fingerprint。backend 必须
-  把原生 line/column 或 byte location 归一化为 Python 字符 offset。
-- `YaraInjectionDetector` 只接受预编译 backend 和 `YaraInjectionProfile` 的有限 rule→type 映射；Policy 不能
-  上传/编译规则，descriptor 只发布该 profile 实际绑定的 type，rule ID 不进入 evidence。yara-python 的 byte
-  offset 必须先转换为 Python 字符 offset；无法可靠转换时返回无 span 的 match。
+- `semgrep` 的 `SemgrepDetector` 只接受固定 `SemgrepProfile` 与 backend 的结构化 finding。Policy 不能选择
+  语言、规则、文件、工作目录或进程；只接受 `text` encoding，rule identity 只进入 payload-free
+  fingerprint。backend 必须把原生 line/column 或 byte location 归一化为 Python 字符 offset。
+- `yara_injection_signatures` 的 `YaraInjectionDetector` 只接受预编译 backend 和
+  `YaraInjectionProfile` 的有限 rule→type 映射；Policy 不能上传/编译规则，descriptor 只发布该 profile
+  实际绑定的 type，rule ID 不进入 evidence。yara-python 的 byte offset 必须先转换为 Python 字符 offset；
+  无法可靠转换时返回无 span 的 match。
 
-Semgrep、YARA、Presidio NER 和 prompt 模型当前都没有随项目运行真实 backend；fake 测试只证明 linking、
-预算、错误脱敏和 Enforcement 合同，具体状态见状态矩阵。
+`semgrep`、`yara_injection_signatures`、带 Presidio backend 的 `pii` 和 `prompt_injection_model` 当前都没有
+随项目运行真实 backend；fake 测试只证明 linking、预算、错误脱敏和 Enforcement 合同，具体状态见状态矩阵。
 
 文本 embedding 不在 Predicate 内执行。部署必须在 Policy 执行外用固定模型预先得到向量，再把有限向量交给
 `embedding_similarity`；当前没有发布文本 encoder adapter，因此整体状态仍是 `baseline`。

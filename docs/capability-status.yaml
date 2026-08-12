@@ -1,5 +1,5 @@
 schema_version: 1
-last_verified: "2026-08-11"
+last_verified: "2026-08-12"
 
 status_vocabulary:
   verified: 实际算法或声明的真实后端已运行，并满足完整行为完成定义。
@@ -40,10 +40,10 @@ priority_capabilities:
     status: baseline
     threat_paths: [T01, T02, T05, T09]
     implementation: pii
-    note: 校验型本地规则和 Presidio 固定 profile adapter 已实现；PERSON/LOCATION 等真实 NER checkpoint 尚未运行，不能标为 verified。
+    note: 校验型本地规则和 Presidio 固定 profile adapter 已实现；person/location 等真实 NER checkpoint 尚未运行，不能标为 verified。
 
   - id: P0-D04
-    name: model_prompt_injection
+    name: prompt_injection_model
     kind: detector
     status: adapter_only
     threat_paths: [T03, T04]
@@ -56,7 +56,7 @@ priority_capabilities:
     status: baseline
     threat_paths: [T03, T04]
     implementation: jailbreak
-    note: 独立确定性高信号 heuristic 已实际运行；模型事实复用尚未验证真实 checkpoint 的 prompt_injection_model adapter。
+    note: 独立确定性高信号 heuristic 已实际运行；固定模式对多语言、改写和混淆攻击的覆盖尚未完成系统评测。
 
   - id: P0-D06
     name: yara_injection_signatures
@@ -110,15 +110,27 @@ other_current_capabilities:
   - name: prompt_injection
     kind: detector
     status: baseline
+    threat_paths: [T03, T04]
+    implementation: prompt_injection
+    note: 确定性高信号模式及 Enforcement 路径已实际运行；多语言、改写和语义攻击覆盖仍有限。
   - name: dangerous_command
     kind: detector
     status: baseline
+    threat_paths: [T04]
+    implementation: dangerous_command
+    note: 固定高风险命令模式及 Enforcement 路径已实际运行；不是完整 shell parser 或 Sandbox。
   - name: number_in_range
     kind: predicate
     status: verified
+    implementation: number_in_range
+    note: 有限数值、闭区间和非法边界行为已实际运行。
   - name: length_in_range
     kind: predicate
     status: verified
+    implementation: length_in_range
+    note: 字符串、数组和对象长度的闭区间行为已实际运行。
   - name: url_host_allowed
     kind: predicate
     status: verified
+    implementation: url_host_allowed
+    note: HTTP(S) host 规范化、精确/wildcard allowlist 与非法 URL 边界已实际运行；不单独构成完整 SSRF 防护。

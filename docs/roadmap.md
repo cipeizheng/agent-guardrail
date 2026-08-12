@@ -23,9 +23,10 @@ P0 的本地算法和安全 adapter 表面已经进入状态矩阵。当前剩�
 
 1. `P0-D03 pii`：在固定部署 profile 中运行真实 Presidio/NER checkpoint 与多语言安全/攻击语料；本地
    checksum/context recognizer 继续独立维护。
-2. `P0-D04 model_prompt_injection`：运行锁定的真实 checkpoint 和攻击/安全语料，把状态从
+2. `P0-D04 prompt_injection_model`：运行锁定的真实 checkpoint 和攻击/安全语料，把状态从
    `adapter_only` 提升为 `verified`。
-3. `P0-D05 jailbreak`：评测独立模型 profile；确定性高信号 heuristic 继续只报告有限事实。
+3. `P0-D05 jailbreak`：用安全、攻击、多语言、改写和混淆语料扩展并评测本地确定性 heuristic；
+   `prompt_injection_model` 的 `model_jailbreak` 输出属于 P0-D04，不会自动提升本地 `jailbreak` 状态。
 4. `P0-D06 yara_injection_signatures`：用部署方预编译的真实 ruleset 做 smoke/eval 和残留资源检查；YAML
    仍不能上传规则或选择文件。
 
