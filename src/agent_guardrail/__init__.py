@@ -1,5 +1,15 @@
 """A small, explainable guardrail runtime for AI agents."""
 
+from agent_guardrail.adapters.protocols import (
+    ModelProviderAdapter,
+    ProviderAdapterError,
+    ProviderStreamDecoder,
+)
+from agent_guardrail.adapters.streaming import (
+    ProviderStreamUpdate,
+    ServerSentEvent,
+    StreamRelease,
+)
 from agent_guardrail.config import (
     create_default_detector_registry,
     create_default_predicate_registry,
@@ -68,6 +78,7 @@ __all__ = [
     "EventRelation",
     "FlowAuthorization",
     "FlowSecurityContext",
+    "ModelProviderAdapter",
     "MatchPolicyAnalyzer",
     "GuardedLLMClient",
     "GuardedToolExecutor",
@@ -78,12 +89,17 @@ __all__ = [
     "OwnerScope",
     "PendingTrace",
     "PolicyAnalyzer",
+    "ProviderAdapterError",
+    "ProviderStreamDecoder",
+    "ProviderStreamUpdate",
     "EventRef",
     "SubmissionResult",
     "RelationKind",
     "SecurityDestination",
     "SecurityFactAuthorities",
     "SecurityFactAuthority",
+    "ServerSentEvent",
+    "StreamRelease",
     "Trace",
     "create_default_detector_registry",
     "create_default_predicate_registry",

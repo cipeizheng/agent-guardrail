@@ -34,7 +34,7 @@ Matcher 和 Analyzer 都不执行 LLM、Tool 或其他 Agent 业务副作用。
 ## 2. 运行图
 
 ```text
-Semantic SDK call / Provider payload
+Semantic SDK call / Provider payload or SSE
           │
           ▼
 GuardrailRun / Adapter / InputNormalizer
@@ -55,8 +55,9 @@ allow/log：原子提交全部 pending Event
 block：丢弃原始 pending Event，只提交脱敏 Decision Event
 ```
 
-Runtime 管理 Analyzer 生命周期；Adapter 只处理 Provider/Framework 协议；Enforcement 控制何时允许副作用；
-Gateway 组合 HTTP、认证、固定上游和请求级 Session。
+Runtime 管理 Analyzer 生命周期；Adapter 只处理 Provider/Framework wire↔canonical 协议；Enforcement
+控制何时允许副作用；Gateway 组合 HTTP、认证、固定上游和请求级 Session。OpenAI Chat/Responses 以及可信
+部署注册的非 OpenAI Adapter 复用同一 InputNormalizer/Session/Runtime，不复制 Policy 执行链。
 
 三种产品入口的职责不同：
 
@@ -125,8 +126,14 @@ profile；默认仍为 `local`。文本 `is_similar` 只在部署注入 `Embeddi
 - `before_model_call` allow 前不请求模型上游。
 - `before_tool_call` allow 前不执行工具。
 - 非流式 `before_model_output_release` allow 前不向客户端/Agent 释放原始模型响应。
+- Streaming 文本窗口只在累计 Canonical 前缀通过 tentative Decision 后释放；Tool arguments 在完整
+  JSON/Schema/Policy 检查前不释放；terminal 时完整输出再检查并只提交一次。
 - `before_tool_output_release` allow 前不释放 ToolResult；但输出检查 block 不能撤销已经执行的工具。
 - block 不提交原始 pending Event，Audit 只接收脱敏 Decision。
+
+Streaming block/error 会隐藏当前未通过窗口并以脱敏 SSE error 终止，但不能撤回早先已经通过并发送的窗口，
+也不能保证未来上下文不会改变对旧前缀的判断。需要完整输出原子保证时使用非流式模式。当前累计前缀重复
+分析，增量性能属于 P4。
 
 这些名称只属于 OpenAI/MCP Gateway 的执行检查点，不进入 Event、PendingTrace、Decision、Inline Wrapper
 或 YAML。编程式 SDK 只负责分析并返回 Decision；应用必须在真正副作用前检查 `blocked`。

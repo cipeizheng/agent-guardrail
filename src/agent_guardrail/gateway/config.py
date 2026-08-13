@@ -123,13 +123,8 @@ class GatewaySettings(BaseSettings):
             if self.core_url is not None or self.core_api_key is not None:
                 raise ValueError("Core settings require decision_backend=remote")
             if self.detector_profile == "local" and self.prompt_model_device != "cpu":
-                raise ValueError(
-                    "prompt_model_device requires detector_profile=full_local_v1"
-                )
-            if (
-                self.detector_profile == "full_local_v1"
-                and self.detector_assets_dir is None
-            ):
+                raise ValueError("prompt_model_device requires detector_profile=full_local_v1")
+            if self.detector_profile == "full_local_v1" and self.detector_assets_dir is None:
                 raise ValueError("detector_assets_dir is required for full_local_v1")
         else:
             if self.core_url is None or self.core_api_key is None:
@@ -187,5 +182,11 @@ class GatewaySettings(BaseSettings):
     @property
     def upstream_chat_completions_url(self) -> str:
         if self.upstream_base_url is None:
-            raise RuntimeError("OpenAI upstream is not configured")
+            raise RuntimeError("model upstream is not configured")
         return self.upstream_base_url + "chat/completions"
+
+    @property
+    def upstream_responses_url(self) -> str:
+        if self.upstream_base_url is None:
+            raise RuntimeError("model upstream is not configured")
+        return self.upstream_base_url + "responses"

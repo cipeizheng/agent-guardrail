@@ -143,12 +143,12 @@ Detector 或 Policy 写回 Trace。内容级外泄判断仍需敏感数据 Detec
 | Point | 主要保护 | 当前保证 |
 | --- | --- | --- |
 | `before_model_call` | 数据不进入未经授权的模型目的地；恶意输入不进入模型 | Decision 完成前不请求上游 |
-| `before_model_output_release` | 原始模型内容/ToolCallProposal 不释放给 Agent 或用户 | 非流式响应完整通过后才释放 |
+| `before_model_output_release` | 原始模型内容/ToolCallProposal 不释放给 Agent 或用户 | 非流式完整通过；流式只释放已检查累计前缀，已释放窗口不可撤回 |
 | `before_tool_call` | 外发和资源副作用 | block 时实际 Tool 调用次数为零 |
 | `before_tool_output_release` | ToolResult 不进入后续 Agent/模型/用户 | 不能撤销已经执行的 Tool 副作用 |
 | Audit | 原始 Secret/PII 不进入诊断面 | 只接受脱敏 Decision；可信 producer 仍负责遮罩 |
 
-这些 checkpoint 是 OpenAI/MCP Gateway 的执行概念，不是 Event/Inline Wrapper 字段，也不能写入 YAML
+这些 checkpoint 是 Model Provider/MCP Gateway 的执行概念，不是 Event/Inline Wrapper 字段，也不能写入 YAML
 选择条件。
 
 LLM Gateway 只能中介经过它的模型请求和响应；MCP Gateway 只能中介经过固定 MCP Server 的

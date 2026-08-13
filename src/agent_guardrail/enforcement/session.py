@@ -33,6 +33,7 @@ Clock = Callable[[], datetime]
 IdFactory = Callable[[], str]
 _SOURCE_EVENT_IDS_METADATA_KEY = "source_event_ids"
 
+
 class EnforcementSession:
     """Own one trace and serialize evaluate-and-commit operations within it."""
 
@@ -51,13 +52,9 @@ class EnforcementSession:
         self.trace = trace
         self.audit = audit or NullAuditSink()
         self.attributes = dict(attributes or {})
-        if security_context is not None and not isinstance(
-            security_context, FlowSecurityContext
-        ):
+        if security_context is not None and not isinstance(security_context, FlowSecurityContext):
             raise TypeError("security_context must be a FlowSecurityContext")
-        self.security_context = (security_context or FlowSecurityContext()).model_copy(
-            deep=True
-        )
+        self.security_context = (security_context or FlowSecurityContext()).model_copy(deep=True)
         self.clock = clock or (lambda: datetime.now(UTC))
         self.id_factory = id_factory or (lambda: uuid4().hex)
         self.audit_failure_types: list[str] = []
@@ -120,11 +117,46 @@ class EnforcementSession:
     ) -> Decision:
         """Analyze and atomically commit a bounded batch of candidate events."""
 
+        return await self._evaluate_candidates(
+            candidates,
+            primary_key=primary_key,
+            security_context=security_context,
+            commit_allowed=True,
+        )
+
+    async def inspect_candidates(
+        self,
+        candidates: Sequence[CandidateEvent],
+        *,
+        primary_key: str | None = None,
+        security_context: FlowSecurityContext | None = None,
+    ) -> Decision:
+        """Inspect a tentative representation without committing an allowed batch.
+
+        A blocked inspection still commits one sanitized Decision Event and Audit record.
+        This is intended for an exact output prefix immediately before irreversible release.
+        """
+
+        return await self._evaluate_candidates(
+            candidates,
+            primary_key=primary_key,
+            security_context=security_context,
+            commit_allowed=False,
+        )
+
+    async def _evaluate_candidates(
+        self,
+        candidates: Sequence[CandidateEvent],
+        *,
+        primary_key: str | None,
+        security_context: FlowSecurityContext | None,
+        commit_allowed: bool,
+    ) -> Decision:
+        """Evaluate one candidate batch with normal or tentative commit semantics."""
+
         if isinstance(candidates, (str, bytes)):
             raise ValueError("candidates must be a sequence of CandidateEvent values")
-        if security_context is not None and not isinstance(
-            security_context, FlowSecurityContext
-        ):
+        if security_context is not None and not isinstance(security_context, FlowSecurityContext):
             raise TypeError("security_context must be a FlowSecurityContext")
         if len(candidates) > MAX_PENDING_EVENTS:
             raise ValueError(f"candidate batch cannot exceed {MAX_PENDING_EVENTS} events")
@@ -133,10 +165,7 @@ class EnforcementSession:
             raise ValueError("candidate batch must not be empty")
         if any(not isinstance(candidate, CandidateEvent) for candidate in candidate_batch):
             raise TypeError("candidate batch must contain only CandidateEvent values")
-        if any(
-            len(candidate.relations) > MAX_RELATIONS_PER_EVENT
-            for candidate in candidate_batch
-        ):
+        if any(len(candidate.relations) > MAX_RELATIONS_PER_EVENT for candidate in candidate_batch):
             raise ValueError(
                 f"candidate relations cannot exceed {MAX_RELATIONS_PER_EVENT} per event"
             )
@@ -192,9 +221,7 @@ class EnforcementSession:
                 events=tuple(pending_events),
                 primary_event_id=candidate_ids[selected_primary_key],
                 attributes=dict(self.attributes),
-                security_context=(
-                    security_context or self.security_context
-                ).model_copy(deep=True),
+                security_context=(security_context or self.security_context).model_copy(deep=True),
             )
             pending_snapshot = pending.model_dump(mode="json")
             try:
@@ -225,11 +252,12 @@ class EnforcementSession:
                 )
             if decision.blocked:
                 self.trace.append(self._blocked_event(decision, pending))
-            else:
+            elif commit_allowed:
                 for event in pending.events:
                     self.trace.append(event)
 
-        await self._audit_if_needed(decision)
+        if commit_allowed or decision.blocked:
+            await self._audit_if_needed(decision)
         return decision
 
     def _candidate_relations(
@@ -268,9 +296,7 @@ class EnforcementSession:
         for relation in all_relations:
             unique_relations[(relation.source_event_id, relation.kind)] = relation
         if len(unique_relations) > MAX_RELATIONS_PER_EVENT:
-            raise ValueError(
-                f"resolved event relations cannot exceed {MAX_RELATIONS_PER_EVENT}"
-            )
+            raise ValueError(f"resolved event relations cannot exceed {MAX_RELATIONS_PER_EVENT}")
         return tuple(unique_relations.values())
 
     def _validate_decision(self, decision: Decision, pending: PendingTrace) -> None:

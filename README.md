@@ -19,9 +19,9 @@ are evidence, not security decisions by themselves; policies combine those facts
 source, destination, ownership, and authorization context.
 
 > **Project status — v0.1.0 alpha.** The direct Detector SDK, event/Policy SDK, core runtime, Inline
-> wrappers, non-streaming OpenAI-compatible Gateway, stateless MCP Gateway, and remote Core path
-> are implemented and tested. This release is not a complete sandbox, streaming proxy, or
-> multi-tenant control plane.
+> wrappers, provider-neutral Adapter contract, OpenAI Chat/Responses streaming Gateway, stateless
+> MCP Gateway, and remote Core path are implemented and tested. This release is not a complete
+> sandbox, persistent-session service, or multi-tenant control plane.
 
 ## Why Agent Guardrail?
 
@@ -42,7 +42,7 @@ source, destination, ownership, and authorization context.
 
 ```mermaid
 flowchart LR
-    A[Agent or client] --> B[Event SDK / OpenAI / MCP adapter]
+    A[Agent or client] --> B[Event SDK / Model Provider / MCP adapter]
     A --> I[Direct Detector SDK]
     B --> C[EnforcementSession]
     C -->|PendingTrace| D[Embedded Runtime or Remote Core]
@@ -137,7 +137,7 @@ derived values, findings, budgets, and trusted security parameters.
 | Direct Detector SDK | Any Python code needs a fact at an arbitrary insertion point | No YAML; bounded text/JSON/batch detection, with application-owned action |
 | Event/Policy SDK | Any Python agent/framework can expose semantic events | No framework adapter required; the application chooses every insertion point and carries explicit `EventRef` relations |
 | Inline wrappers | You can inject LLM and tool interfaces | Mediates calls passing through the shared task-level session |
-| OpenAI-compatible Gateway | The agent can change its OpenAI base URL | Checks complete requests and non-streaming responses |
+| Model Provider Gateway | OpenAI Chat/Responses or a deployment adapter | Full request checks; atomic non-streaming output checks; non-retractable prefix-guarded SSE |
 | MCP Gateway | Tools are exposed by a fixed MCP server | Checks every stateless `tools/call` before and after execution |
 | Remote Core | Policy and detector assets must be isolated from the edge | Gateway owns traffic and side effects; Core analyzes complete `PendingTrace` values |
 | Docker Compose | Self-hosted Core + Gateway | Read-only containers, private Core network, separated provider and Core credentials |
@@ -168,6 +168,13 @@ client = OpenAI(
     base_url="http://127.0.0.1:8080/v1/openai",
 )
 ```
+
+Both `client.chat.completions.create(...)` and `client.responses.create(...)` support
+`stream=False/True`. Streaming releases only policy-checked cumulative text prefixes and fully
+validated tool arguments; a later block cannot retract an earlier released prefix. Use
+`stream=False` when complete-output atomicity is required. Trusted deployments can register a
+non-OpenAI wire adapter at `/v1/providers/...`; client requests still cannot select an upstream
+URL.
 
 For MCP Python SDK v2:
 
@@ -246,7 +253,6 @@ The Core image includes the full detector profile and is intentionally large. Re
 Agent Guardrail only mediates traffic that passes through its wrappers or gateways. It does not
 currently provide:
 
-- real-time LLM streaming enforcement;
 - cross-request session state or policy hot reload;
 - a complete multi-tenant identity and authorization control plane;
 - a sandbox or interception for direct shell, function, filesystem, or arbitrary HTTP access;

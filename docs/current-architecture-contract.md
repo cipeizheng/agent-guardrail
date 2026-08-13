@@ -28,7 +28,10 @@ strict version: 3 YAML → AuthorPolicy → immutable MatchPlan
   不要求每个 Agent Framework 提供专用 Adapter。
 - 框架无关 `DetectorRunner` 可在任意应用位置直接运行一个或多个已发布 Detector；它不需要 YAML，返回
   脱敏 `Detection` fact，不返回 allow/log/block，也不执行 Agent 的 LLM/Tool/业务副作用。
-- OpenAI-compatible 非流式 `POST /v1/openai/chat/completions`。
+- Model Provider Adapter 只负责封闭 wire Schema 与 provider-neutral `ModelRequest/ModelResponse` 转换；
+  可信部署代码可在 `/v1/providers/...` 注册固定相对上游路径，客户端不能选择 URL。
+- OpenAI Chat Completions 与 Responses API 均支持非流式和 SSE Streaming；内置路由同时提供
+  `/v1/openai/...` 与标准 SDK base URL 所需的 `/v1/...` 形式。
 - MCP `2026-07-28` 无状态 `POST /v1/mcp`：`server/discover`、`ping`、`tools/list`、`tools/call`。
 - Gateway 可选择进程内 Runtime，或通过版本化内部 HTTP 协议调用固定 Policy 的无状态 Core；两种模式复用
   同一 `PolicyAnalyzer.analyze_pending` 和唯一 v3 执行链。
@@ -60,7 +63,9 @@ strict version: 3 YAML → AuthorPolicy → immutable MatchPlan
 3. Predicate 必须纯且无 I/O；Detector 调用、输入字节、deadline、结果和 evidence 必须有界并失败安全。
 4. Gateway 的 `before_model_call` 完成前不得请求上游模型；`before_tool_call` 完成前不得执行工具。
 5. 非流式输出完整通过 `before_model_output_release` 后才能释放；输出检查 block 不能撤回已经发生的
-   上游调用。
+   上游调用。Streaming 每个文本窗口只在累计 Canonical 前缀通过 tentative Decision 后释放，Tool arguments
+   必须完整 JSON/Schema/Policy 检查后释放，终止时再原子提交完整输出；Gateway 只释放 Adapter 重新编码的
+   封闭 SSE event，不透传原始 event；已释放窗口不能撤回。
 6. MCP `tools/call` 每个 HTTP 请求使用独立 Session，并完整经过 `before_tool_call` 与
    `before_tool_output_release`；不得重新引入
    `initialize`、`Mcp-Session-Id`、GET stream 或 DELETE session。
@@ -92,9 +97,12 @@ strict version: 3 YAML → AuthorPolicy → immutable MatchPlan
 ## 6. 明确未交付
 
 Framework 自动 history cursor、CEL/Invariant DSL、Policy 热加载、跨请求 Session Store、
-实时 LLM streaming、MCP subscriptions、特定 Framework 生命周期 Adapter、Sandbox、Event 级
+MCP subscriptions、特定 Framework 生命周期 Adapter、Sandbox、Event 级
 Security Fact、principal/tenant/destination Registry、授权凭证、owner-aware 端到端 Policy、Redaction
 TransformationPlan、SBOM/镜像签名/集群编排，以及状态矩阵中标为 `planned` 的能力。
+
+当前 Responses Adapter 不接受隐藏服务端历史、内置远程 Tool、background、多模态或无法完整映射的 output；
+Streaming 尚未做增量 Matcher/cache，每个累计前缀会重新分析，长流性能优化属于 P4。
 
 当前 Compose 的 Core/Gateway 容器加固只缩小服务自身权限，不构成 Agent Sandbox，也不提供 Agent 的
 default-deny egress、宿主隔离或资源配额。

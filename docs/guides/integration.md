@@ -134,7 +134,7 @@ YAML 与 SDK 编排不重合：代码决定“何时产生哪些 Event、是否�
 | 只需在任意位置取得检测 fact | `DetectorRunner` | 无 YAML；应用自行解释 fact 并控制副作用 |
 | 能在任意代码位置提交语义 Event | `GuardrailRun` | 框架无关；由应用执行 Decision |
 | 可注入 LLM 与 Tool 接口 | Inline Wrapper | 中介经过包装器的模型和工具调用 |
-| 可配置 OpenAI Base URL | OpenAI Gateway | 中介模型请求和响应 |
+| 可配置 Model Provider Base URL | Provider Gateway | 中介模型请求与非流式/流式响应 |
 | Tool 通过 MCP Server | MCP Gateway | 中介固定 Server 的 `tools/call` |
 | LLM HTTP + MCP Tool | 两种 Gateway | 分别覆盖模型和工具边界 |
 | 直接 Shell/函数/HTTP | 当前不能完整覆盖 | 需要 Hook/Sandbox/网络代理 |
@@ -185,7 +185,7 @@ Wrapper 不按 payload 相等自动推断 proposal 来源；ToolResult 只引用
 - 调用前 block：底层调用次数为零；
 - 输出释放前 block：底层副作用已发生，但原结果不返回、不提交。
 
-## 8. OpenAI Gateway
+## 8. Model Provider Gateway
 
 Agent 不导入本项目，只修改 base URL：
 
@@ -196,9 +196,30 @@ client = OpenAI(
 )
 ```
 
-每个 Chat Completions 请求创建独立 Session。规范化历史 Event 与 `MODEL_CALL` 在固定上游前于
-`before_model_call` 检查；完整非流式响应在 `before_model_output_release` 检查。当前不提供跨 HTTP 请求
-Session 或实时 streaming。
+同一个 base URL 支持 `client.chat.completions.create(...)` 和 `client.responses.create(...)`；也可把 base
+URL 设为 `/v1` 使用标准 `/v1/chat/completions`、`/v1/responses` alias。Responses 当前只支持可完整映射的
+文本、instructions、custom function 与 function output。
+
+每个请求创建独立 Session。规范化历史 Event 与 `MODEL_CALL` 在固定上游前于 `before_model_call` 检查；
+非流式响应完整通过输出 Decision 后才释放。`stream=True` 时，Chat data-only SSE 和 Responses named SSE
+都由 Adapter 转为累计 Canonical output：
+
+- 文本 delta 对累计前缀做 tentative 检查，allow 后释放当前窗口；
+- Tool arguments 在完整 JSON、声明、Schema 和 Policy 检查前不释放；
+- terminal event 对完整输出再次检查并提交一个最终 Event；
+- block/error 发送脱敏 SSE error，当前未通过窗口不释放；此前窗口已经发送，不能撤回。
+
+响应头 `x-guardrail-streaming: prefix-guarded-non-retractable` 明示这一弱于完整缓冲的保证。需要完整输出
+原子判断时使用 `stream=False`。当前仍不提供跨 HTTP 请求 Session。
+
+非 OpenAI wire format 可由可信部署代码实现 `ModelProviderAdapter`，并在
+`create_app(model_routes={"/v1/providers/name": adapter})` 注册。路由和相对上游路径在启动时固定；请求不能
+携带动态 URL。仓内 Toy Adapter 用非流式与自定义 `token/done` SSE 证明扩展合同，不是发布的生产 Provider。
+
+Adapter 合同分三组方法：`parse_request/request_to_canonical/request_payload`，
+`parse_response/response_to_canonical/response_payload`，以及 `is_streaming/stream_decoder`；另有部署固定的
+`upstream_path`。流 decoder 只能返回 `HOLD/GUARD/FINAL` 与累计 `ModelResponse`，不能执行 Policy 或创建
+可信安全事实。公共类型从 `agent_guardrail` 导出，HTTP 组合仍由 gateway extra 的 `create_app` 完成。
 
 ## 9. MCP Gateway
 

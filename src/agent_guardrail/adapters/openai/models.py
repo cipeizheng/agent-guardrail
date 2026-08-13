@@ -1,4 +1,4 @@
-"""Closed schemas for the non-streaming OpenAI Chat Completions subset."""
+"""Closed schemas for the supported OpenAI Chat Completions subset."""
 
 from __future__ import annotations
 
@@ -89,8 +89,13 @@ class ResponseFormat(OpenAIModel):
     type: Literal["text", "json_object"]
 
 
+class StreamOptions(OpenAIModel):
+    include_usage: bool | None = None
+    include_obfuscation: bool | None = None
+
+
 class ChatCompletionRequest(OpenAIModel):
-    """Supported request fields; streaming and multiple choices are intentionally excluded."""
+    """Supported request fields; multiple choices remain intentionally excluded."""
 
     model: str = Field(min_length=1)
     messages: tuple[ChatMessage, ...] = Field(min_length=1)
@@ -98,7 +103,8 @@ class ChatCompletionRequest(OpenAIModel):
     tool_choice: Literal["none", "auto", "required"] | NamedToolChoice | None = None
     parallel_tool_calls: bool | None = None
     response_format: ResponseFormat | None = None
-    stream: Literal[False] = False
+    stream: bool = False
+    stream_options: StreamOptions | None = None
     n: Literal[1] = 1
     temperature: float | None = Field(default=None, ge=0, le=2)
     top_p: float | None = Field(default=None, ge=0, le=1)
@@ -118,6 +124,8 @@ class ChatCompletionRequest(OpenAIModel):
         if isinstance(self.tool_choice, NamedToolChoice):
             if self.tool_choice.function.name not in set(names):
                 raise ValueError("tool_choice must name a declared tool")
+        if self.stream_options is not None and not self.stream:
+            raise ValueError("stream_options requires stream=true")
         return self
 
 
@@ -140,8 +148,14 @@ class ResponseAssistantMessage(OpenAIModel):
 class ChatCompletionChoice(OpenAIModel):
     index: Literal[0]
     message: ResponseAssistantMessage
-    finish_reason: str | None
+    finish_reason: Literal["stop", "length", "tool_calls", "content_filter"] | None
     logprobs: dict[str, JsonValue] | None = None
+
+
+class ChatTokenUsage(OpenAIModel):
+    prompt_tokens: int = Field(ge=0)
+    completion_tokens: int = Field(ge=0)
+    total_tokens: int = Field(ge=0)
 
 
 class ChatCompletionResponse(OpenAIModel):
@@ -150,6 +164,44 @@ class ChatCompletionResponse(OpenAIModel):
     created: int = Field(ge=0)
     model: str = Field(min_length=1)
     choices: tuple[ChatCompletionChoice, ...] = Field(min_length=1, max_length=1)
-    usage: dict[str, JsonValue] | None = None
+    usage: ChatTokenUsage | None = None
+    service_tier: str | None = None
+    system_fingerprint: str | None = None
+
+
+class StreamFunctionDelta(OpenAIModel):
+    name: str | None = None
+    arguments: str | None = None
+
+
+class StreamToolCallDelta(OpenAIModel):
+    index: int = Field(ge=0)
+    id: str | None = None
+    type: Literal["function"] | None = None
+    function: StreamFunctionDelta | None = None
+
+
+class StreamChoiceDelta(OpenAIModel):
+    role: Literal["assistant"] | None = None
+    content: str | None = None
+    refusal: str | None = None
+    tool_calls: tuple[StreamToolCallDelta, ...] | None = None
+
+
+class ChatCompletionStreamChoice(OpenAIModel):
+    index: Literal[0]
+    delta: StreamChoiceDelta
+    finish_reason: Literal["stop", "length", "tool_calls", "content_filter"] | None = None
+    logprobs: JsonValue | None = None
+
+
+class ChatCompletionStreamChunk(OpenAIModel):
+    id: str = Field(min_length=1)
+    object: Literal["chat.completion.chunk"]
+    created: int = Field(ge=0)
+    model: str = Field(min_length=1)
+    choices: tuple[ChatCompletionStreamChoice, ...] = Field(max_length=1)
+    usage: ChatTokenUsage | None = None
+    moderation: JsonValue | None = None
     service_tier: str | None = None
     system_fingerprint: str | None = None

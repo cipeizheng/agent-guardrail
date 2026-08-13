@@ -11,6 +11,7 @@ from agent_guardrail.core_service import CoreSettings, create_core_app
 from agent_guardrail.gateway import GatewaySettings, create_app
 from agent_guardrail.models import EventKind
 from agent_guardrail.runtime import GuardrailRuntime
+from tests.integration.test_gateway import chat_stream, streaming_message_analyzer
 from tests.support import FAKE_SECRET, secret_policy_yaml
 
 
@@ -193,3 +194,69 @@ async def test_remote_core_failure_before_decision_prevents_upstream_side_effect
     assert response.status_code == 503
     assert response.json()["error"]["type"] == "guardrail_unavailable"
     assert provider_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_remote_core_guards_streamed_prefixes_and_hides_blocked_delta() -> None:
+    core_app = create_core_app(
+        CoreSettings(
+            policy_file=Path("unused.yaml"),
+            api_key=SecretStr("core-test-key"),
+        ),
+        runtime=GuardrailRuntime(streaming_message_analyzer()),
+    )
+    provider_calls = 0
+
+    def provider_handler(request: httpx.Request) -> httpx.Response:
+        nonlocal provider_calls
+        provider_calls += 1
+        return httpx.Response(
+            200,
+            content=(
+                chat_stream("Safe response")
+                if provider_calls == 1
+                else chat_stream("Safe prefix. ", FAKE_SECRET)
+            ),
+            headers={"content-type": "text/event-stream"},
+        )
+
+    core_client = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=core_app),
+        base_url="http://core.test",
+    )
+    provider_client = httpx.AsyncClient(transport=httpx.MockTransport(provider_handler))
+
+    async with core_app.router.lifespan_context(core_app):
+        gateway_app = create_app(
+            _gateway_settings(),
+            core_http_client=core_client,
+            upstream_http_client=provider_client,
+        )
+        async with gateway_app.router.lifespan_context(gateway_app):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=gateway_app),
+                base_url="http://gateway.test",
+            ) as gateway_client:
+                payload = _request_payload()
+                payload["stream"] = True
+                headers = {"authorization": "Bearer gateway-test-key"}
+                allowed = await gateway_client.post(
+                    "/v1/chat/completions",
+                    headers=headers,
+                    json=payload,
+                )
+                blocked = await gateway_client.post(
+                    "/v1/chat/completions",
+                    headers=headers,
+                    json=payload,
+                )
+
+    await core_client.aclose()
+    await provider_client.aclose()
+    assert allowed.status_code == 200
+    assert "Safe response" in allowed.text
+    assert blocked.status_code == 200
+    assert "Safe prefix." in blocked.text
+    assert FAKE_SECRET not in blocked.text
+    assert "guardrail_blocked" in blocked.text
+    assert provider_calls == 2

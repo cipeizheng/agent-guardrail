@@ -130,7 +130,7 @@ async def test_session_snapshots_trusted_context_and_allows_per_flow_override() 
         authorization=FlowAuthorization.ALLOWED,
         authorities=SecurityFactAuthorities(
             destination=SecurityFactAuthority.ENFORCEMENT,
-            authorization=SecurityFactAuthority.AUTHORIZATION_SERVICE
+            authorization=SecurityFactAuthority.AUTHORIZATION_SERVICE,
         ),
     )
     session = EnforcementSession(
@@ -151,10 +151,7 @@ async def test_session_snapshots_trusted_context_and_allows_per_flow_override() 
     captured = analyzer.pending[0]
     assert captured.security_context.authorization is FlowAuthorization.ALLOWED
     assert captured.security_context.destination is SecurityDestination.LLM_PROVIDER
-    assert (
-        captured.security_context.authorities.destination
-        is SecurityFactAuthority.ENFORCEMENT
-    )
+    assert captured.security_context.authorities.destination is SecurityFactAuthority.ENFORCEMENT
     assert captured.attributes == {"security_authorization": "denied"}
     assert session.security_context.destination is SecurityDestination.LLM_PROVIDER
 
@@ -235,9 +232,7 @@ async def test_session_does_not_infer_relation_from_tool_call_id_alone() -> None
         kind=EventKind.MODEL_CALL,
         payload=model_call_payload(),
     )
-    proposal = ToolCall(
-        call_id="call-1", name="read_file", arguments={"path": "a"}
-    )
+    proposal = ToolCall(call_id="call-1", name="read_file", arguments={"path": "a"})
     await session.submit(
         kind=EventKind.TOOL_CALL_PROPOSAL,
         payload=cast(dict[str, JsonValue], proposal.model_dump(mode="json")),
@@ -628,3 +623,53 @@ async def test_candidate_batch_capacity_fails_before_analyzer_or_commit() -> Non
 
     assert unavailable.value.error_type == "trace_capacity_exceeded"
     assert not trace.events
+
+
+@pytest.mark.asyncio
+async def test_tentative_inspection_does_not_commit_allowed_prefix() -> None:
+    trace = Trace(id="trace-1")
+    analyzer = CapturingAnalyzer()
+    session = EnforcementSession(analyzer=analyzer, trace=trace)
+    candidate = CandidateEvent(
+        key="prefix",
+        kind=EventKind.MESSAGE,
+        payload=message_payload(role=MessageRole.ASSISTANT, text="safe prefix"),
+        origin=EventOrigin.OBSERVED,
+    )
+
+    inspected = await session.inspect_candidates((candidate,))
+    committed = await session.submit_candidates((candidate,))
+
+    assert inspected.action is Action.ALLOW
+    assert committed.action is Action.ALLOW
+    assert len(analyzer.pending) == 2
+    assert analyzer.pending[0].trace.events == ()
+    assert analyzer.pending[1].trace.events == ()
+    assert len(trace.events) == 1
+    assert trace.events[0].kind is EventKind.MESSAGE
+
+
+@pytest.mark.asyncio
+async def test_tentative_block_commits_only_sanitized_decision() -> None:
+    trace = Trace(id="trace-1")
+    session = EnforcementSession(analyzer=secret_analyzer(), trace=trace)
+    candidate = CandidateEvent(
+        key="prefix",
+        kind=EventKind.TOOL_CALL,
+        payload=cast(
+            dict[str, JsonValue],
+            ToolCall(
+                call_id="call-sensitive",
+                name="send_email",
+                arguments={"body": FAKE_SECRET},
+            ).model_dump(mode="json"),
+        ),
+        origin=EventOrigin.OBSERVED,
+    )
+
+    decision = await session.inspect_candidates((candidate,))
+
+    assert decision.blocked
+    assert len(trace.events) == 1
+    assert trace.events[0].kind is EventKind.GUARDRAIL_DECISION
+    assert FAKE_SECRET not in trace.events[0].model_dump_json()

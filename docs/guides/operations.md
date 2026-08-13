@@ -11,7 +11,8 @@ uv sync --frozen --extra gateway --no-dev
 uv run python -m agent_guardrail.gateway
 ```
 
-进程内包含 FastAPI Gateway、一个 GuardrailRuntime、固定 OpenAI/MCP 上游客户端和可选 JSONL AuditSink。
+进程内包含 FastAPI Gateway、一个 GuardrailRuntime、固定 Model Provider/MCP 上游客户端和可选 JSONL
+AuditSink。
 该 embedded 模式不依赖数据库、远程 Core 或跨请求 Session Store。
 
 ### 完整本地 Detector profile
@@ -157,17 +158,17 @@ Broker 和凭据留在 Sandbox 外。最低部署合同是：
 | `AGENT_GUARDRAIL_CORE_TIMEOUT_SECONDS` | `10` | 单次 Core 请求 timeout |
 | `AGENT_GUARDRAIL_CORE_MAX_REQUEST_BYTES` | `8388608` | 发往 Core 的 body 上限 |
 | `AGENT_GUARDRAIL_CORE_MAX_RESPONSE_BYTES` | `1048576` | Core 响应 body 上限 |
-| `AGENT_GUARDRAIL_UPSTREAM_BASE_URL` | LLM 模式必填 | 固定 OpenAI-compatible 上游 |
+| `AGENT_GUARDRAIL_UPSTREAM_BASE_URL` | LLM 模式必填 | 固定 Model Provider base URL |
 | `AGENT_GUARDRAIL_UPSTREAM_ALLOWED_HOSTS` | 空 | JSON host allowlist |
 | `AGENT_GUARDRAIL_UPSTREAM_AUTH_MODE` | `server_managed` | `server_managed/pass_through` |
-| `AGENT_GUARDRAIL_UPSTREAM_API_KEY` | server-managed 时必填 | OpenAI 上游 Key |
+| `AGENT_GUARDRAIL_UPSTREAM_API_KEY` | server-managed 时必填 | Model Provider 上游 Key |
 | `AGENT_GUARDRAIL_GATEWAY_API_KEYS` | 空 | JSON 客户端 Key；生产应配置 |
 | `AGENT_GUARDRAIL_AUDIT_PATH` | 空 | 设置后启用 JSONL Audit |
 | `AGENT_GUARDRAIL_LOG_LEVEL` | `info` | Uvicorn 日志级别 |
 | `AGENT_GUARDRAIL_MAX_REQUEST_BYTES` | `1048576` | 请求体上限 |
-| `AGENT_GUARDRAIL_MAX_UPSTREAM_RESPONSE_BYTES` | `4194304` | OpenAI 响应体上限 |
+| `AGENT_GUARDRAIL_MAX_UPSTREAM_RESPONSE_BYTES` | `4194304` | 非流式响应或完整 SSE 流字节上限 |
 | `AGENT_GUARDRAIL_MAX_TRACE_EVENTS` | `16` | 请求级 Trace Event 上限 |
-| `AGENT_GUARDRAIL_UPSTREAM_TIMEOUT_SECONDS` | `60` | OpenAI 上游总超时 |
+| `AGENT_GUARDRAIL_UPSTREAM_TIMEOUT_SECONDS` | `60` | 非流式网络 timeout；完整 SSE 流 wall-clock 上限 |
 | `AGENT_GUARDRAIL_DETECTOR_PROFILE` | `local` | `local/full_local_v1` 固定部署 profile |
 | `AGENT_GUARDRAIL_DETECTOR_ASSETS_DIR` | 空 | `full_local_v1` 必填的已校验模型资产根目录 |
 | `AGENT_GUARDRAIL_PROMPT_MODEL_DEVICE` | `cpu` | `full_local_v1` 的 `cpu/cuda` 推理设备 |

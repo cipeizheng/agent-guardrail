@@ -29,7 +29,8 @@ flowchart TD
     Analyzer --> Decision[models/core.py Decision]
     Runtime[runtime/] --> Analyzer
     Remote[core_service/ remote HTTP] --> Runtime
-    Gateway[gateway/] --> Session[enforcement/session.py]
+    Provider[Provider Adapter + SSE decoder] --> Gateway[gateway/]
+    Gateway --> Session[enforcement/session.py]
     Direct[detector_sdk.py DetectorRunner] --> DetectorExec[core/detector_executor.py]
     SDK[sdk.py GuardrailRun] --> Session
     Inline[inline_llm.py + inline_tools.py] --> Session
@@ -53,10 +54,10 @@ flowchart TD
 | Matcher/Monitor | `core/matcher.py`、`core/monitor.py` |
 | Finding/Error → Decision | `core/decision_analyzer.py` |
 | v3 Policy Loader | `config/loader.py` |
-| Session 与 normalization | `enforcement/session.py`、`input_normalizer.py` |
+| Session、tentative stream inspection 与 normalization | `enforcement/session.py`、`input_normalizer.py` |
 | 框架无关编程式接入 | `sdk.py` |
 | 无 YAML 直接 Detector 接入 | `detector_sdk.py` |
-| OpenAI/MCP | `gateway/app.py`、`gateway/mcp.py`、`adapters/` |
+| Provider/Streaming/MCP | `gateway/app.py`、`gateway/upstream.py`、`gateway/mcp.py`、`adapters/` |
 | 远程 Core/双容器 | `core_service/`、`runtime/remote.py`、`compose.yaml`、`docker/` |
 
 调试意外 allow/block：`Matcher Report → Decision Analyzer → Session commit`。关系未命中先看
@@ -84,6 +85,9 @@ flowchart TD
 - `test_session.py`：batch 原子性、block、异常和可信来源；
 - `test_sdk.py`：编程式 EventRef、显式关系和跨 run 防伪；
 - `test_detector_sdk.py`：直接 Detector 的枚举、text/JSON/batch、timeout、失败与脱敏；
+- `test_openai_stream_adapter.py` / `test_responses_adapter.py` / `test_streaming_adapter.py`：Chat 与
+  Responses canonical 映射、SSE 状态机、限制与失败；
+- `test_model_upstream.py`：固定上游 URL、鉴权、限长、timeout/transport 和 SSE Content-Type；
 - `test_security_detectors.py` / `test_priority_detectors.py`：既有 Detector 算法边界；
 - `test_secret_detector_parity.py` / `test_pii_detector.py` / `test_prompt_detector_parity.py`：
   Secret、PII、Prompt/模型适配边界；
@@ -94,7 +98,9 @@ flowchart TD
   MatchPlan→Decision→Enforcement 对齐路径；
 - `test_documentation_contracts.py`：状态目录封闭词汇、Registry 名称覆盖和本地文档链接；
 - `test_builtin_capabilities.py`：Registry→Decision→Enforcement 副作用；
-- Gateway/Inline/MCP integration：真实接入顺序与上游调用计数。
+- Gateway/Inline/MCP integration：真实接入顺序、Chat/Responses streaming 窗口与上游调用计数；
+- `test_external_agent_base_url.py` / `test_remote_core_gateway.py`：官方 OpenAI SDK、真实 HTTP
+  首块释放/取消，以及 remote Core streaming 链路。
 
 ## 6. 新行为测试要求
 
@@ -112,6 +118,8 @@ MockTransport/Fake Upstream，不访问真实模型 API。
 - 新节点是否有静态类型、成本、失败代码、脱敏和相邻超限测试？
 - capability 是否显式 linking，cache identity 是否绑定实现版本、输入和 Event 上下文？
 - tentative pending 是否错误推进 Monitor dedupe？
+- Streaming event 是否全部进入 Canonical 累计输出？当前未通过窗口是否可能提前释放？
+- 流式文档是否明确承认已释放窗口不能撤回，而没有冒充非流式原子保证？
 - Detector fact 是否与 T01–T10 的可信 source/sink 语境组合？
 - 文档是否把 planned、adapter_only、fake 或目标场景写成已交付？
 
