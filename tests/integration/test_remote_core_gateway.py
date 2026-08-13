@@ -158,7 +158,7 @@ async def test_remote_core_failure_before_decision_prevents_upstream_side_effect
             return httpx.Response(
                 200,
                 json={
-                    "protocol_version": 2,
+                    "protocol_version": 3,
                     "version": 3,
                     "content_hash": "fixed-policy",
                 },

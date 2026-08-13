@@ -47,7 +47,8 @@ arguments 校验。Responses 支持 text/instructions、custom function、functi
 
 - 完整 messages 作为本次 `client_asserted` snapshot，不是服务端可信历史；
 - request 历史加 `MODEL_CALL` 和 observed response 各形成一个原子 batch；
-- 不接受客户端覆盖 Trace、Policy、origin、tenant、Relation 或 security fact；
+- 不接受客户端覆盖 Trace、Policy、origin、Relation 或 security fact；公共协议不提供 principal、tenant 或
+  owner 字段；
 - 不维护跨请求 Session Store 或 Tool 调用计数。
 
 ## 4. Provider Canonical 映射

@@ -17,7 +17,7 @@ Detector 对齐必须同时保留：
 - 输入字节、调用次数、deadline、结果数量、span 和 evidence 上限；
 - backend 缺失、timeout、预算耗尽、非法输出和异常显式失败，不能退化为 no-match；
 - Detection 只包含有限类型、位置、置信度、遮罩和不依赖 payload 的 occurrence fingerprint；
-- Detector hit 只是 fact，必须与可信 source/sink、owner、destination 或 authorization 语境组合。
+- Detector hit 只是 fact，必须与可信 source/sink、destination 或 authorization 语境组合。
 
 ## 2. 能力映射
 

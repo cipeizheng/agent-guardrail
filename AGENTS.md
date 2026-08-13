@@ -1,7 +1,7 @@
 # Repository Instructions
 
-本仓库使用 AI 辅助实现。日常任务以短合同为入口，ADR 只按任务路由读取，禁止把全部历史 ADR 无差别
-塞入上下文。
+本仓库使用 AI 辅助实现。活动文档只保存当前架构，不保存按时间累积的架构历史；历史理由由 Git 提交记录
+承担，不得作为日常任务上下文。
 
 ## 开始任务前
 
@@ -9,9 +9,8 @@
 
 1. 本文件。
 2. [`docs/current-architecture-contract.md`](docs/current-architecture-contract.md)。
-3. [`docs/adr/README.md`](docs/adr/README.md)，并且**只读取其任务路由命中的 ADR**。
-4. 与任务直接相关的专项设计文档和代码测试。
-5. 实现任务再阅读 [`docs/contributing.md`](docs/contributing.md)。
+3. 与任务直接相关的专项设计文档和代码测试。
+4. 实现任务再阅读 [`docs/contributing.md`](docs/contributing.md)。
 
 涉及 Detector、Predicate 或 roadmap 时还必须阅读
 [`docs/capability-status.yaml`](docs/capability-status.yaml)。`docs/overview.md` 是完整架构说明，只在
@@ -20,13 +19,15 @@
 ## 工作规则
 
 - 当前实现、不可破坏约束、事实来源和未交付范围以 current architecture contract 为准。
-- 非 ADR 文档必须区分“当前实现”“设计合同”“后续规划”，不得把 target、adapter 或模拟测试写成
-  verified 能力。
+- 活动文档必须区分“当前实现”“设计合同”“后续规划”，不得记录已废弃架构、替代链或版本演进叙述，
+  也不得把 target、adapter 或模拟测试写成 verified 能力。
+- 复杂跨层变更可在 `docs/proposals/<topic>.md` 临时讨论；结论接受后必须改写当前合同与专项设计、同步
+  测试并删除 proposal。不得创建按时间编号的架构决策记录、决策日志或其他常驻历史架构目录。
 - Capability 状态只能使用状态矩阵的封闭词汇；`adapter_only`、`baseline` 和 `planned` 不得写成
   `verified`。
 - 新增 MatchPlan 节点或 capability 必须用 I01–I14 相邻行为测试验证表达、成本和脱敏边界，并映射
   T01–T10；不能重新引入 mandatory anchor、自动 provenance 或第二执行器。
-- MCP 版本升级必须先核对官方最终规范和官方 SDK，再修改 ADR、Adapter、黑盒测试与文档。
+- MCP 版本升级必须先核对官方最终规范和官方 SDK，再修改当前合同、专项设计、Adapter、黑盒测试与文档。
 - 修改前检查工作树；已有修改属于用户，保留无关改动，不使用破坏性 Git 命令。
 - 新增行为必须有正常、违规、边界、失败安全和受保护副作用未发生测试。
 - 修改代码后同步检查 README、专项设计、roadmap、状态矩阵和部署配置。
@@ -41,8 +42,7 @@
 `precedes/may_influence`，不能生成 `derived_from`。
 
 参考 NeMo Guardrails 时不复制 Colang、动态 `actions.py` 加载或完整对话编排。Detector hit 只是 fact；
-必须映射到安全模型的资产和 T01–T10 路径，并与可信 source/sink、owner、destination 或 authorization
-语境组合。
+必须映射到安全模型的资产和 T01–T10 路径，并与可信 source/sink、destination 或 authorization 语境组合。
 
 ## 完成与提交
 

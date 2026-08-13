@@ -80,7 +80,8 @@ backend 与 profile 必须同时提供；模型、profile identity 或资源上�
 仓库可重复评测，因此能力矩阵保持 `adapter_only`。
 
 启用远程 backend 会把参与比较的 `data` 和 `target` 发送到该固定 endpoint；它不是本地零泄露能力。部署方
-必须把该 endpoint 作为获准的数据接收方并配置传输、保留和租户边界，或者注入本地 `EmbeddingBackend`。
+必须把该 endpoint 作为获准的数据接收方并配置传输、保留和数据隔离边界，或者注入本地
+`EmbeddingBackend`。
 Policy 不能借此改写 endpoint/model/凭据，但这一限制不能替代部署侧的数据授权。
 
 ## 2. 双容器启动

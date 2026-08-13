@@ -6,10 +6,10 @@
 
 ## 1. 开始任务
 
-事实优先级依次是：用户当前要求、`AGENTS.md`、[当前架构合同](current-architecture-contract.md)、任务命中
-的现行 ADR、专项设计、代码与测试。运行路由和配置以合同指定的代码源为准。
+事实优先级依次是：用户当前要求、`AGENTS.md`、[当前架构合同](current-architecture-contract.md)、专项设计、
+代码与测试。运行路由和配置以合同指定的代码源为准；Git 历史不作为当前实现规范。
 
-1. 阅读 `AGENTS.md`、当前合同和 ADR 索引。
+1. 阅读 `AGENTS.md` 和当前合同。
 2. 通过[文档导航](README.md)只打开任务相关领域文档。
 3. capability 任务再读 `capability-status.yaml`。
 4. 检查代码、测试和未提交修改，区分当前行为与规划。
@@ -96,7 +96,6 @@ flowchart TD
 - `test_similarity_detector.py`：Invariant `is_similar`、profile model、backend、timeout、脱敏和 Enforcement；
 - `test_alignment_registries.py` / `test_invariant_detector_alignment.py`：默认/可选 Registry、
   MatchPlan→Decision→Enforcement 对齐路径；
-- `test_documentation_contracts.py`：状态目录封闭词汇、Registry 名称覆盖和本地文档链接；
 - `test_builtin_capabilities.py`：Registry→Decision→Enforcement 副作用；
 - Gateway/Inline/MCP integration：真实接入顺序、Chat/Responses streaming 窗口与上游调用计数；
 - `test_external_agent_base_url.py` / `test_remote_core_gateway.py`：官方 OpenAI SDK、真实 HTTP
@@ -137,5 +136,6 @@ git diff --check
 还要检查暂存文件和凭据泄漏，不提交环境文件、缓存、构建产物、Audit 或真实 Secret。
 
 新增 Action、改变 Policy/MatchPlan 链、Canonical Event/Relation、pre/post 承诺、持久状态、远程 Core、
-新信任主体、原始敏感内容保留、payload Transformation 或破坏性协议升级时，先按
-[ADR 路由](adr/README.md)记录决策。
+新信任边界、原始敏感内容保留、payload Transformation 或破坏性协议升级时，必须在同一变更中更新当前
+架构合同、专项设计和安全测试。需要先讨论时可创建临时 `docs/proposals/<topic>.md`；结论接受并合并后删除，
+历史由 Git 保存。

@@ -16,7 +16,7 @@ The project currently follows a few ideas that I hope are useful beyond this rep
 - A guardrail should be able to stop a protected action, not only label text after the fact.
 - Policies should be reviewable data rather than executable code with hidden I/O or imports.
 - Detector results are evidence. A security decision also needs context such as the source,
-  destination, owner, and authorization.
+  destination, and authorization.
 - Events and their relationships should be explicit, so a decision can explain what matched and
   why.
 - Sensitive inputs should not be copied into findings, errors, logs, or audit records.

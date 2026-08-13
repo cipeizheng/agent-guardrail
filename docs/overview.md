@@ -7,7 +7,7 @@
 ## 1. 系统定位
 
 Agent Guardrail 是本地 Policy Analyzer 加 Enforcement Runtime/Gateway。它保护用户的数据、意图和资源，
-使用 `source → transform → sink` 描述威胁；Detector 只产生事实，完整违规还需要可信 source/sink、owner、
+使用 `source → transform → sink` 描述威胁；Detector 只产生事实，完整违规还需要可信 source/sink、
 destination 或 authorization 语境。
 
 当前唯一生产策略链是：

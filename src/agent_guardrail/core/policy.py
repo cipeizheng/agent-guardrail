@@ -74,6 +74,8 @@ class PolicyDocument(AuthorModel):
         ):
             raise ValueError("production policy parameters must define defaults")
         for name, parameter in self.parameters.items():
+            if name.startswith("security_") and name not in SECURITY_CONTEXT_PARAMETER_NAMES:
+                raise ValueError(f"unsupported security context parameter: {name}")
             if name not in SECURITY_CONTEXT_PARAMETER_NAMES:
                 continue
             if (

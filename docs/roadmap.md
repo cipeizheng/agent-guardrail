@@ -45,21 +45,21 @@ Detector 执行器。它只返回 fact，不返回 Decision，也不控制应用
 
 ## P3：跨事件安全语境
 
-- 先建立部署可提供的 destination、source trust 与 Tool risk 分类，不要求单用户 Agent 引入 tenant 模型；
+- 先建立部署可提供的 destination、source trust 与 Tool risk 分类；
 - 实现 T01–T04 的 destination/trust-aware v3 Policy，authorization 只在已有独立授权服务时接入；
 - 为不可信 ToolResult → LLM/高风险 Tool 建立 trust 与显式 Relation 组合策略；
 - 增加真实 Gateway/SDK source→sink 回放，验证受保护副作用；
 - 保持 T10 为明确边界外，直到存在 Framework Hook、Sandbox 或网络代理。
 
-principal/tenant Registry、跨租户状态以及 T05/T09 owner-aware Policy 只在项目出现真实多用户部署需求后
-启动，不作为单用户 SDK 的默认复杂度。
+P3 只围绕单用户数据流构建规则，不引入 principal/tenant Registry、owner-aware Policy 或跨用户状态。
+T09 使用跨目的地授权复用/confused-deputy 路径，不使用跨租户泄漏定义。
 
 ## P4：长 Session 与性能
 
 - 为 Matcher 建立安全的历史 cursor、增量索引与 relation/finding cache，避免每个窗口或新 Event 全量扫描；
 - 用真实长会话与长流 benchmark 固定内存、延迟和缓存 identity；
 - 完成单进程增量语义后，再设计跨请求 Session Store、run token、TTL/CAS 与 Policy identity；
-- 多租户字段只在真实多用户部署需求存在时加入。
+- Session Store 仍服务同一用户的连续运行，不加入用户、租户或数据所有权字段。
 
 ## P5：部署工程
 
@@ -81,7 +81,7 @@ smoke/eval，因此仍为 `adapter_only`。其他 capability 后续按威胁覆�
 - 保持普通 `allow/log/block` Action 不承担 payload 修改；
 - 对调用前/输出释放前 checkpoint、重复变换、编码偏移和敏感数据泄漏建立测试。
 
-该阶段需要新 ADR，因为它改变当前“Analyzer 只判断、不修改 payload”的合同。
+该阶段必须先更新当前架构合同，因为它改变“Analyzer 只判断、不修改 payload”的现行边界。
 
 ## 明确后置
 
@@ -92,4 +92,8 @@ smoke/eval，因此仍为 `adapter_only`。其他 capability 后续按威胁覆�
 - 常见 Framework 的可选生命周期 recipe/hook；
 - 完整 Web UI 和分布式控制平面。
 
-这些项目不能用文档或模拟测试写成已交付。任何改变当前架构合同的项目先写短 ADR，再更新合同和测试。
+多用户/多租户身份、跨用户共享、按用户授权、租户隔离和租户控制面不是后置功能，而是明确不属于本产品。
+未来若改变这一边界，必须先明确改写当前架构合同，并重新设计完整身份与隔离模型，不能逐字段恢复。
+
+这些项目不能用文档或模拟测试写成已交付。任何改变当前架构合同的项目必须同步更新合同、专项设计和测试；
+需要讨论的 proposal 在结论合并后删除。

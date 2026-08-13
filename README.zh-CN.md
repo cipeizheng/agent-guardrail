@@ -14,11 +14,12 @@ Agent Guardrail 可以不写 YAML 直接运行有界 Detector，也可以把严�
 强制落实 Decision。
 
 项目聚焦三类资产：**用户数据、用户意图和用户资源**。Detector 命中只是证据，不会单独成为安全结论；
-Policy 还需要把这些事实与可信的 source、destination、owner 和 authorization 语境组合。
+Policy 还需要把这些事实与可信的 source、destination 和 authorization 语境组合。
 
 > **项目状态 — v0.1.0 alpha。** 直接 Detector SDK、Event/Policy SDK、Core Runtime、Inline Wrapper、
 > Provider-neutral Adapter 合同、OpenAI Chat/Responses 流式 Gateway、无状态 MCP Gateway 和远程 Core
-> 路径已经实现并通过测试。当前版本不是完整 Sandbox、持久 Session 服务或多租户控制平面。
+> 路径已经实现并通过测试。应用明确只供单用户使用；它不是完整 Sandbox 或持久 Session 服务，也不建模
+> 用户目录、租户或数据所有权。
 
 ## 为什么使用 Agent Guardrail？
 
@@ -241,10 +242,11 @@ Core 镜像包含完整 Detector profile，因此体积较大。在本地环境�
 Agent Guardrail 只能中介实际经过 Wrapper 或 Gateway 的流量。当前不提供：
 
 - 跨请求 Session 状态或 Policy 热更新；
-- 完整多租户 identity/authorization 控制平面；
 - 对直接 Shell、函数、文件系统或任意 HTTP 的 Sandbox/拦截；
 - Web 管理界面或分布式 Policy 服务；
 - Moderation、copyright 或 OCR capability。
+
+多用户身份、租户隔离、跨用户共享和按用户授权属于明确的产品范围外能力，而不是后置功能。
 
 如果 Agent 能执行 Shell 或任意代码，应将其部署在独立 Sandbox 中：网络 egress 默认拒绝、文件系统临时且
 最小化、资源有硬上限，并且不持有 Provider 或 Tool 凭据。Guardrail Gateway、Policy/Core、持有凭据的
@@ -252,7 +254,7 @@ Tool Broker 和 Audit 应位于 Sandbox 外。模式、代码和 URL Detector �
 syscall、凭据读取、持久化、资源耗尽或 Sandbox 逃逸。详见[威胁边界矩阵](docs/security-model.md#8-guardrail-无法替代的-sandbox-控制)
 和[部署检查清单](docs/guides/operations.md#3-agent-sandbox-与不可绕过部署边界)。
 
-Detector 命中不能证明恶意意图、数据所有权或授权。生产 Rule 应当把 Detector fact 与可信 source/sink
+Detector 命中不能证明恶意意图或授权。生产 Rule 应当把 Detector fact 与可信 source/sink
 语境组合。权威边界以[当前架构合同](docs/current-architecture-contract.md)和
 [安全模型](docs/security-model.md)为准。
 

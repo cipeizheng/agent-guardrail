@@ -377,15 +377,15 @@ def test_match_plan_represents_pending_scope_capabilities_ranges_and_parameters(
         ),
     )
     parameter = simple_rule(
-        rule_id="trusted_principal",
+        rule_id="trusted_parameter",
         event_bindings=(EventBinding(name="event", kind=EventKind.TOOL_CALL),),
         where=comparison(
-            ParameterValue(name="principal"),
+            ParameterValue(name="risk_tier"),
             ComparisonOperator.NOT_EQUALS,
-            literal("admin"),
+            literal("approved"),
         ),
         subjects=("event",),
-        finding_bindings=("event", "principal"),
+        finding_bindings=("event", "risk_tier"),
     )
 
     compiled = plan_for(
@@ -395,7 +395,7 @@ def test_match_plan_represents_pending_scope_capabilities_ranges_and_parameters(
         parameter,
         scopes=(AnalysisScope.SNAPSHOT, AnalysisScope.PENDING),
         parameters=(
-            ParameterDeclaration(name="principal", type=ParameterType.STRING),
+            ParameterDeclaration(name="risk_tier", type=ParameterType.STRING),
         ),
     )
 
@@ -441,7 +441,7 @@ def test_rule_rejects_unknown_forward_or_unsafe_references() -> None:
     with pytest.raises(ValidationError, match="canonical safe envelope"):
         simple_rule(
             where=comparison(
-                field("message", "metadata", "principal"),
+                field("message", "metadata", "internal_label"),
                 ComparisonOperator.EQUALS,
                 literal("admin"),
             )
@@ -538,9 +538,9 @@ def test_plan_rejects_projecting_a_lexical_quantifier_binding() -> None:
 def test_plan_rejects_unknown_parameters_symbol_collisions_and_duplicate_ids() -> None:
     unknown = simple_rule(
         where=comparison(
-            ParameterValue(name="principal"),
+            ParameterValue(name="risk_tier"),
             ComparisonOperator.NOT_EQUALS,
-            literal("admin"),
+            literal("approved"),
         )
     )
     with pytest.raises(ValidationError, match="unknown parameter"):
@@ -560,30 +560,30 @@ def test_plan_rejects_unknown_parameters_symbol_collisions_and_duplicate_ids() -
 
 def test_parameter_defaults_are_typed_and_provider_payload_is_not_a_parameter_source() -> None:
     optional = ParameterDeclaration(
-        name="principal",
+        name="risk_tier",
         type=ParameterType.STRING,
         required=False,
-        default="anonymous",
+        default="review",
     )
 
-    assert optional.default == "anonymous"
+    assert optional.default == "review"
     assert "provider" not in json.dumps(optional.model_dump(mode="json"))
     with pytest.raises(ValidationError, match="required.*default"):
         ParameterDeclaration(
-            name="principal",
+            name="risk_tier",
             type=ParameterType.STRING,
-            default="anonymous",
+            default="review",
         )
     with pytest.raises(ValidationError, match="declared type"):
         ParameterDeclaration(
-            name="principal",
+            name="risk_tier",
             type=ParameterType.STRING,
             required=False,
             default=7,
         )
     with pytest.raises(ValidationError, match="optional.*default"):
         ParameterDeclaration(
-            name="principal",
+            name="risk_tier",
             type=ParameterType.STRING,
             required=False,
         )

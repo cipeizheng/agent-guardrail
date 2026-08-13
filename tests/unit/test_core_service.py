@@ -49,7 +49,7 @@ async def test_core_analyze_authenticates_and_returns_closed_decision(tmp_path: 
 
     assert unauthenticated.status_code == 401
     assert response.status_code == 200
-    assert response.json()["protocol_version"] == 2
+    assert response.json()["protocol_version"] == 3
     assert response.json()["decision"]["action"] == "block"
     assert FAKE_SECRET not in response.text
 
@@ -75,3 +75,27 @@ async def test_core_rejects_oversized_body_before_analysis(tmp_path: Path) -> No
 
     assert response.status_code == 413
     assert response.json()["error"]["code"] == "request_too_large"
+
+
+@pytest.mark.asyncio
+async def test_core_rejects_retired_protocol_v2(tmp_path: Path) -> None:
+    runtime = GuardrailRuntime.from_policy_yaml(secret_policy_yaml())
+    app = create_core_app(core_settings(tmp_path), runtime=runtime)
+    payload = RemoteAnalyzeRequest(pending=tool_context(body="safe")).model_dump(
+        mode="json"
+    )
+    payload["protocol_version"] = 2
+
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://core.test",
+        ) as client:
+            response = await client.post(
+                "/v1/analyze",
+                headers={"authorization": "Bearer core-test-key"},
+                json=payload,
+            )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "invalid_pending_trace"

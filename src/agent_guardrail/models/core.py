@@ -56,17 +56,6 @@ class DataSensitivity(StrEnum):
     MIXED = "mixed"
 
 
-class OwnerScope(StrEnum):
-    """The protected value's owner relative to the current security principal."""
-
-    UNKNOWN = "unknown"
-    CURRENT_PRINCIPAL = "current_principal"
-    CURRENT_TENANT = "current_tenant"
-    OTHER_PRINCIPAL = "other_principal"
-    OTHER_TENANT = "other_tenant"
-    SHARED = "shared"
-
-
 class SecurityDestination(StrEnum):
     """A bounded sink class established by trusted enforcement code."""
 
@@ -92,7 +81,6 @@ class SecurityFactAuthority(StrEnum):
     UNKNOWN = "unknown"
     DEPLOYMENT = "deployment"
     ENFORCEMENT = "enforcement"
-    AUTHENTICATION = "authentication"
     AUTHORIZATION_SERVICE = "authorization_service"
     DATA_SOURCE = "data_source"
     DETECTOR = "detector"
@@ -105,7 +93,6 @@ class SecurityFactAuthorities(CanonicalModel):
 
     trust_class: SecurityFactAuthority = SecurityFactAuthority.UNKNOWN
     sensitivity: SecurityFactAuthority = SecurityFactAuthority.UNKNOWN
-    owner_scope: SecurityFactAuthority = SecurityFactAuthority.UNKNOWN
     destination: SecurityFactAuthority = SecurityFactAuthority.UNKNOWN
     authorization: SecurityFactAuthority = SecurityFactAuthority.UNKNOWN
 
@@ -114,7 +101,6 @@ SECURITY_CONTEXT_PARAMETER_NAMES: frozenset[str] = frozenset(
     {
         "security_trust_class",
         "security_sensitivity",
-        "security_owner_scope",
         "security_destination",
         "security_authorization",
     }
@@ -128,7 +114,6 @@ class FlowSecurityContext(CanonicalModel):
 
     trust_class: ContentTrustClass = ContentTrustClass.UNKNOWN
     sensitivity: DataSensitivity = DataSensitivity.UNKNOWN
-    owner_scope: OwnerScope = OwnerScope.UNKNOWN
     destination: SecurityDestination = SecurityDestination.UNKNOWN
     authorization: FlowAuthorization = FlowAuthorization.UNKNOWN
     authorities: SecurityFactAuthorities = Field(default_factory=SecurityFactAuthorities)
@@ -159,19 +144,6 @@ class FlowSecurityContext(CanonicalModel):
                         SecurityFactAuthority.DEPLOYMENT,
                         SecurityFactAuthority.DATA_SOURCE,
                         SecurityFactAuthority.DETECTOR,
-                    }
-                ),
-            ),
-            (
-                "owner_scope",
-                self.owner_scope,
-                OwnerScope.UNKNOWN,
-                self.authorities.owner_scope,
-                frozenset(
-                    {
-                        SecurityFactAuthority.DEPLOYMENT,
-                        SecurityFactAuthority.AUTHENTICATION,
-                        SecurityFactAuthority.DATA_SOURCE,
                     }
                 ),
             ),
@@ -243,7 +215,6 @@ class FlowSecurityContext(CanonicalModel):
         return {
             "security_trust_class": self.trust_class.value,
             "security_sensitivity": self.sensitivity.value,
-            "security_owner_scope": self.owner_scope.value,
             "security_destination": self.destination.value,
             "security_authorization": self.authorization.value,
         }

@@ -51,4 +51,4 @@ Policy 作者指南 → Capability 参考
 ## 治理与规划
 
 - [Roadmap](roadmap.md)：唯一未来工作清单。
-- [ADR 路由](adr/README.md)：判断何时需要新 ADR。
+- [当前架构合同](current-architecture-contract.md)：唯一架构事实与文档治理规则；历史变更只通过 Git 追溯。

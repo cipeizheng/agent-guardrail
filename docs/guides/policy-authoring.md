@@ -91,7 +91,7 @@ SDK 调用方或 Gateway Adapter 决定。
 {field: [message, payload, content, text]}
 {binding: outgoing_mail}
 {derived: lines}
-{parameter: principal}
+{parameter: risk_tier}
 {literal: blocked}
 ```
 
@@ -140,12 +140,11 @@ Event 时绑定整个 pending batch；错误文本不得包含输入或实现异
 
 ## 7. 安全参数
 
-生产只允许下面五个保留参数读取 `FlowSecurityContext`：
+生产只允许下面四个保留参数读取 `FlowSecurityContext`：
 
 ```text
 security_trust_class
 security_sensitivity
-security_owner_scope
 security_destination
 security_authorization
 ```

@@ -322,28 +322,28 @@ def test_parameters_compile_as_trusted_typed_values() -> None:
         """
 version: 1
 parameters:
-  principal: {type: string}
+  risk_tier: {type: string}
 rules:
-  - id: principal_check
+  - id: risk_tier_check
     events:
       call: {kind: tool_call}
     where:
       compare:
-        left: {parameter: principal}
+        left: {parameter: risk_tier}
         operator: not_equals
-        right: {literal: admin}
+        right: {literal: approved}
     finding:
       code: unauthorized
-      message: Principal is not authorized
+      message: Risk tier is not approved
       subjects: [call]
-      bindings: [principal]
+      bindings: [risk_tier]
 """
     )
 
     comparison = plan.rules[0].where.compare
     assert comparison is not None
-    assert comparison.left == ParameterValue(name="principal")
-    assert plan.rules[0].finding.bindings == ("call", "principal")
+    assert comparison.left == ParameterValue(name="risk_tier")
+    assert plan.rules[0].finding.bindings == ("call", "risk_tier")
 
 
 def test_author_boolean_presence_literals_and_local_collection_compile() -> None:
@@ -364,7 +364,7 @@ rules:
                   operator: in
                   right: {literal: [send_email, post_message]}
             - compare:
-                left: {field: [call, payload, arguments, owner]}
+                left: {field: [call, payload, arguments, resource_label]}
                 operator: equals
                 right: {literal: null}
         - quantify:

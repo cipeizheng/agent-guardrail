@@ -23,7 +23,6 @@ from agent_guardrail.models import (
     FlowSecurityContext,
     Message,
     MessageRole,
-    OwnerScope,
     PendingTrace,
     RelationKind,
     SecurityDestination,
@@ -302,13 +301,11 @@ def test_flow_security_context_is_closed_typed_and_authority_bound() -> None:
     context = FlowSecurityContext(
         trust_class=ContentTrustClass.USER_CONTENT,
         sensitivity=DataSensitivity.PRIVATE,
-        owner_scope=OwnerScope.CURRENT_PRINCIPAL,
         destination=SecurityDestination.LLM_PROVIDER,
         authorization=FlowAuthorization.ALLOWED,
         authorities=SecurityFactAuthorities(
             trust_class=SecurityFactAuthority.ENFORCEMENT,
             sensitivity=SecurityFactAuthority.DATA_SOURCE,
-            owner_scope=SecurityFactAuthority.AUTHENTICATION,
             destination=SecurityFactAuthority.ENFORCEMENT,
             authorization=SecurityFactAuthority.AUTHORIZATION_SERVICE,
         ),
@@ -316,13 +313,11 @@ def test_flow_security_context_is_closed_typed_and_authority_bound() -> None:
 
     boundary = context.with_enforcement_destination(SecurityDestination.LLM_PROVIDER)
 
-    assert boundary.owner_scope is OwnerScope.CURRENT_PRINCIPAL
     assert boundary.destination is SecurityDestination.LLM_PROVIDER
     assert boundary.authorities.destination is SecurityFactAuthority.ENFORCEMENT
     assert boundary.policy_parameters() == {
         "security_trust_class": "user_content",
         "security_sensitivity": "private",
-        "security_owner_scope": "current_principal",
         "security_destination": "llm_provider",
         "security_authorization": "allowed",
     }
@@ -341,8 +336,20 @@ def test_flow_security_context_is_closed_typed_and_authority_bound() -> None:
         )
     with pytest.raises(ValidationError, match="frozen"):
         boundary.authorization = FlowAuthorization.DENIED
+
+
+@pytest.mark.parametrize(
+    "legacy_field",
+    ["owner_scope", "tenant_id", "principal_id"],
+)
+def test_flow_security_context_rejects_identity_and_ownership_fields(
+    legacy_field: str,
+) -> None:
     with pytest.raises(ValidationError, match="Extra inputs"):
-        FlowSecurityContext.model_validate({"tenant_id": "raw-tenant"})
+        FlowSecurityContext.model_validate({legacy_field: "legacy-value"})
+
+    with pytest.raises(ValidationError, match="Extra inputs"):
+        SecurityFactAuthorities.model_validate({legacy_field: "deployment"})
 
 
 @pytest.mark.parametrize(
@@ -360,15 +367,12 @@ def test_flow_security_context_is_closed_typed_and_authority_bound() -> None:
         ),
         (
             {
-                "owner_scope": "current_tenant",
-                "authorities": {"owner_scope": "detector"},
-            },
-            "owner_scope cannot use that authority",
-        ),
-        (
-            {
                 "authorization": "allowed",
-                "authorities": {"authorization": "authentication"},
+                "destination": "llm_provider",
+                "authorities": {
+                    "authorization": "detector",
+                    "destination": "enforcement",
+                },
             },
             "authorization cannot use that authority",
         ),

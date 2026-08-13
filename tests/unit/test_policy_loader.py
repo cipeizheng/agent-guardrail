@@ -112,6 +112,21 @@ rules: []
     assert declaration.default == "unknown"
 
 
+def test_retired_owner_security_parameter_is_rejected() -> None:
+    with pytest.raises(
+        PolicyLoadError,
+        match="unsupported security context parameter: security_owner_scope",
+    ):
+        load(
+            """\
+version: 3
+scopes: [pending]
+parameters:
+  security_owner_scope: {type: string, required: false, default: unknown}
+rules: []
+"""
+        )
+
 @pytest.mark.parametrize(
     "path",
     sorted((Path(__file__).parents[2] / "examples" / "policies").glob("*.yaml")),

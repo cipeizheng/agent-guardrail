@@ -972,12 +972,12 @@ def parameter_rule() -> MatchRulePlan:
     return rule(
         bindings=(EventBinding(name="event", kind=EventKind.TOOL_CALL),),
         where=compare(
-            ParameterValue(name="principal"),
+            ParameterValue(name="risk_tier"),
             ComparisonOperator.NOT_EQUALS,
-            LiteralValue(value="admin"),
+            LiteralValue(value="approved"),
         ),
         subjects=("event",),
-        finding_bindings=("event", "principal"),
+        finding_bindings=("event", "risk_tier"),
     )
 
 
@@ -986,25 +986,25 @@ async def test_i14_trusted_parameter_cannot_be_overridden_by_payload() -> None:
     analyzer = matcher(
         plan(
             parameter_rule(),
-            parameters=(ParameterDeclaration(name="principal", type=ParameterType.STRING),),
+            parameters=(ParameterDeclaration(name="risk_tier", type=ParameterType.STRING),),
         )
     )
     report = await analyzer.analyze(
-        trace(call("c1", 0, "read", {"principal": "admin"})),
-        parameters={"principal": "alice"},
+        trace(call("c1", 0, "read", {"risk_tier": "approved"})),
+        parameters={"risk_tier": "review"},
     )
 
     assert len(report.findings) == 1
-    principal = report.findings[0].bindings[1]
-    assert principal.event_id is None
-    assert "alice" not in report.model_dump_json()
-    assert "admin" not in report.model_dump_json()
+    risk_tier = report.findings[0].bindings[1]
+    assert risk_tier.event_id is None
+    assert "review" not in report.model_dump_json()
+    assert "approved" not in report.model_dump_json()
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "parameters",
-    [None, {"principal": 7}, {"principal": "admin", "extra": True}],
+    [None, {"risk_tier": 7}, {"risk_tier": "approved", "extra": True}],
 )
 async def test_i14_parameter_errors_happen_before_rule_search(
     parameters: dict[str, object] | None,
@@ -1012,7 +1012,7 @@ async def test_i14_parameter_errors_happen_before_rule_search(
     analyzer = matcher(
         plan(
             parameter_rule(),
-            parameters=(ParameterDeclaration(name="principal", type=ParameterType.STRING),),
+            parameters=(ParameterDeclaration(name="risk_tier", type=ParameterType.STRING),),
         )
     )
     report = await analyzer.analyze(trace(call("c1", 0, "read")), parameters=parameters)

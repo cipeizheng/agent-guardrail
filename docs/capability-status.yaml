@@ -1,5 +1,5 @@
 schema_version: 1
-last_verified: "2026-08-13"
+last_verified: "2026-08-14"
 
 status_vocabulary:
   verified: 实际算法或声明的真实后端已运行，并满足完整行为完成定义。

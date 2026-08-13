@@ -16,12 +16,13 @@ execution checkpoints.
 
 The project focuses on three assets: **user data, user intent, and user resources**. Detector hits
 are evidence, not security decisions by themselves; policies combine those facts with trusted
-source, destination, ownership, and authorization context.
+source, destination, and authorization context.
 
 > **Project status — v0.1.0 alpha.** The direct Detector SDK, event/Policy SDK, core runtime, Inline
 > wrappers, provider-neutral Adapter contract, OpenAI Chat/Responses streaming Gateway, stateless
-> MCP Gateway, and remote Core path are implemented and tested. This release is not a complete
-> sandbox, persistent-session service, or multi-tenant control plane.
+> MCP Gateway, and remote Core path are implemented and tested. The application is explicitly
+> single-user; it is not a sandbox or persistent-session service and does not model users, tenants,
+> or data ownership.
 
 ## Why Agent Guardrail?
 
@@ -254,10 +255,12 @@ Agent Guardrail only mediates traffic that passes through its wrappers or gatewa
 currently provide:
 
 - cross-request session state or policy hot reload;
-- a complete multi-tenant identity and authorization control plane;
 - a sandbox or interception for direct shell, function, filesystem, or arbitrary HTTP access;
 - a web management UI or distributed policy service;
 - moderation, copyright, or OCR capabilities.
+
+Multi-user identity, tenant isolation, cross-user sharing, and per-user authorization are outside
+the product scope rather than deferred features.
 
 If an agent can execute shell commands or arbitrary code, deploy it in a separate sandbox with
 default-deny network egress, ephemeral/minimal filesystem access, resource limits, and no
@@ -267,7 +270,7 @@ and audit outside that sandbox. Pattern, code, and URL detectors cannot stop an 
 sandbox escape. See the [threat boundary matrix](docs/security-model.md#8-guardrail-无法替代的-sandbox-控制)
 and [deployment checklist](docs/guides/operations.md#3-agent-sandbox-与不可绕过部署边界).
 
-A detector hit is not proof of malicious intent, data ownership, or authorization. Production
+A detector hit is not proof of malicious intent or authorization. Production
 rules should combine detector facts with trusted source/sink context. The authoritative boundaries
 are maintained in the [current architecture contract](docs/current-architecture-contract.md) and
 [security model](docs/security-model.md).
