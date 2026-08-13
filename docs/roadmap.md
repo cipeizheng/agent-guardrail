@@ -9,6 +9,8 @@
 - typed/multi Event binding、derive、量词、顺序/精确 Relation 和 whole-pending Matcher；
 - phase-free 语义 Event、PendingTrace batch 原子提交、EventOrigin、显式 `derived_from/may_influence` 和脱敏 Audit；
 - 框架无关 `GuardrailRun` 编程式 SDK 与跨 Event `EventRef`；
+- 无 YAML `DetectorRunner` SDK：任意插入点的 text/canonical JSON/batch 检测、capability 枚举，以及与
+  MatchPlan 共享的有界 Detector 执行器；
 - OpenAI 非流式、MCP `2026-07-28` 无状态 Gateway 与 Inline LLM/Tool Enforcement；
 - 固定 Policy 的无状态远程 Core、失败关闭 DecisionClient 与 Core/Gateway 双容器 Compose；
 - Gateway 调用前副作用控制与非流式输出释放前完整检查；

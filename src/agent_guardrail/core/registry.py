@@ -175,6 +175,14 @@ class DetectorRegistry:
         except KeyError as exc:
             raise RegistryError(f"detector is not available to structured policy: {name}") from exc
 
+    def published_detector_descriptors(self) -> tuple[DetectorPolicyDescriptor, ...]:
+        """Return the finite Detector surface available to Policy and direct SDK calls."""
+
+        return tuple(
+            self._policy_descriptors[name]
+            for name in sorted(self._policy_descriptors)
+        )
+
     def register_similarity(
         self,
         detector: SimilarityDetector,

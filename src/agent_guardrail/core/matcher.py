@@ -13,6 +13,10 @@ from typing import cast
 from pydantic import JsonValue
 
 from agent_guardrail.core.capabilities import CompiledMatchPlan
+from agent_guardrail.core.detector_executor import (
+    DetectorExecutionError,
+    DetectorExecutor,
+)
 from agent_guardrail.core.match_plan import (
     BindingDomain,
     BindingValue,
@@ -46,10 +50,7 @@ from agent_guardrail.core.match_plan import (
     ValueType,
 )
 from agent_guardrail.core.protocols import PredicateContext
-from agent_guardrail.core.registry import (
-    DetectorPolicyDescriptor,
-    SimilarityPolicyDescriptor,
-)
+from agent_guardrail.core.registry import SimilarityPolicyDescriptor
 from agent_guardrail.models import (
     AnalysisError,
     AnalysisErrorCode,
@@ -142,9 +143,7 @@ class _CapabilityRuntime:
         self.predicates = {
             item.descriptor.name: item for item in compiled.predicates
         }
-        self.detectors = {
-            item.descriptor.name: item for item in compiled.detectors
-        }
+        self.detector_executor = DetectorExecutor(compiled.detectors)
         self.similarities = {
             item.descriptor.name: item for item in compiled.similarities
         }
@@ -317,7 +316,7 @@ class SnapshotMatcher:
                 )
                 if exc.rule_id is None:
                     break
-            except _CapabilityFailure as exc:
+            except (_CapabilityFailure, DetectorExecutionError) as exc:
                 errors.append(
                     AnalysisError(
                         code=exc.code,
@@ -919,8 +918,10 @@ async def _evaluate_detector(
     ledger: MatchCostLedger,
     runtime: _CapabilityRuntime,
 ) -> _ConditionResult:
-    compiled = runtime.detectors[condition.capability]
-    descriptor = compiled.descriptor
+    descriptor = runtime.detector_executor.descriptor(condition.capability)
+    implementation_version = runtime.detector_executor.implementation_version(
+        condition.capability
+    )
     selected_types = set(condition.types_any)
     facts: list[_CapturedEvidence] = []
     complete = True
@@ -940,11 +941,15 @@ async def _evaluate_detector(
         if encoded_text is None:
             complete = False
             continue
-        encoded = encoded_text.encode("utf-8")
+        prepared = runtime.detector_executor.prepare_text(
+            condition.capability,
+            encoded_text,
+            encoding=detector_input.encoding,
+        )
         _charge_capability_input(
             rule_id=rule_id,
             capability=condition.capability,
-            encoded_size=len(encoded),
+            encoded_size=prepared.input_bytes,
             descriptor_limit=descriptor.max_input_bytes,
             calls_dimension=CostDimension.DETECTOR_CALLS,
             bytes_dimension=CostDimension.DETECTOR_INPUT_BYTES,
@@ -970,8 +975,8 @@ async def _evaluate_detector(
         )
         cache_key = (
             condition.capability,
-            compiled.implementation.version,
-            sha256(encoded).digest(),
+            implementation_version,
+            sha256(encoded_text.encode("utf-8")).digest(),
             context.trace_id,
             context.event_id,
             detector_input.encoding.value,
@@ -979,14 +984,14 @@ async def _evaluate_detector(
         if cache_key in runtime.detector_cache:
             detections = runtime.detector_cache[cache_key]
         else:
-            detections = await _invoke_detector(
-                condition=condition,
-                text=encoded_text,
+            ledger.consume(
+                rule_id,
+                CostDimension.DETECTOR_TIME_MS,
+                descriptor.timeout_ms,
+            )
+            detections = await runtime.detector_executor.execute(
+                prepared,
                 context=context,
-                descriptor=descriptor,
-                implementation=compiled.implementation,
-                rule_id=rule_id,
-                ledger=ledger,
             )
             runtime.detector_cache[cache_key] = detections
         for detection in detections:
@@ -1032,61 +1037,6 @@ async def _evaluate_detector(
             ),
         ),
     )
-
-
-async def _invoke_detector(
-    *,
-    condition: DetectorCondition,
-    text: str,
-    context: DetectionContext,
-    descriptor: DetectorPolicyDescriptor,
-    implementation: object,
-    rule_id: str,
-    ledger: MatchCostLedger,
-) -> tuple[Detection, ...]:
-    ledger.consume(rule_id, CostDimension.DETECTOR_TIME_MS, descriptor.timeout_ms)
-    try:
-        async with asyncio.timeout(descriptor.timeout_ms / 1_000):
-            raw = await implementation.detect(text, context=context)  # type: ignore[attr-defined]
-    except TimeoutError as exc:
-        raise _CapabilityFailure(
-            code=descriptor.timeout_code,
-            message="Detector capability timed out",
-            capability=condition.capability,
-            retryable=True,
-        ) from exc
-    except Exception as exc:
-        raise _CapabilityFailure(
-            code=descriptor.error_code,
-            message="Detector capability execution failed",
-            capability=condition.capability,
-        ) from exc
-    if not isinstance(raw, (list, tuple)) or len(raw) > descriptor.max_detections:
-        raise _invalid_detector_result(condition.capability, descriptor)
-    result: list[Detection] = []
-    for detection in raw:
-        if not isinstance(detection, Detection):
-            raise _invalid_detector_result(condition.capability, descriptor)
-        if (
-            detection.detector != condition.capability
-            or detection.detector_version != implementation.version  # type: ignore[attr-defined]
-            or detection.type not in descriptor.detection_types
-            or len(detection.masked_evidence) > 256
-            or detection.masked_evidence != detection.masked_evidence.strip()
-            or len(detection.fingerprint) > 128
-            or any(
-                character
-                not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
-                for character in detection.fingerprint
-            )
-            or (
-                detection.end is not None
-                and detection.end > len(text)
-            )
-        ):
-            raise _invalid_detector_result(condition.capability, descriptor)
-        result.append(detection)
-    return tuple(result)
 
 
 async def _evaluate_similarity(
@@ -1284,17 +1234,6 @@ def _similarity_threshold(value: int | float | SimilarityThreshold) -> float:
         SimilarityThreshold.SAME_TOPIC: 0.5,
         SimilarityThreshold.VERY_SIMILAR: 0.8,
     }[value]
-
-
-def _invalid_detector_result(
-    capability: str,
-    descriptor: DetectorPolicyDescriptor,
-) -> _CapabilityFailure:
-    return _CapabilityFailure(
-        code=descriptor.error_code,
-        message="Detector capability returned an invalid result",
-        capability=capability,
-    )
 
 
 def _invalid_similarity_result(

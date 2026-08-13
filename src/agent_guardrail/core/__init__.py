@@ -14,6 +14,7 @@ from agent_guardrail.core.capabilities import (
     compile_match_plan_capabilities,
 )
 from agent_guardrail.core.decision_analyzer import MatchPolicyAnalyzer
+from agent_guardrail.core.detector_executor import DetectorExecutionError
 from agent_guardrail.core.match_plan import (
     CostDimension,
     MatchBudgetExceeded,
@@ -49,6 +50,7 @@ from agent_guardrail.core.registry import (
 
 __all__ = [
     "Detector",
+    "DetectorExecutionError",
     "Predicate",
     "PredicateContext",
     "SimilarityDetector",

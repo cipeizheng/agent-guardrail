@@ -9,18 +9,19 @@ English | [简体中文](README.zh-CN.md)
 [![Status](https://img.shields.io/badge/status-alpha-f59e0b)](docs/roadmap.md)
 [![License](https://img.shields.io/badge/license-MIT-22c55e)](LICENSE)
 
-Agent Guardrail compiles a strict YAML policy into an immutable match plan, analyzes
-provider-neutral agent events, and returns explainable decisions. Applications can submit events
-through a framework-neutral SDK; Gateways additionally enforce decisions at concrete model and
-tool execution checkpoints.
+Agent Guardrail can run bounded Detectors directly without YAML, or compile a strict YAML policy
+into an immutable match plan for cross-event decisions. Applications can use both modes through
+framework-neutral SDKs; Gateways additionally enforce decisions at concrete model and tool
+execution checkpoints.
 
 The project focuses on three assets: **user data, user intent, and user resources**. Detector hits
 are evidence, not security decisions by themselves; policies combine those facts with trusted
 source, destination, ownership, and authorization context.
 
-> **Project status — v0.1.0 alpha.** The programmatic SDK, core runtime, Inline wrappers, non-streaming
-> OpenAI-compatible Gateway, stateless MCP Gateway, and remote Core path are implemented and
-> tested. This release is not a complete sandbox, streaming proxy, or multi-tenant control plane.
+> **Project status — v0.1.0 alpha.** The direct Detector SDK, event/Policy SDK, core runtime, Inline
+> wrappers, non-streaming OpenAI-compatible Gateway, stateless MCP Gateway, and remote Core path
+> are implemented and tested. This release is not a complete sandbox, streaming proxy, or
+> multi-tenant control plane.
 
 ## Why Agent Guardrail?
 
@@ -41,10 +42,14 @@ source, destination, ownership, and authorization context.
 
 ```mermaid
 flowchart LR
-    A[Agent or client] --> B[Programmatic SDK / OpenAI / MCP adapter]
+    A[Agent or client] --> B[Event SDK / OpenAI / MCP adapter]
+    A --> I[Direct Detector SDK]
     B --> C[EnforcementSession]
     C -->|PendingTrace| D[Embedded Runtime or Remote Core]
     D --> E[Policy v3 → MatchPlan → SnapshotMatcher]
+    E --> J[Shared bounded Detector executor]
+    I --> J
+    J -->|masked facts| I
     E -->|AnalysisReport| F[Decision Analyzer]
     F -->|allow / log / block| C
     C -->|allow before call / output release| G[LLM or Tool boundary]
@@ -129,12 +134,29 @@ derived values, findings, budgets, and trusted security parameters.
 
 | Integration | Best fit | Current guarantee |
 | --- | --- | --- |
-| Programmatic SDK | Any Python agent/framework can expose semantic events | No framework adapter required; the application chooses every insertion point and carries explicit `EventRef` relations |
+| Direct Detector SDK | Any Python code needs a fact at an arbitrary insertion point | No YAML; bounded text/JSON/batch detection, with application-owned action |
+| Event/Policy SDK | Any Python agent/framework can expose semantic events | No framework adapter required; the application chooses every insertion point and carries explicit `EventRef` relations |
 | Inline wrappers | You can inject LLM and tool interfaces | Mediates calls passing through the shared task-level session |
 | OpenAI-compatible Gateway | The agent can change its OpenAI base URL | Checks complete requests and non-streaming responses |
 | MCP Gateway | Tools are exposed by a fixed MCP server | Checks every stateless `tools/call` before and after execution |
 | Remote Core | Policy and detector assets must be isolated from the edge | Gateway owns traffic and side effects; Core analyzes complete `PendingTrace` values |
 | Docker Compose | Self-hosted Core + Gateway | Read-only containers, private Core network, separated provider and Core credentials |
+
+Direct detection requires no Policy file:
+
+```python
+from agent_guardrail import DetectorRunner
+
+detectors = DetectorRunner.from_profile("local")
+result = await detectors.detect("prompt_injection", retrieved_text)
+if result.detected:
+    reject_untrusted_content()
+```
+
+This returns masked facts, not an allow/block Decision. `detect_text`, `detect_json`, and
+`detect_many` share exactly the same descriptor, timeout, result-limit, and redaction boundary as
+YAML/MatchPlan Detector conditions. Backend errors raise a redacted `DetectorExecutionError`
+instead of silently becoming “no hit.”
 
 For an OpenAI client, the agent only changes its base URL:
 

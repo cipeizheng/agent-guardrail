@@ -9,6 +9,13 @@ from agent_guardrail.config import (
     load_policy_yaml,
 )
 from agent_guardrail.core import MatchPolicyAnalyzer
+from agent_guardrail.core.detector_executor import DetectorExecutionError
+from agent_guardrail.core.match_plan import DetectorInputEncoding
+from agent_guardrail.detector_sdk import (
+    DetectorCapability,
+    DetectorResult,
+    DetectorRunner,
+)
 from agent_guardrail.enforcement import (
     EnforcementSession,
     GuardedLLMClient,
@@ -49,6 +56,11 @@ __all__ = [
     "ContentTrustClass",
     "DataSensitivity",
     "Decision",
+    "DetectorCapability",
+    "DetectorExecutionError",
+    "DetectorInputEncoding",
+    "DetectorResult",
+    "DetectorRunner",
     "EnforcementSession",
     "Event",
     "EventKind",

@@ -26,6 +26,10 @@ descriptor、实现位置、模型、文件、进程或 endpoint。
 Predicate 是纯、类型化、无 I/O 布尔能力。Detector 产生脱敏事实，不决定 action。可信 Detector backend
 若需要模型、文件、进程或网络，这些权限必须由部署 profile 固定并隔离，Policy 不能选择具体资源。
 
+同一个带 descriptor 的 Detector 也可由 `DetectorRunner` 直接调用。直接入口不需要 YAML，不产生 Finding
+或 Decision；它与 Matcher 复用 `core/detector_executor.py`，因此 encoding、输入字节、deadline、结果数量、
+公开 type、span、mask 和 fingerprint 的执行合同完全相同。
+
 ## 2. 编译与有界执行
 
 linking 在分析前原子验证：
@@ -49,6 +53,24 @@ Event/Rule 上下文。
 错误只公开稳定类别、Rule ID 和 capability 名，不包含输入或异常原文。Rule 中 capability 失败会丢弃该
 Rule 已暂存 Finding。
 
+直接 SDK 对同类失败抛出 `DetectorExecutionError`，公开同样的稳定 `code`、安全 message、capability 与
+retryable，不包含输入或 backend 异常。错误绝不转换为空 Detection。`detect_many` 最多接受 64 个不重复
+Detector，并在任何执行前预校验整个 capability/encoding/input 集合；执行期异常不返回部分成功结果。
+
+直接调用示例：
+
+```python
+from agent_guardrail import DetectorRunner
+
+runner = DetectorRunner.from_profile("local")
+text_result = await runner.detect_text("prompt_injection", text)
+json_result = await runner.detect_json("secrets", tool_arguments)
+batch = await runner.detect_many(("pii", "secrets"), model_output)
+```
+
+`runner.capabilities` 只枚举普通 `detect(text, context=...)` Detector。专用双输入 Similarity
+`is_similar` 不会伪装成单输入直接 Detector，当前仍通过 MatchPlan Similarity condition 使用。
+
 ## 3. Evidence
 
 Predicate 只能投影 condition ID、capability、可选结构位置和 Policy 静态 mask。Detector evidence 只接受
@@ -57,6 +79,7 @@ version。
 
 原始输入及 Detector path 不进入 Finding。text span 可映射回原字段；canonical JSON span 只属于编码后
 文本，不能冒充原始 JSON 字段位置。同一 Detector 条件最多投影 64 条 evidence，超过时显式资源失败。
+直接 SDK 同样移除 backend `Detection.path`，只保留有界 span 与遮罩事实。
 
 ## 4. 默认 Predicate
 

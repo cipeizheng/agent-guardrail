@@ -30,11 +30,13 @@ flowchart TD
     Runtime[runtime/] --> Analyzer
     Remote[core_service/ remote HTTP] --> Runtime
     Gateway[gateway/] --> Session[enforcement/session.py]
+    Direct[detector_sdk.py DetectorRunner] --> DetectorExec[core/detector_executor.py]
     SDK[sdk.py GuardrailRun] --> Session
     Inline[inline_llm.py + inline_tools.py] --> Session
     Session --> Runtime
     Session --> Remote
     Session --> Security[FlowSecurityContext]
+    Matcher --> DetectorExec
 ```
 
 ## 3. 代码阅读顺序
@@ -46,12 +48,14 @@ flowchart TD
 | MatchPlan Schema 与预算 | `core/match_plan.py` |
 | 作者模型与编译 | `core/authoring.py` |
 | Registry/linking | `core/registry.py`、`core/capabilities.py` |
+| 共享 Detector 执行边界 | `core/detector_executor.py` |
 | 默认 capability | `config/defaults.py`、`predicates/`、`detectors/` |
 | Matcher/Monitor | `core/matcher.py`、`core/monitor.py` |
 | Finding/Error → Decision | `core/decision_analyzer.py` |
 | v3 Policy Loader | `config/loader.py` |
 | Session 与 normalization | `enforcement/session.py`、`input_normalizer.py` |
 | 框架无关编程式接入 | `sdk.py` |
+| 无 YAML 直接 Detector 接入 | `detector_sdk.py` |
 | OpenAI/MCP | `gateway/app.py`、`gateway/mcp.py`、`adapters/` |
 | 远程 Core/双容器 | `core_service/`、`runtime/remote.py`、`compose.yaml`、`docker/` |
 
@@ -79,6 +83,7 @@ flowchart TD
 - `test_models.py`：Event、Relation、PendingTrace 和安全上下文；
 - `test_session.py`：batch 原子性、block、异常和可信来源；
 - `test_sdk.py`：编程式 EventRef、显式关系和跨 run 防伪；
+- `test_detector_sdk.py`：直接 Detector 的枚举、text/JSON/batch、timeout、失败与脱敏；
 - `test_security_detectors.py` / `test_priority_detectors.py`：既有 Detector 算法边界；
 - `test_secret_detector_parity.py` / `test_pii_detector.py` / `test_prompt_detector_parity.py`：
   Secret、PII、Prompt/模型适配边界；

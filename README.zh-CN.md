@@ -9,16 +9,16 @@
 [![Status](https://img.shields.io/badge/status-alpha-f59e0b)](docs/roadmap.md)
 [![License](https://img.shields.io/badge/license-MIT-22c55e)](LICENSE)
 
-Agent Guardrail 把严格 YAML Policy 编译为不可变 MatchPlan，分析与 Provider 无关的 Agent Event，并返回
-可解释 Decision。应用可通过框架无关 SDK 在任意位置提交 Event；Gateway 还会在具体模型与工具执行检查点
+Agent Guardrail 可以不写 YAML 直接运行有界 Detector，也可以把严格 YAML Policy 编译为不可变 MatchPlan，
+对跨 Event 行为返回可解释 Decision。两种模式都提供框架无关 SDK；Gateway 还会在具体模型与工具执行检查点
 强制落实 Decision。
 
 项目聚焦三类资产：**用户数据、用户意图和用户资源**。Detector 命中只是证据，不会单独成为安全结论；
 Policy 还需要把这些事实与可信的 source、destination、owner 和 authorization 语境组合。
 
-> **项目状态 — v0.1.0 alpha。** 编程式 SDK、Core Runtime、Inline Wrapper、非流式 OpenAI-compatible Gateway、
-> 无状态 MCP Gateway 和远程 Core 路径已经实现并通过测试。当前版本不是完整 Sandbox、流式代理或多租户
-> 控制平面。
+> **项目状态 — v0.1.0 alpha。** 直接 Detector SDK、Event/Policy SDK、Core Runtime、Inline Wrapper、
+> 非流式 OpenAI-compatible Gateway、无状态 MCP Gateway 和远程 Core 路径已经实现并通过测试。当前版本
+> 不是完整 Sandbox、流式代理或多租户控制平面。
 
 ## 为什么使用 Agent Guardrail？
 
@@ -39,10 +39,14 @@ Policy 还需要把这些事实与可信的 source、destination、owner 和 aut
 
 ```mermaid
 flowchart LR
-    A[Agent 或 Client] --> B[编程式 SDK / OpenAI / MCP Adapter]
+    A[Agent 或 Client] --> B[Event SDK / OpenAI / MCP Adapter]
+    A --> I[直接 Detector SDK]
     B --> C[EnforcementSession]
     C -->|PendingTrace| D[Embedded Runtime 或 Remote Core]
     D --> E[Policy v3 → MatchPlan → SnapshotMatcher]
+    E --> J[共享有界 Detector 执行器]
+    I --> J
+    J -->|脱敏 fact| I
     E -->|AnalysisReport| F[Decision Analyzer]
     F -->|allow / log / block| C
     C -->|调用前 allow / 输出释放| G[LLM 或 Tool 边界]
@@ -125,12 +129,28 @@ binding、relation、quantifier、派生值、Finding、预算和可信安全参
 
 | 接入方式 | 适用场景 | 当前保证 |
 | --- | --- | --- |
-| 编程式 SDK | 任意 Python Agent/Framework 能暴露语义 Event | 无需框架专用 Adapter；应用选择插入点并携带显式 `EventRef` Relation |
+| 直接 Detector SDK | 任意 Python 代码需要在某个插入点获得检测 fact | 无 YAML；有界 text/JSON/batch 检测，动作由应用决定 |
+| Event/Policy SDK | 任意 Python Agent/Framework 能暴露语义 Event | 无需框架专用 Adapter；应用选择插入点并携带显式 `EventRef` Relation |
 | Inline Wrapper | 可以注入 LLM 与 Tool 接口 | 中介经过共享任务级 Session 的调用 |
 | OpenAI-compatible Gateway | Agent 可以修改 OpenAI base URL | 检查完整请求和非流式响应 |
 | MCP Gateway | Tool 来自固定 MCP Server | 每个无状态 `tools/call` 都经过执行前后检查 |
 | Remote Core | Policy/Detector 资产需要与边缘流量隔离 | Gateway 持有流量和副作用，Core 分析完整 `PendingTrace` |
 | Docker Compose | 自托管 Core + Gateway | 只读容器、Core 私网、Provider/Core 凭据隔离 |
+
+直接检测不需要 Policy 文件：
+
+```python
+from agent_guardrail import DetectorRunner
+
+detectors = DetectorRunner.from_profile("local")
+result = await detectors.detect("prompt_injection", retrieved_text)
+if result.detected:
+    reject_untrusted_content()
+```
+
+结果是脱敏 fact，不是 allow/block Decision。`detect_text`、`detect_json`、`detect_many` 与 YAML/MatchPlan 的
+Detector condition 共享完全相同的 descriptor、timeout、结果上限和脱敏执行边界；backend 异常会抛出脱敏
+`DetectorExecutionError`，不会静默变成“未命中”。
 
 OpenAI Client 只需要修改 base URL：
 

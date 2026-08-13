@@ -27,6 +27,10 @@ strict v3 YAML
 生产没有 Python Rule、动态 import、callback、mandatory anchor、v1/v2 fallback 或第二套解释器。Core、
 Matcher 和 Analyzer 都不执行 LLM、Tool 或其他 Agent 业务副作用。
 
+项目同时提供一个较小的 `DetectorRunner` 事实接口：应用不写 YAML，直接对 text/canonical JSON 调用部署方
+发布的 Detector。该接口只返回脱敏 Detection，不做跨 Event 判断或 allow/log/block；其 Detector 调用与
+上述 Policy 链共享同一个 descriptor、timeout 和结果校验执行器，不是第二套 Policy 链。
+
 ## 2. 运行图
 
 ```text
@@ -53,6 +57,14 @@ block：丢弃原始 pending Event，只提交脱敏 Decision Event
 
 Runtime 管理 Analyzer 生命周期；Adapter 只处理 Provider/Framework 协议；Enforcement 控制何时允许副作用；
 Gateway 组合 HTTP、认证、固定上游和请求级 Session。
+
+三种产品入口的职责不同：
+
+| 入口 | 是否需要 YAML | 输入与输出 | 谁决定/控制副作用 |
+| --- | --- | --- | --- |
+| `DetectorRunner` | 否 | text/JSON → Detection fact | 应用代码；SDK 不返回 Decision |
+| `GuardrailRun` | 是 | Event/Relation → Decision | 应用在副作用前检查 `blocked` |
+| Gateway/Inline | 是 | Provider 调用 → Decision + enforcement | 受信 Gateway/Wrapper |
 
 Gateway 的 Decision backend 可以是进程内 `GuardrailRuntime`，也可以是独立 Core 容器中的同一 Runtime。
 远程模式传输封闭、版本化的 `PendingTrace → Decision`；Core 不持有 Provider Key、不调用 LLM/Tool，Gateway
@@ -92,6 +104,11 @@ pending 分析看到 `committed past + whole pending batch`，但 Finding 至少
 
 MatchPlan 是 action-free 分析 IR。Rule action 和失败动作保存在生产 Policy 外层；Analyzer 在完整匹配后按
 `block > log > allow` 聚合 Decision。
+
+直接 Detector SDK 使用同一部署 Registry，但不编译 MatchPlan。`detect_text`、`detect_json` 和
+`detect_many` 先完成 capability/encoding/输入上限预校验，再按 descriptor deadline 调用 Detector，并严格
+校验 detection type、数量、span、mask 和 fingerprint。timeout、backend 异常和非法返回通过脱敏
+`DetectorExecutionError` 显式失败，绝不伪装成空检测结果。
 
 YAML 只能引用部署方注册并发布 descriptor 的 Predicate/Detector。Predicate 必须纯且无 I/O；Detector
 输入编码、字节、deadline、结果类型、数量和 evidence 均受 descriptor 与 MatchPlan 预算约束。Policy

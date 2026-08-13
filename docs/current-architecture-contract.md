@@ -19,11 +19,15 @@ strict version: 3 YAML → AuthorPolicy → immutable MatchPlan
 - Core/Matcher 只产生 Finding/AnalysisReport；Analyzer 只投影 Decision；它们不执行 Agent、LLM 或 Tool。
 - Runtime 管理 Analyzer 生命周期；Provider 协议属于 Adapter/Gateway，副作用控制属于 Enforcement。
 - pending 分析使用完整 `committed past + whole pending batch`；batch 同 Trace、有界并原子提交。
+- `DetectorRunner` 是不经过 Policy/Decision 的直接事实接口；它与 MatchPlan 复用同一个 descriptor-enforced
+  Detector 执行器，因此不构成第二套 Policy 解释器或第二个 Detector 执行语义。
 
 ## 2. 当前接入与数据模型
 
 - 框架无关 `GuardrailRun` SDK 直接提交语义 Event 与显式 `EventRef` Relation；应用自行选择插入位置，
   不要求每个 Agent Framework 提供专用 Adapter。
+- 框架无关 `DetectorRunner` 可在任意应用位置直接运行一个或多个已发布 Detector；它不需要 YAML，返回
+  脱敏 `Detection` fact，不返回 allow/log/block，也不执行 Agent 的 LLM/Tool/业务副作用。
 - OpenAI-compatible 非流式 `POST /v1/openai/chat/completions`。
 - MCP `2026-07-28` 无状态 `POST /v1/mcp`：`server/discover`、`ping`、`tools/list`、`tools/call`。
 - Gateway 可选择进程内 Runtime，或通过版本化内部 HTTP 协议调用固定 Policy 的无状态 Core；两种模式复用
@@ -82,6 +86,8 @@ strict version: 3 YAML → AuthorPolicy → immutable MatchPlan
   threshold，不能选择 model、endpoint 或凭据。
 - 运行时实际发布名称以默认 Registry 为事实来源；交付验证状态、稳定 roadmap ID 和完成定义以
   [`capability-status.yaml`](capability-status.yaml) 为事实来源。
+- Policy 与直接 SDK 只能调用 Registry 中带 `DetectorPolicyDescriptor` 的 Detector；两条入口共享 encoding、
+  输入字节、deadline、结果数量、类型与 evidence 校验。任一失败都显式返回/抛出脱敏错误，不能变成 no-hit。
 
 ## 6. 明确未交付
 
