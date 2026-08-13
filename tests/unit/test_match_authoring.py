@@ -185,6 +185,10 @@ rules:
             source: output
             target: call
             operator: derived_from_ancestor
+        - compare:
+            left: {field: [output, security_facts, trust_class]}
+            operator: equals
+            right: {literal: external_untrusted}
         - tool: {binding: output, name: get_website}
         - tool: {binding: call, name: send_email}
     finding:
@@ -212,7 +216,12 @@ rules:
     assert rule.where.all[0].relation is not None
     assert rule.where.all[0].relation.operator is RelationOperator.DERIVED_FROM_ANCESTOR
     assert rule.where.all[1].compare is not None
-    assert isinstance(rule.where.all[1].compare.left, FieldValue)
+    assert rule.where.all[1].compare.left == FieldValue(
+        binding="output",
+        path=("security_facts", "trust_class"),
+    )
+    assert rule.where.all[2].compare is not None
+    assert isinstance(rule.where.all[2].compare.left, FieldValue)
 
 
 @pytest.mark.asyncio

@@ -16,14 +16,14 @@
 
 ## 2. Core HTTP
 
-- `POST /v1/analyze`：Bearer 服务认证；请求 `protocol_version=3` 与一个 phase-free `PendingTrace`，响应
-  `protocol_version=3` 与一个 phase-free `Decision`。
+- `POST /v1/analyze`：Bearer 服务认证；请求 `protocol_version=4` 与一个 phase-free `PendingTrace`，响应
+  `protocol_version=4` 与一个 phase-free `Decision`。
 - `GET /v1/policies/current`：Bearer 服务认证；返回协议版本、Policy version 和 content hash。
 - `GET /health/live`：只证明进程存活。
 - `GET /health/ready`：只有固定 Policy、Registry 和可选模型完成加载且 Runtime ready 时返回 200。
 
 请求、响应、deadline 和并发使用部署固定上限。错误只返回稳定 type/code/message，不回显请求、Policy、
-Detector 输出或下游异常。协议版本是封闭 Schema 的一部分，非 v3 请求或响应一律拒绝；不得记录请求体或
+Detector 输出或下游异常。协议版本是封闭 Schema 的一部分，非 v4 请求或响应一律拒绝；不得记录请求体或
 原始响应体。破坏性 wire Schema 变化必须更换协议版本，不能静默复用现有版本号。
 
 Core 启动时只从只读部署文件加载固定 Policy 与 Detector profile；请求不能上传 Policy、模型、规则、路径、

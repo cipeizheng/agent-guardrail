@@ -49,7 +49,7 @@ async def test_core_analyze_authenticates_and_returns_closed_decision(tmp_path: 
 
     assert unauthenticated.status_code == 401
     assert response.status_code == 200
-    assert response.json()["protocol_version"] == 3
+    assert response.json()["protocol_version"] == 4
     assert response.json()["decision"]["action"] == "block"
     assert FAKE_SECRET not in response.text
 
@@ -78,13 +78,13 @@ async def test_core_rejects_oversized_body_before_analysis(tmp_path: Path) -> No
 
 
 @pytest.mark.asyncio
-async def test_core_rejects_retired_protocol_v2(tmp_path: Path) -> None:
+async def test_core_rejects_retired_protocol_v3(tmp_path: Path) -> None:
     runtime = GuardrailRuntime.from_policy_yaml(secret_policy_yaml())
     app = create_core_app(core_settings(tmp_path), runtime=runtime)
     payload = RemoteAnalyzeRequest(pending=tool_context(body="safe")).model_dump(
         mode="json"
     )
-    payload["protocol_version"] = 2
+    payload["protocol_version"] = 3
 
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(

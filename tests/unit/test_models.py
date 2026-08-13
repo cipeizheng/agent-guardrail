@@ -19,6 +19,7 @@ from agent_guardrail.models import (
     EventKind,
     EventOrigin,
     EventRelation,
+    EventSecurityFacts,
     FlowAuthorization,
     FlowSecurityContext,
     Message,
@@ -54,6 +55,8 @@ def test_trace_preserves_order_and_queries_history() -> None:
     assert trace.previous() == trace.events[-1]
     assert trace.count(kind=EventKind.TOOL_CALL) == 2
     assert trace.events[0].origin is EventOrigin.CLIENT_ASSERTED
+    assert trace.events[0].model_version == 4
+    assert trace.events[0].security_facts == EventSecurityFacts()
 
 
 def test_trace_queries_direct_and_transitive_event_relationships() -> None:
@@ -336,6 +339,32 @@ def test_flow_security_context_is_closed_typed_and_authority_bound() -> None:
         )
     with pytest.raises(ValidationError, match="frozen"):
         boundary.authorization = FlowAuthorization.DENIED
+
+
+def test_event_security_facts_are_closed_immutable_and_authority_bound() -> None:
+    facts = EventSecurityFacts(
+        trust_class=ContentTrustClass.EXTERNAL_UNTRUSTED,
+        trust_authority=SecurityFactAuthority.ENFORCEMENT,
+    )
+    source = event(sequence=0).model_copy(update={"security_facts": facts})
+
+    assert source.model_dump(mode="json")["security_facts"] == {
+        "trust_class": "external_untrusted",
+        "trust_authority": "enforcement",
+    }
+    with pytest.raises(ValidationError, match="frozen"):
+        facts.trust_class = ContentTrustClass.TRUSTED_CONTROL
+    with pytest.raises(ValidationError, match="explicit authority"):
+        EventSecurityFacts(trust_class=ContentTrustClass.EXTERNAL_UNTRUSTED)
+    with pytest.raises(ValidationError, match="unknown trust_class"):
+        EventSecurityFacts(trust_authority=SecurityFactAuthority.ENFORCEMENT)
+    with pytest.raises(ValidationError, match="cannot use that authority"):
+        EventSecurityFacts(
+            trust_class=ContentTrustClass.EXTERNAL_UNTRUSTED,
+            trust_authority=SecurityFactAuthority.DETECTOR,
+        )
+    with pytest.raises(ValidationError, match="Extra inputs"):
+        EventSecurityFacts.model_validate({"tenant_id": "not-supported"})
 
 
 @pytest.mark.parametrize(

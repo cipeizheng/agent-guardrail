@@ -1734,6 +1734,7 @@ def _event_envelope(event: Event) -> dict[str, object]:
         "kind": event.kind.value,
         "origin": event.origin.value,
         "payload": event.payload,
+        "security_facts": event.security_facts.model_dump(mode="json"),
     }
 
 

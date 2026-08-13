@@ -117,8 +117,31 @@ if checked.decision.blocked:
 
 assert checked.primary is not None
 result = await executor.execute(call)
-await run.tool_result(result, call=checked.primary)
+committed_result = await run.tool_result(result, call=checked.primary)
 ```
+
+如果该 ToolResult 被可信宿主确认为外部来源，首次提交时应改为把 `EventSecurityFacts` 绑定到这个确切
+Candidate/Event。它不会从 `FlowSecurityContext`、EventOrigin 或时间顺序自动复制：
+
+```python
+from agent_guardrail.models import (
+    ContentTrustClass,
+    EventSecurityFacts,
+    SecurityFactAuthority,
+)
+
+external_source = EventSecurityFacts(
+    trust_class=ContentTrustClass.EXTERNAL_UNTRUSTED,
+    trust_authority=SecurityFactAuthority.DATA_SOURCE,
+)
+result_ref = (
+    await run.tool_result(result, call=checked.primary, security_facts=external_source)
+).primary
+```
+
+随后把 `result_ref` 作为 `model_call(inputs=...)` 或 `tool_call(influenced_by=...)` 的来源；存储结构由目标
+Event 向后引用 source，但关系语义始终是 source 影响 target。普通 HTTP/Provider payload 不能直接设置
+该字段。
 
 上述 helper 覆盖 `message/model_call/tool_call_proposal/tool_call/tool_result`。高级调用方也可用
 `submit/submit_batch` 提交 `CandidateEvent`。SDK 只返回分析结果，不可能自动控制它未持有的副作用；因此

@@ -109,6 +109,16 @@ SDK 调用方或 Gateway Adapter 决定。
 缺失字段和不适用类型不是 Python 异常，也不会因为外层 `not` 自动变成命中。需要区分缺失时必须使用
 `present`。
 
+Event safe envelope 只开放 `id/sequence/kind/origin/payload/security_facts`。其中 Event 级来源信任可读取：
+
+```yaml
+{field: [source, security_facts, trust_class]}
+```
+
+它必须与显式 `may_influence/derived_from` 关系组合，才能说明该 source 影响了某个 sink；sequence 先后不能
+替代 Relation。`trust_authority` 可查询，但 Schema 已先校验非 unknown trust 的 authority，Policy 不应把
+authority 名称当作身份或授权凭证。
+
 ## 5. 声明式 predicate
 
 声明式 predicate 是条件宏，不是代码：

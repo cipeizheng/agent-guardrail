@@ -36,7 +36,7 @@ flowchart TD
     Inline[inline_llm.py + inline_tools.py] --> Session
     Session --> Runtime
     Session --> Remote
-    Session --> Security[FlowSecurityContext]
+    Session --> Security[FlowSecurityContext + EventSecurityFacts]
     Matcher --> DetectorExec
 ```
 
@@ -44,7 +44,7 @@ flowchart TD
 
 | 任务 | 入口 |
 | --- | --- |
-| Event/Trace/Decision/security context | `models/core.py` |
+| Event/Trace/Decision/security facts/context | `models/core.py` |
 | Finding/AnalysisReport | `models/analysis.py` |
 | MatchPlan Schema 与预算 | `core/match_plan.py` |
 | 作者模型与编译 | `core/authoring.py` |

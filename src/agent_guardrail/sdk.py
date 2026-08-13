@@ -15,6 +15,7 @@ from agent_guardrail.models import (
     Decision,
     EventKind,
     EventOrigin,
+    EventSecurityFacts,
     FlowSecurityContext,
     Message,
     MessageRole,
@@ -138,6 +139,7 @@ class GuardrailRun:
         text: str,
         origin: EventOrigin = EventOrigin.CLIENT_ASSERTED,
         derived_from: Sequence[EventRef] = (),
+        security_facts: EventSecurityFacts | None = None,
         security_context: FlowSecurityContext | None = None,
     ) -> SubmissionResult:
         message = Message(role=role, content=TextContent(text=text))
@@ -146,6 +148,7 @@ class GuardrailRun:
             payload=message.model_dump(mode="json"),
             origin=origin,
             derived_from=derived_from,
+            security_facts=security_facts,
             security_context=security_context,
         )
 
@@ -154,6 +157,7 @@ class GuardrailRun:
         *,
         model: str | None = None,
         inputs: Sequence[EventRef] = (),
+        security_facts: EventSecurityFacts | None = None,
         security_context: FlowSecurityContext | None = None,
     ) -> SubmissionResult:
         call = ModelCall(model=model)
@@ -162,6 +166,7 @@ class GuardrailRun:
             payload=call.model_dump(mode="json"),
             origin=EventOrigin.OBSERVED,
             may_influence=inputs,
+            security_facts=security_facts,
             security_context=security_context,
         )
 
@@ -170,6 +175,7 @@ class GuardrailRun:
         call: ToolCall,
         *,
         model_call: EventRef,
+        security_facts: EventSecurityFacts | None = None,
         security_context: FlowSecurityContext | None = None,
     ) -> SubmissionResult:
         self._require_kind(model_call, EventKind.MODEL_CALL)
@@ -178,6 +184,7 @@ class GuardrailRun:
             payload=call.model_dump(mode="json"),
             origin=EventOrigin.OBSERVED,
             derived_from=(model_call,),
+            security_facts=security_facts,
             security_context=security_context,
         )
 
@@ -187,6 +194,7 @@ class GuardrailRun:
         *,
         proposal: EventRef | None = None,
         influenced_by: Sequence[EventRef] = (),
+        security_facts: EventSecurityFacts | None = None,
         security_context: FlowSecurityContext | None = None,
     ) -> SubmissionResult:
         sources = tuple(influenced_by)
@@ -198,6 +206,7 @@ class GuardrailRun:
             payload=call.model_dump(mode="json"),
             origin=EventOrigin.OBSERVED,
             may_influence=sources,
+            security_facts=security_facts,
             security_context=security_context,
         )
 
@@ -206,6 +215,7 @@ class GuardrailRun:
         result: ToolResult,
         *,
         call: EventRef,
+        security_facts: EventSecurityFacts | None = None,
         security_context: FlowSecurityContext | None = None,
     ) -> SubmissionResult:
         self._require_kind(call, EventKind.TOOL_CALL)
@@ -214,6 +224,7 @@ class GuardrailRun:
             payload=result.model_dump(mode="json"),
             origin=EventOrigin.OBSERVED,
             derived_from=(call,),
+            security_facts=security_facts,
             security_context=security_context,
         )
 
@@ -225,6 +236,7 @@ class GuardrailRun:
         origin: EventOrigin,
         derived_from: Sequence[EventRef] = (),
         may_influence: Sequence[EventRef] = (),
+        security_facts: EventSecurityFacts | None,
         security_context: FlowSecurityContext | None,
     ) -> SubmissionResult:
         candidate = CandidateEvent(
@@ -232,6 +244,7 @@ class GuardrailRun:
             kind=kind,
             payload=payload,
             origin=origin,
+            security_facts=security_facts or EventSecurityFacts(),
             relations=(
                 *self._relations(derived_from, RelationKind.DERIVED_FROM),
                 *self._relations(may_influence, RelationKind.MAY_INFLUENCE),

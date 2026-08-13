@@ -14,16 +14,20 @@ from agent_guardrail.models import (
     Action,
     CandidateEvent,
     CandidateRelation,
+    ContentTrustClass,
     Decision,
     Event,
     EventKind,
     EventOrigin,
+    EventRelation,
+    EventSecurityFacts,
     FlowAuthorization,
     FlowSecurityContext,
     Message,
     MessageRole,
     ModelCall,
     PendingTrace,
+    RelationKind,
     SecurityDestination,
     SecurityFactAuthorities,
     SecurityFactAuthority,
@@ -201,6 +205,52 @@ async def test_session_commits_only_valid_trusted_source_event_ids() -> None:
 
     assert trace.events[-1].source_event_ids == (call_decision.event_id,)
     assert trace.sources_of(trace.events[-1]) == (trace.events[0],)
+
+
+@pytest.mark.asyncio
+async def test_session_persists_event_trust_for_later_related_submissions() -> None:
+    analyzer = CapturingAnalyzer()
+    trace = Trace(id="trace-1")
+    session = EnforcementSession(analyzer=analyzer, trace=trace)
+    source_facts = EventSecurityFacts(
+        trust_class=ContentTrustClass.EXTERNAL_UNTRUSTED,
+        trust_authority=SecurityFactAuthority.ENFORCEMENT,
+    )
+    source = await session.submit(
+        kind=EventKind.TOOL_RESULT,
+        payload=tool_result_payload(),
+        origin=EventOrigin.OBSERVED,
+        security_facts=source_facts,
+    )
+
+    await session.submit_candidates(
+        (
+            CandidateEvent(
+                key="model-call",
+                kind=EventKind.MODEL_CALL,
+                payload=model_call_payload(),
+                origin=EventOrigin.OBSERVED,
+                relations=(
+                    CandidateRelation(
+                        source_event_id=source.event_id,
+                        kind=RelationKind.MAY_INFLUENCE,
+                    ),
+                ),
+            ),
+        ),
+        primary_key="model-call",
+    )
+
+    historical_source = analyzer.pending[1].trace.events[0]
+    pending_target = analyzer.pending[1].events[0]
+    assert historical_source.security_facts == source_facts
+    assert pending_target.relations == (
+        EventRelation(
+            source_event_id=historical_source.id,
+            kind=RelationKind.MAY_INFLUENCE,
+        ),
+    )
+    assert trace.events[0].security_facts == source_facts
 
 
 @pytest.mark.asyncio

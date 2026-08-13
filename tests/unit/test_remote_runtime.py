@@ -48,7 +48,7 @@ async def test_remote_runtime_starts_and_analyzes_pending_trace() -> None:
             return httpx.Response(
                 200,
                 json={
-                    "protocol_version": 3,
+                    "protocol_version": 4,
                     "version": 3,
                     "content_hash": "fixed-policy",
                 },
@@ -57,7 +57,7 @@ async def test_remote_runtime_starts_and_analyzes_pending_trace() -> None:
         return httpx.Response(
             200,
             json={
-                "protocol_version": 3,
+                "protocol_version": 4,
                 "decision": _decision(pending).model_dump(mode="json"),
             },
         )
@@ -89,7 +89,7 @@ async def test_remote_runtime_rejects_policy_change_and_oversized_response() -> 
             return httpx.Response(
                 200,
                 json={
-                    "protocol_version": 3,
+                    "protocol_version": 4,
                     "version": 3,
                     "content_hash": "fixed-policy",
                 },
@@ -99,7 +99,7 @@ async def test_remote_runtime_rejects_policy_change_and_oversized_response() -> 
             return httpx.Response(
                 200,
                 json={
-                    "protocol_version": 3,
+                    "protocol_version": 4,
                     "decision": _decision(
                         pending,
                         policy_hash="changed-policy",
@@ -138,7 +138,7 @@ async def test_remote_runtime_rejects_oversized_request_without_core_call() -> N
             return httpx.Response(
                 200,
                 json={
-                    "protocol_version": 3,
+                    "protocol_version": 4,
                     "version": 3,
                     "content_hash": "fixed-policy",
                 },

@@ -136,7 +136,7 @@ derived values, findings, budgets, and trusted security parameters.
 | Integration | Best fit | Current guarantee |
 | --- | --- | --- |
 | Direct Detector SDK | Any Python code needs a fact at an arbitrary insertion point | No YAML; bounded text/JSON/batch detection, with application-owned action |
-| Event/Policy SDK | Any Python agent/framework can expose semantic events | No framework adapter required; the application chooses every insertion point and carries explicit `EventRef` relations |
+| Event/Policy SDK | Any Python agent/framework can expose semantic events | No framework adapter required; the application carries explicit `EventRef` relations and can bind trusted source facts to exact Events |
 | Inline wrappers | You can inject LLM and tool interfaces | Mediates calls passing through the shared task-level session |
 | Model Provider Gateway | OpenAI Chat/Responses or a deployment adapter | Full request checks; atomic non-streaming output checks; non-retractable prefix-guarded SSE |
 | MCP Gateway | Tools are exposed by a fixed MCP server | Checks every stateless `tools/call` before and after execution |

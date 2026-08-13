@@ -46,13 +46,17 @@ from agent_guardrail.core.monitor import MatchMonitor
 from agent_guardrail.models import (
     AnalysisErrorCode,
     AnalysisScope,
+    ContentTrustClass,
     Event,
     EventKind,
     EventOrigin,
     EventRelation,
+    EventSecurityFacts,
     FindingEmission,
     MessageRole,
     PendingTrace,
+    RelationKind,
+    SecurityFactAuthority,
     Trace,
 )
 
@@ -66,6 +70,7 @@ def event(
     origin: EventOrigin = EventOrigin.CLIENT_ASSERTED,
     relations: tuple[EventRelation, ...] = (),
     metadata: dict[str, object] | None = None,
+    security_facts: EventSecurityFacts | None = None,
 ) -> Event:
     return Event.model_validate(
         {
@@ -77,6 +82,7 @@ def event(
             "origin": origin,
             "payload": payload,
             "metadata": metadata or {},
+            "security_facts": security_facts or EventSecurityFacts(),
             "relations": relations,
         }
     )
@@ -700,6 +706,82 @@ async def test_i08_direct_and_ancestor_relations_are_distinct() -> None:
         ("direct", ("c1",)),
         ("relation_derived_from_ancestor", ("c1",)),
     ]
+
+
+@pytest.mark.asyncio
+async def test_i08_event_trust_combines_with_explicit_cross_commit_influence() -> None:
+    external = event(
+        "r1",
+        0,
+        EventKind.TOOL_RESULT,
+        {"call_id": "call-r1", "name": "search", "output": "external"},
+        security_facts=EventSecurityFacts(
+            trust_class=ContentTrustClass.EXTERNAL_UNTRUSTED,
+            trust_authority=SecurityFactAuthority.ENFORCEMENT,
+        ),
+    )
+    trusted = event(
+        "r2",
+        1,
+        EventKind.TOOL_RESULT,
+        {"call_id": "call-r2", "name": "internal", "output": "trusted"},
+        security_facts=EventSecurityFacts(
+            trust_class=ContentTrustClass.TRUSTED_CONTROL,
+            trust_authority=SecurityFactAuthority.DEPLOYMENT,
+        ),
+    )
+    external_target = call(
+        "c1",
+        2,
+        "send",
+        relations=(
+            EventRelation(source_event_id="r1", kind=RelationKind.MAY_INFLUENCE),
+        ),
+    )
+    trusted_target = call(
+        "c2",
+        3,
+        "send",
+        relations=(
+            EventRelation(source_event_id="r2", kind=RelationKind.MAY_INFLUENCE),
+        ),
+    )
+    selected = rule(
+        rule_id="external_source_influence",
+        bindings=(
+            EventBinding(
+                name="source",
+                kind=EventKind.TOOL_RESULT,
+                domain=BindingDomain.PAST,
+            ),
+            EventBinding(
+                name="target",
+                kind=EventKind.TOOL_CALL,
+                domain=BindingDomain.PENDING,
+            ),
+        ),
+        where=MatchCondition(
+            all=(
+                compare(
+                    field("source", "security_facts", "trust_class"),
+                    ComparisonOperator.EQUALS,
+                    LiteralValue(value="external_untrusted"),
+                ),
+                relation("source", "target", RelationOperator.MAY_INFLUENCE),
+            )
+        ),
+        subjects=("target",),
+        finding_bindings=("source", "target"),
+    )
+
+    report = await matcher(
+        plan(selected, scopes=(AnalysisScope.PENDING,))
+    ).analyze_pending(
+        pending_trace((external, trusted), (external_target, trusted_target))
+    )
+
+    assert report.errors == ()
+    assert [finding.subject_event_ids for finding in report.findings] == [("c1",)]
 
 
 @pytest.mark.asyncio

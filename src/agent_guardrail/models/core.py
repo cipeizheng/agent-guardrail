@@ -97,6 +97,36 @@ class SecurityFactAuthorities(CanonicalModel):
     authorization: SecurityFactAuthority = SecurityFactAuthority.UNKNOWN
 
 
+_TRUST_CLASS_AUTHORITIES: frozenset[SecurityFactAuthority] = frozenset(
+    {
+        SecurityFactAuthority.DEPLOYMENT,
+        SecurityFactAuthority.ENFORCEMENT,
+        SecurityFactAuthority.DATA_SOURCE,
+    }
+)
+
+
+class EventSecurityFacts(CanonicalModel):
+    """Immutable source facts bound to one canonical Event by trusted code."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    trust_class: ContentTrustClass = ContentTrustClass.UNKNOWN
+    trust_authority: SecurityFactAuthority = SecurityFactAuthority.UNKNOWN
+
+    @model_validator(mode="after")
+    def validate_trust_authority(self) -> Self:
+        if self.trust_class is ContentTrustClass.UNKNOWN:
+            if self.trust_authority is not SecurityFactAuthority.UNKNOWN:
+                raise ValueError("unknown trust_class cannot declare an authority")
+            return self
+        if self.trust_authority is SecurityFactAuthority.UNKNOWN:
+            raise ValueError("trust_class requires an explicit authority")
+        if self.trust_authority not in _TRUST_CLASS_AUTHORITIES:
+            raise ValueError("trust_class cannot use that authority")
+        return self
+
+
 SECURITY_CONTEXT_PARAMETER_NAMES: frozenset[str] = frozenset(
     {
         "security_trust_class",
@@ -126,13 +156,7 @@ class FlowSecurityContext(CanonicalModel):
                 self.trust_class,
                 ContentTrustClass.UNKNOWN,
                 self.authorities.trust_class,
-                frozenset(
-                    {
-                        SecurityFactAuthority.DEPLOYMENT,
-                        SecurityFactAuthority.ENFORCEMENT,
-                        SecurityFactAuthority.DATA_SOURCE,
-                    }
-                ),
+                _TRUST_CLASS_AUTHORITIES,
             ),
             (
                 "sensitivity",
@@ -336,6 +360,7 @@ class CandidateEvent(CanonicalModel):
     payload: dict[str, JsonValue] = Field(default_factory=dict)
     metadata: dict[str, JsonValue] = Field(default_factory=dict)
     origin: EventOrigin = EventOrigin.CLIENT_ASSERTED
+    security_facts: EventSecurityFacts = Field(default_factory=EventSecurityFacts)
     relations: tuple[CandidateRelation, ...] = Field(
         default=(),
         max_length=MAX_RELATIONS_PER_EVENT,
@@ -369,7 +394,7 @@ class Event(CanonicalModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    model_version: Literal[3] = 3
+    model_version: Literal[4] = 4
     id: str = Field(min_length=1)
     trace_id: str = Field(min_length=1)
     sequence: int = Field(ge=0)
@@ -378,6 +403,7 @@ class Event(CanonicalModel):
     origin: EventOrigin = EventOrigin.CLIENT_ASSERTED
     payload: dict[str, JsonValue] = Field(default_factory=dict)
     metadata: dict[str, JsonValue] = Field(default_factory=dict)
+    security_facts: EventSecurityFacts = Field(default_factory=EventSecurityFacts)
     relations: tuple[EventRelation, ...] = Field(
         default=(),
         max_length=MAX_RELATIONS_PER_EVENT,

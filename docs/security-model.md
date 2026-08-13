@@ -101,7 +101,7 @@ Finding + deployment action mapping = Decision
 因此不能把 `observed` 当作 `trusted`，也不能把 `client_asserted` 自动当作恶意。安全事实命名不得复用
 三个 EventOrigin 值，避免实现混淆这两个维度。
 
-## 5. 当前 FlowSecurityContext 与后续 Security Fact 合同
+## 5. 当前 FlowSecurityContext 与 Event Security Fact 合同
 
 当前生产 `FlowSecurityContext` 已为一个 pending batch 提供最小、类型化且有明确授权来源的相对事实：
 
@@ -128,6 +128,18 @@ security_authorization
 当前会按执行 checkpoint 建立 destination；其他事实只有可信嵌入式宿主明确提供时才非 unknown。authority
 是信任边界内的类型化声明，不是加密凭证。非 unknown authorization 必须同时绑定已知 destination；
 Enforcement 切换 sink 时会清空旧 authorization，避免跨目的地复用授权。
+
+当前 `EventSecurityFacts` 另外持久保存绑定到一个 Event payload 的 `trust_class` 和 `trust_authority`。
+可信 Session/SDK 接入必须把该事实显式绑定到具体 Candidate；allow/log 后它随 Event 进入 Trace，后续
+pending 分析可读取 `[source, security_facts, trust_class]`，再与 `source → target` 的显式
+`may_influence/derived_from` 组合。默认值为 unknown；非 unknown authority 仍只允许 deployment、
+Enforcement 或 data source。
+
+Event trust 不从 `EventOrigin`、sequence、Tool 名或 Relation 自动推断，也不从一次
+`FlowSecurityContext` 自动复制。二者语义不同：Event fact 描述该 Event payload 自身的来源可信度；Flow
+context 描述当前 pending batch 的 source→sink 判断语境。普通 HTTP/Provider payload 和 metadata 不能设置
+Event fact；可信嵌入式宿主可以通过 `CandidateEvent.security_facts`、`EnforcementSession.submit` 或
+`GuardrailRun` typed helper 的专用参数提供。
 
 后续可以增加 Event 级 sensitivity、可信目的地 Registry 和 `tool_effect` descriptor；它们也不能由外部
 YAML 获得 I/O 或动态代码权限。principal、tenant、owner identity、跨用户状态和按用户授权明确不属于本
@@ -159,7 +171,7 @@ LLM Gateway 只能中介经过它的模型请求和响应；MCP Gateway 只能�
 | --- | --- | --- | --- |
 | T01 | 敏感数据 → 未授权模型提供商 | `before_model_call` | 部分：Detector、调用前检查、destination context 已有；完整 authorization Policy 未实现 |
 | T02 | 敏感数据 → 外部 Tool | `before_tool_call` | 部分：Detector、external_tool context、邮件与来源路径示例已实现 |
-| T03 | 不可信 ToolResult 注入 → 后续模型请求 | `before_model_call` | 部分：Detector/关系/context 可组合；Adapter 尚未自动分类 trust |
+| T03 | 不可信 ToolResult 注入 → 后续模型请求 | `before_model_call` | 部分：Event trust 可跨提交保存并与 Detector/关系组合；Adapter 尚未自动分类 trust，默认 Policy 未交付 |
 | T04 | 不可信影响 → 未授权高权限 Tool | `before_tool_call` | 部分：静态 Tool Rule/context 已有；risk/独立授权 Policy 未实现 |
 | T05 | 敏感模型输出 → 未授权客户端展示面 | `before_model_output_release` | 部分：输出释放前检查/client destination 已有；展示面授权 Policy 未实现 |
 | T06 | 原始敏感数据 → Finding/Error/Audit | Audit | 已支持结构、遮罩和测试；受信任 producer 仍是边界 |

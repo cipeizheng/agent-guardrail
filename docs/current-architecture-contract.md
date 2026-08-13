@@ -33,14 +33,16 @@ strict version: 3 YAML → AuthorPolicy → immutable MatchPlan
   `/v1/openai/...` 与标准 SDK base URL 所需的 `/v1/...` 形式。
 - MCP `2026-07-28` 无状态 `POST /v1/mcp`：`server/discover`、`ping`、`tools/list`、`tools/call`。
 - Gateway 可选择进程内 Runtime，或通过版本化内部 HTTP 协议调用固定 Policy 的无状态 Core；两种模式复用
-  同一 `PolicyAnalyzer.analyze_pending` 和唯一 v3 执行链。当前内部 Remote Core 协议版本为 v3。
+  同一 `PolicyAnalyzer.analyze_pending` 和唯一 v3 Policy 执行链。当前内部 Remote Core 协议版本为 v4。
 - Inline LLM/Tool Wrapper 是低层便利接入，并必须共享一个请求/任务级 `EnforcementSession` 与 `Trace`。
-- 一等 MatchPlan Event：`MESSAGE`、`MODEL_CALL`、`TOOL_CALL_PROPOSAL`、`TOOL_CALL`、
-  `TOOL_RESULT`；payload 封闭且有 Schema 硬上限。Event、PendingTrace、Decision 和 YAML binding 不含
-  Enforcement Phase。`MODEL_CALL` 是轻量实际模型操作，不是完整请求快照；`TOOL_CALL_PROPOSAL` 是模型
-  建议，`TOOL_CALL` 才表示即将发生真实副作用的调用。
+- Canonical `Event.model_version` 为 4；一等 MatchPlan Event：`MESSAGE`、`MODEL_CALL`、
+  `TOOL_CALL_PROPOSAL`、`TOOL_CALL`、`TOOL_RESULT`；payload 封闭且有 Schema 硬上限。Event、
+  PendingTrace、Decision 和 YAML binding 不含 Enforcement Phase。`MODEL_CALL` 是轻量实际模型操作，
+  不是完整请求快照；`TOOL_CALL_PROPOSAL` 是模型建议，`TOOL_CALL` 才表示即将发生真实副作用的调用。
 - 数据来源和可能影响只存在于类型化 `Event.relations`：`derived_from` 表示派生，`may_influence` 表示
   可能影响；时间顺序不得冒充任一种 Relation。
+- `EventSecurityFacts` 只持久保存绑定到具体 Event payload 的 `trust_class + trust_authority`；它由可信
+  Session/SDK 接入显式提供，不能由普通 HTTP/Provider payload、metadata 或 EventOrigin 自我声明。
 - 外部 Event 默认 `client_asserted`；只有 Enforcement 可建立 `observed/derived`。
 
 ## 3. 安全对象与上下文
@@ -48,6 +50,9 @@ strict version: 3 YAML → AuthorPolicy → immutable MatchPlan
 - 核心资产：用户数据、用户意图、用户资源；威胁使用 `source → transform → sink` 描述。
 - `FlowSecurityContext` 的 trust/sensitivity/destination/authorization 只能经 Session/PendingTrace
   专用通道注入，非 unknown 事实必须带允许的 authority。
+- `EventSecurityFacts` 与 `FlowSecurityContext` 不自动互相复制：前者描述一个 Event payload 的来源可信度并
+  随 Event 提交，后者描述当前 pending flow 的 source→sink 判断语境。Policy 可通过 Event safe envelope
+  将历史 source trust 与显式 Relation 组合。
 - 普通 attributes、metadata、HTTP/Provider payload 和 SDK Event payload 不能写入保留的
   `security_*` 参数或自我授权。
 - Detector 只产生事实；没有可信 source/sink/destination/authorization 语境时，不得宣称完成
@@ -81,7 +86,7 @@ strict version: 3 YAML → AuthorPolicy → immutable MatchPlan
 13. 远程模式中 Core 启动时只读加载固定 Policy 与 Detector profile，请求不能上传 Policy、模型、规则、
     路径、命令或 endpoint；Core 只分析完整 PendingTrace，Gateway 持有 Trace、Audit、Provider Key 和
     全部副作用。
-14. Remote Core 只接受当前封闭协议 v3；其他版本、Core 不可达、认证/协议/超限错误、非法 Decision 或
+14. Remote Core 只接受当前封闭协议 v4；其他版本、Core 不可达、认证/协议/超限错误、非法 Decision 或
     Policy identity 变化必须失败关闭。Gateway 必须校验 trace、pending Event 与 Policy identity；破坏性
     wire Schema 变化必须更换协议版本，不能静默复用现有版本号。
 
@@ -103,8 +108,8 @@ strict version: 3 YAML → AuthorPolicy → immutable MatchPlan
 ## 6. 明确未交付
 
 Framework 自动 history cursor、CEL/Invariant DSL、Policy 热加载、跨请求 Session Store、
-MCP subscriptions、特定 Framework 生命周期 Adapter、Sandbox、Event 级
-Security Fact、destination Registry、授权凭证、Redaction
+MCP subscriptions、特定 Framework 生命周期 Adapter、Sandbox、Event 级 sensitivity、自动 source trust
+分类、destination Registry、授权凭证、Redaction
 TransformationPlan、SBOM/镜像签名/集群编排，以及状态矩阵中标为 `planned` 的能力。
 
 多用户/多租户身份、数据所有权、跨用户共享与状态、按用户授权和租户控制面不属于未交付 roadmap，而是

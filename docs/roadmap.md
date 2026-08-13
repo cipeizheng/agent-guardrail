@@ -45,7 +45,8 @@ Detector 执行器。它只返回 fact，不返回 Decision，也不控制应用
 
 ## P3：跨事件安全语境
 
-- 先建立部署可提供的 destination、source trust 与 Tool risk 分类；
+- Event 已能持久保存可信接入显式提供的 source trust；下一步以 benchmark 失败样本校准 Adapter 分类、
+  destination 与 Tool risk 的最小枚举；
 - 实现 T01–T04 的 destination/trust-aware v3 Policy，authorization 只在已有独立授权服务时接入；
 - 为不可信 ToolResult → LLM/高风险 Tool 建立 trust 与显式 Relation 组合策略；
 - 增加真实 Gateway/SDK source→sink 回放，验证受保护副作用；

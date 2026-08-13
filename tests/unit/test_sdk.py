@@ -4,9 +4,12 @@ import pytest
 
 from agent_guardrail import EventRef, GuardrailRun
 from agent_guardrail.models import (
+    ContentTrustClass,
     EventKind,
+    EventSecurityFacts,
     MessageRole,
     RelationKind,
+    SecurityFactAuthority,
     ToolCall,
     ToolResult,
 )
@@ -58,6 +61,33 @@ async def test_programmatic_sdk_builds_only_explicit_semantic_relations() -> Non
     assert events[4].relations[0].kind is RelationKind.DERIVED_FROM
     assert run.trace.sources_of(events[3]) == ()
     assert run.trace.sources_of(events[4]) == (events[3],)
+
+
+@pytest.mark.asyncio
+async def test_programmatic_sdk_binds_trust_to_the_exact_source_event() -> None:
+    run = GuardrailRun(analyzer=empty_analyzer(), run_id="run-1")
+    call = (await run.tool_call(tool_call())).primary
+    assert call is not None
+    facts = EventSecurityFacts(
+        trust_class=ContentTrustClass.EXTERNAL_UNTRUSTED,
+        trust_authority=SecurityFactAuthority.DATA_SOURCE,
+    )
+    source = (
+        await run.tool_result(
+            ToolResult(call_id="call-1", name="read_file", output="external text"),
+            call=call,
+            security_facts=facts,
+        )
+    ).primary
+    assert source is not None
+    target = (await run.model_call(inputs=(source,))).primary
+    assert target is not None
+
+    source_event, target_event = run.trace.events[1:]
+    assert source_event.security_facts == facts
+    assert target_event.security_facts == EventSecurityFacts()
+    assert target_event.relations[0].source_event_id == source_event.id
+    assert target_event.relations[0].kind is RelationKind.MAY_INFLUENCE
 
 
 @pytest.mark.asyncio

@@ -3,7 +3,15 @@ from __future__ import annotations
 import pytest
 
 from agent_guardrail import GuardrailRun
-from agent_guardrail.models import EventKind, MessageRole, ToolCall, ToolResult
+from agent_guardrail.models import (
+    ContentTrustClass,
+    EventKind,
+    EventSecurityFacts,
+    MessageRole,
+    SecurityFactAuthority,
+    ToolCall,
+    ToolResult,
+)
 from agent_guardrail.runtime import GuardrailRuntime
 from agent_guardrail.testing import FakeToolExecutor
 from tests.support import FAKE_SECRET, secret_policy_yaml, tool_result_flow_policy_yaml
@@ -101,4 +109,72 @@ async def test_programmatic_cross_event_flow_blocks_derived_side_effect() -> Non
     assert blocked.decision.blocked
     assert blocked.decision.violations[0].code == "tool_result_flow_denied"
     assert fake.call_count("read_private_file") == 1
+    assert fake.call_count("send_email") == 0
+
+
+@pytest.mark.asyncio
+async def test_persisted_untrusted_source_fact_blocks_later_side_effect() -> None:
+    runtime = GuardrailRuntime.from_policy_yaml(
+        """\
+version: 3
+scopes: [pending]
+rules:
+  - id: block-untrusted-source-to-email
+    action: block
+    events:
+      source: {kind: tool_result, domain: past}
+      destination: {kind: tool_call, domain: pending}
+    where:
+      all:
+        - compare:
+            left: {field: [source, security_facts, trust_class]}
+            operator: equals
+            right: {literal: external_untrusted}
+        - relation:
+            source: source
+            target: destination
+            operator: may_influence
+        - tool: {binding: destination, name: send_email}
+    finding:
+      code: untrusted_source_flow_denied
+      message: Untrusted external content cannot drive this tool.
+      subjects: [destination]
+"""
+    )
+    fake = FakeToolExecutor(
+        {
+            "search": lambda arguments: "external instructions",
+            "send_email": lambda arguments: {"sent": True},
+        }
+    )
+    search = ToolCall(call_id="search-call", name="search", arguments={"q": "report"})
+    email = ToolCall(
+        call_id="email-call",
+        name="send_email",
+        arguments={"body": "external instructions"},
+    )
+
+    async with runtime:
+        run = GuardrailRun(analyzer=runtime, run_id="trace-1")
+        search_ref = (await run.tool_call(search)).primary
+        assert search_ref is not None
+        search_output = await fake.execute(search)
+        source_ref = (
+            await run.tool_result(
+                search_output,
+                call=search_ref,
+                security_facts=EventSecurityFacts(
+                    trust_class=ContentTrustClass.EXTERNAL_UNTRUSTED,
+                    trust_authority=SecurityFactAuthority.ENFORCEMENT,
+                ),
+            )
+        ).primary
+        assert source_ref is not None
+        decision = await run.tool_call(email, influenced_by=(source_ref,))
+        if not decision.decision.blocked:
+            await fake.execute(email)
+
+    assert decision.decision.blocked
+    assert decision.decision.violations[0].code == "untrusted_source_flow_denied"
+    assert fake.call_count("search") == 1
     assert fake.call_count("send_email") == 0

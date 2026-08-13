@@ -23,6 +23,7 @@ from agent_guardrail.models import (
     EventKind,
     EventOrigin,
     EventRelation,
+    EventSecurityFacts,
     FlowSecurityContext,
     PendingTrace,
     Trace,
@@ -69,6 +70,7 @@ class EnforcementSession:
         metadata: Mapping[str, JsonValue] | None = None,
         source_event_ids: Sequence[str] = (),
         origin: EventOrigin = EventOrigin.CLIENT_ASSERTED,
+        security_facts: EventSecurityFacts | None = None,
         security_context: FlowSecurityContext | None = None,
     ) -> Decision:
         """Submit one semantic Event through the atomic pending path."""
@@ -97,6 +99,7 @@ class EnforcementSession:
             payload=dict(payload),
             metadata=dict(metadata or {}),
             origin=origin,
+            security_facts=security_facts or EventSecurityFacts(),
             relations=tuple(
                 CandidateRelation(source_event_id=source_event_id)
                 for source_event_id in declared_source_ids
@@ -212,6 +215,7 @@ class EnforcementSession:
                         origin=candidate.origin,
                         payload=dict(candidate.payload),
                         metadata=dict(candidate.metadata),
+                        security_facts=candidate.security_facts.model_copy(deep=True),
                         relations=event_relations,
                     )
                 )

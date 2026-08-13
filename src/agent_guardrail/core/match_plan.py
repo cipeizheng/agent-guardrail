@@ -51,7 +51,9 @@ _INDEPENDENT_EVENT_KINDS = frozenset(
         EventKind.TOOL_RESULT,
     }
 )
-_EVENT_ENVELOPE_FIELDS = frozenset({"id", "sequence", "kind", "origin", "payload"})
+_EVENT_ENVELOPE_FIELDS = frozenset(
+    {"id", "sequence", "kind", "origin", "payload", "security_facts"}
+)
 
 type ScalarLiteral = StrictStr | StrictInt | StrictFloat | StrictBool
 

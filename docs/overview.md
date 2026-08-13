@@ -42,7 +42,7 @@ GuardrailRun / Adapter / InputNormalizer
           ▼
 EnforcementSession
   ├─ 分配 Event identity、sequence 和 time
-  ├─ 校验 origin、relation、security context 和容量
+  ├─ 校验 origin、relation、Event security facts、flow security context 和容量
   └─ 构造 immutable PendingTrace
           │
           ▼
@@ -87,6 +87,9 @@ handoff 等任意语义插入位置。`GuardrailRun` 是框架无关 SDK：应�
 
 `EventOrigin` 只回答声明来自客户端、实际观察还是可信派生，不代表内容可信或已授权。外部输入默认
 `client_asserted`；只有 Enforcement 可以建立 `observed/derived`。
+
+`EventSecurityFacts` 只保存绑定到该 Event payload 的来源信任分类及 authority。可信 Session/SDK 接入
+显式提供后，该事实随 Event 跨提交保留；默认 unknown，且不从 origin、顺序或关系自动推断。
 
 精确来源只存在于类型化 `Event.relations`。Adapter/Enforcement 只能在掌握对应事实时建立
 `derived_from` 或 `may_influence`；`precedes/immediately_precedes` 只由 sequence 得出，绝不自动生成
