@@ -53,7 +53,6 @@ from agent_guardrail.models import (
     FindingEmission,
     MessageRole,
     PendingTrace,
-    Phase,
     Trace,
 )
 
@@ -64,23 +63,16 @@ def event(
     kind: EventKind,
     payload: dict[str, object],
     *,
-    phase: Phase | None = None,
     origin: EventOrigin = EventOrigin.CLIENT_ASSERTED,
     relations: tuple[EventRelation, ...] = (),
     metadata: dict[str, object] | None = None,
 ) -> Event:
-    default_phases = {
-        EventKind.MESSAGE: Phase.PRE_LLM,
-        EventKind.TOOL_CALL: Phase.PRE_TOOL,
-        EventKind.TOOL_RESULT: Phase.POST_TOOL,
-    }
     return Event.model_validate(
         {
             "id": event_id,
             "trace_id": "trace-1",
             "sequence": sequence,
             "kind": kind,
-            "phase": phase or default_phases[kind],
             "timestamp": datetime(2026, 8, 10, tzinfo=UTC),
             "origin": origin,
             "payload": payload,
@@ -96,14 +88,12 @@ def message(
     text: str,
     *,
     role: MessageRole = MessageRole.USER,
-    phase: Phase = Phase.PRE_LLM,
 ) -> Event:
     return event(
         event_id,
         sequence,
         EventKind.MESSAGE,
         {"role": role.value, "content": {"type": "text", "text": text}},
-        phase=phase,
     )
 
 
@@ -266,7 +256,6 @@ async def test_i01_typed_event_selection_is_stateless_and_filters_phase() -> Non
             EventBinding(
                 name="event",
                 kind=EventKind.MESSAGE,
-                phases=(Phase.POST_LLM,),
             ),
         ),
         where=MatchCondition(
@@ -291,7 +280,6 @@ async def test_i01_typed_event_selection_is_stateless_and_filters_phase() -> Non
             1,
             "blocked text",
             role=MessageRole.ASSISTANT,
-            phase=Phase.POST_LLM,
         ),
         call("c1", 2, "blocked"),
     )
@@ -670,7 +658,10 @@ async def test_i07_order_never_becomes_provenance() -> None:
         )
     ).analyze(snapshot)
 
-    assert len(report.findings) == 3
+    assert {finding.rule_id for finding in report.findings} == {
+        "relation_precedes",
+        "relation_immediately_precedes",
+    }
     assert all(finding.subject_event_ids == ("c2",) for finding in report.findings)
     assert snapshot.model_dump_json() == before
     assert snapshot.events[1].relations == ()
@@ -740,11 +731,11 @@ async def test_i10_stateless_pending_analysis_filters_past_only_subjects() -> No
         ),
     )
     batch = pending_trace(
-        (message("h1", 0, "blocked historical", phase=Phase.POST_LLM),),
+        (message("h1", 0, "blocked historical"),),
         (
-            message("n1", 1, "blocked one", phase=Phase.POST_LLM),
-            message("n2", 2, "blocked two", phase=Phase.POST_LLM),
-            message("n3", 3, "safe", phase=Phase.POST_LLM),
+            message("n1", 1, "blocked one"),
+            message("n2", 2, "blocked two"),
+            message("n3", 3, "safe"),
         ),
     )
     report = await matcher(
@@ -800,11 +791,10 @@ async def test_i10_pending_domains_can_join_past_and_the_whole_batch() -> None:
         2,
         EventKind.TOOL_CALL,
         {"call_id": "call-1", "name": "send_email", "arguments": {}},
-        phase=Phase.PRE_LLM,
     )
     batch = pending_trace(
-        (message("h1", 0, "first", phase=Phase.PRE_LLM),),
-        (message("n1", 1, "second", phase=Phase.PRE_LLM), pending_call),
+        (message("h1", 0, "first"),),
+        (message("n1", 1, "second"), pending_call),
     )
     report = await matcher(
         plan(selected, scopes=(AnalysisScope.PENDING,))

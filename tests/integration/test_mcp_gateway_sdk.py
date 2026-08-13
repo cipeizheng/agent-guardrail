@@ -126,7 +126,7 @@ async def test_official_sdk_blocked_tool_call_never_reaches_mcp_server() -> None
 
     blocked = _find_mcp_error(blocked_group.value)
     assert blocked.code == -32040
-    assert blocked.data["phase"] == "pre_tool"
+    assert blocked.data["checkpoint"] == "before_tool_call"
     assert FAKE_SECRET not in str(blocked.data)
     assert calls == {"server/discover": 1, "tools/list": 1}
 

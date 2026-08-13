@@ -12,7 +12,6 @@ from agent_guardrail.enforcement.session import EnforcementSession
 from agent_guardrail.models import (
     EventKind,
     EventOrigin,
-    Phase,
     SecurityDestination,
     ToolCall,
     ToolResult,
@@ -27,9 +26,8 @@ class GuardedToolExecutor:
         self.session = session
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        pre_decision = await self.session.evaluate(
+        pre_decision = await self.session.submit(
             kind=EventKind.TOOL_CALL,
-            phase=Phase.PRE_TOOL,
             payload=cast(dict[str, JsonValue], call.model_dump(mode="json")),
             metadata={"adapter": "inline_tool"},
             origin=EventOrigin.OBSERVED,
@@ -41,9 +39,8 @@ class GuardedToolExecutor:
             raise GuardrailBlocked(pre_decision)
 
         result = await self.inner.execute(call)
-        post_decision = await self.session.evaluate(
+        post_decision = await self.session.submit(
             kind=EventKind.TOOL_RESULT,
-            phase=Phase.POST_TOOL,
             payload=cast(dict[str, JsonValue], result.model_dump(mode="json")),
             metadata={"adapter": "inline_tool"},
             source_event_ids=(pre_decision.event_id,),

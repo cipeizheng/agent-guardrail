@@ -13,7 +13,6 @@ from pydantic import JsonValue
 from agent_guardrail.enforcement.audit import NullAuditSink
 from agent_guardrail.enforcement.exceptions import GuardrailUnavailable
 from agent_guardrail.enforcement.protocols import AuditSink
-from agent_guardrail.enforcement.provenance import infer_source_event_ids
 from agent_guardrail.models import (
     MAX_PENDING_EVENTS,
     MAX_RELATIONS_PER_EVENT,
@@ -26,46 +25,13 @@ from agent_guardrail.models import (
     EventRelation,
     FlowSecurityContext,
     PendingTrace,
-    Phase,
     Trace,
 )
 from agent_guardrail.runtime import PolicyAnalyzer
 
 Clock = Callable[[], datetime]
 IdFactory = Callable[[], str]
-_LEGACY_SOURCE_EVENT_IDS_METADATA_KEY = "source_event_ids"
-
-_COMPATIBLE_SINGLE_BOUNDARIES: frozenset[tuple[EventKind, Phase]] = frozenset(
-    {
-        (EventKind.MODEL_REQUEST, Phase.PRE_LLM),
-        (EventKind.MODEL_RESPONSE, Phase.POST_LLM),
-        (EventKind.TOOL_CALL, Phase.PRE_TOOL),
-        (EventKind.TOOL_RESULT, Phase.POST_TOOL),
-    }
-)
-
-_AGGREGATE_MODEL_EVENT_KINDS = frozenset(
-    {EventKind.MODEL_REQUEST, EventKind.MODEL_RESPONSE}
-)
-
-# Aggregate model kinds remain here only because the single-candidate API delegates
-# to evaluate_candidates. Multi-event production batches use independent kinds.
-_VALID_CANDIDATE_PHASES: dict[Phase, frozenset[EventKind]] = {
-    Phase.PRE_LLM: frozenset(
-        {
-            EventKind.MESSAGE,
-            EventKind.MODEL_REQUEST,
-            EventKind.TOOL_CALL,
-            EventKind.TOOL_RESULT,
-        }
-    ),
-    Phase.POST_LLM: frozenset(
-        {EventKind.MESSAGE, EventKind.MODEL_RESPONSE, EventKind.TOOL_CALL}
-    ),
-    Phase.PRE_TOOL: frozenset({EventKind.TOOL_CALL}),
-    Phase.POST_TOOL: frozenset({EventKind.TOOL_RESULT}),
-}
-
+_SOURCE_EVENT_IDS_METADATA_KEY = "source_event_ids"
 
 class EnforcementSession:
     """Own one trace and serialize evaluate-and-commit operations within it."""
@@ -98,22 +64,19 @@ class EnforcementSession:
         self._evaluation_lock = asyncio.Lock()
         self._policy_identity: tuple[int, str] | None = None
 
-    async def evaluate(
+    async def submit(
         self,
         *,
         kind: EventKind,
-        phase: Phase,
         payload: Mapping[str, JsonValue],
         metadata: Mapping[str, JsonValue] | None = None,
         source_event_ids: Sequence[str] = (),
         origin: EventOrigin = EventOrigin.CLIENT_ASSERTED,
         security_context: FlowSecurityContext | None = None,
     ) -> Decision:
-        """Evaluate one compatibility candidate through the atomic batch path."""
+        """Submit one semantic Event through the atomic pending path."""
 
-        if (kind, phase) not in _COMPATIBLE_SINGLE_BOUNDARIES:
-            raise ValueError(f"invalid enforcement boundary: {kind.value}/{phase.value}")
-        if metadata is not None and _LEGACY_SOURCE_EVENT_IDS_METADATA_KEY in metadata:
+        if metadata is not None and _SOURCE_EVENT_IDS_METADATA_KEY in metadata:
             raise ValueError(
                 "source_event_ids metadata is reserved; pass trusted IDs through source_event_ids"
             )
@@ -134,7 +97,6 @@ class EnforcementSession:
         candidate = CandidateEvent(
             key="event",
             kind=kind,
-            phase=phase,
             payload=dict(payload),
             metadata=dict(metadata or {}),
             origin=origin,
@@ -143,13 +105,13 @@ class EnforcementSession:
                 for source_event_id in declared_source_ids
             ),
         )
-        return await self.evaluate_candidates(
+        return await self.submit_candidates(
             (candidate,),
             primary_key=candidate.key,
             security_context=security_context,
         )
 
-    async def evaluate_candidates(
+    async def submit_candidates(
         self,
         candidates: Sequence[CandidateEvent],
         *,
@@ -171,14 +133,6 @@ class EnforcementSession:
             raise ValueError("candidate batch must not be empty")
         if any(not isinstance(candidate, CandidateEvent) for candidate in candidate_batch):
             raise TypeError("candidate batch must contain only CandidateEvent values")
-        if len(candidate_batch) != 1 and any(
-            candidate.kind in _AGGREGATE_MODEL_EVENT_KINDS
-            for candidate in candidate_batch
-        ):
-            raise ValueError(
-                "aggregate model events are supported only as single-candidate "
-                "compatibility inputs"
-            )
         if any(
             len(candidate.relations) > MAX_RELATIONS_PER_EVENT
             for candidate in candidate_batch
@@ -193,21 +147,10 @@ class EnforcementSession:
         selected_primary_key = primary_key or candidate_batch[-1].key
         if selected_primary_key not in candidate_keys:
             raise ValueError("primary_key must identify a candidate in the batch")
-        phase = candidate_batch[0].phase
-        if any(candidate.phase is not phase for candidate in candidate_batch):
-            raise ValueError("all candidates must use the same enforcement phase")
-        for candidate in candidate_batch:
-            if candidate.kind not in _VALID_CANDIDATE_PHASES[candidate.phase]:
-                raise ValueError(
-                    "invalid candidate enforcement phase: "
-                    f"{candidate.kind.value}/{candidate.phase.value}"
-                )
-
         async with self._evaluation_lock:
             if len(self.trace.events) + len(candidate_batch) > self.trace.max_events:
                 raise GuardrailUnavailable(
                     trace_id=self.trace.id,
-                    phase=phase,
                     error_type="trace_capacity_exceeded",
                 )
 
@@ -236,7 +179,6 @@ class EnforcementSession:
                         trace_id=self.trace.id,
                         sequence=self.trace.next_sequence + index,
                         kind=candidate.kind,
-                        phase=candidate.phase,
                         timestamp=self.clock(),
                         origin=candidate.origin,
                         payload=dict(candidate.payload),
@@ -260,14 +202,12 @@ class EnforcementSession:
             except Exception as exc:
                 raise GuardrailUnavailable(
                     trace_id=self.trace.id,
-                    phase=phase,
                     error_type=type(exc).__name__,
                 ) from exc
 
             if pending.model_dump(mode="json") != pending_snapshot:
                 raise GuardrailUnavailable(
                     trace_id=self.trace.id,
-                    phase=phase,
                     error_type="invalid_pending_snapshot",
                 )
 
@@ -281,7 +221,6 @@ class EnforcementSession:
             elif self._policy_identity != decision_policy_identity:
                 raise GuardrailUnavailable(
                     trace_id=self.trace.id,
-                    phase=phase,
                     error_type="policy_identity_changed",
                 )
             if decision.blocked:
@@ -319,23 +258,12 @@ class EnforcementSession:
             if source is None:
                 raise ValueError("source_event_id does not exist in this trace")
             if source.kind is EventKind.GUARDRAIL_DECISION:
-                raise ValueError("guardrail decision events cannot be provenance sources")
+                raise ValueError("guardrail decision events cannot be relation sources")
             declared_relations.append(
                 EventRelation(source_event_id=source_event_id, kind=relation.kind)
             )
 
-        inferred_source_event_ids = infer_source_event_ids(
-            trace=prefix,
-            kind=candidate.kind,
-            payload=dict(candidate.payload),
-        )
-        all_relations = [
-            *(
-                EventRelation(source_event_id=source_event_id)
-                for source_event_id in inferred_source_event_ids
-            ),
-            *declared_relations,
-        ]
+        all_relations = declared_relations
         unique_relations: dict[tuple[str, object], EventRelation] = {}
         for relation in all_relations:
             unique_relations[(relation.source_event_id, relation.kind)] = relation
@@ -350,11 +278,9 @@ class EnforcementSession:
             decision.trace_id != self.trace.id
             or decision.event_id != pending.primary_event_id
             or decision.pending_event_ids != pending.event_ids
-            or decision.phase is not pending.primary_event.phase
         ):
             raise GuardrailUnavailable(
                 trace_id=self.trace.id,
-                phase=pending.primary_event.phase,
                 error_type="invalid_decision_identity",
             )
 
@@ -367,7 +293,6 @@ class EnforcementSession:
             dict[str, JsonValue],
             {
                 "action": decision.action.value,
-                "phase": decision.phase.value,
                 "event_id": pending.primary_event_id,
                 "pending_event_ids": list(pending.event_ids),
                 "policy_version": decision.policy_version,
@@ -380,7 +305,6 @@ class EnforcementSession:
             trace_id=self.trace.id,
             sequence=self.trace.next_sequence,
             kind=EventKind.GUARDRAIL_DECISION,
-            phase=pending.primary_event.phase,
             timestamp=self.clock(),
             origin=EventOrigin.DERIVED,
             payload=payload,

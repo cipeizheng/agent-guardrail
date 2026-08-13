@@ -31,7 +31,6 @@ def _decision(pending: PendingTrace, *, policy_hash: str = "fixed-policy") -> De
         trace_id=pending.trace.id,
         event_id=pending.primary_event_id,
         pending_event_ids=pending.event_ids,
-        phase=pending.primary_event.phase,
         policy_version=3,
         policy_hash=policy_hash,
     )
@@ -39,7 +38,7 @@ def _decision(pending: PendingTrace, *, policy_hash: str = "fixed-policy") -> De
 
 @pytest.mark.asyncio
 async def test_remote_runtime_starts_and_analyzes_pending_trace() -> None:
-    pending = PendingTrace.from_context(tool_context(body="safe"))
+    pending = tool_context(body="safe")
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/health/ready":
@@ -49,7 +48,7 @@ async def test_remote_runtime_starts_and_analyzes_pending_trace() -> None:
             return httpx.Response(
                 200,
                 json={
-                    "protocol_version": 1,
+                    "protocol_version": 2,
                     "version": 3,
                     "content_hash": "fixed-policy",
                 },
@@ -58,7 +57,7 @@ async def test_remote_runtime_starts_and_analyzes_pending_trace() -> None:
         return httpx.Response(
             200,
             json={
-                "protocol_version": 1,
+                "protocol_version": 2,
                 "decision": _decision(pending).model_dump(mode="json"),
             },
         )
@@ -79,7 +78,7 @@ async def test_remote_runtime_starts_and_analyzes_pending_trace() -> None:
 
 @pytest.mark.asyncio
 async def test_remote_runtime_rejects_policy_change_and_oversized_response() -> None:
-    pending = PendingTrace.from_context(tool_context(body="safe"))
+    pending = tool_context(body="safe")
     analyze_calls = 0
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -90,7 +89,7 @@ async def test_remote_runtime_rejects_policy_change_and_oversized_response() -> 
             return httpx.Response(
                 200,
                 json={
-                    "protocol_version": 1,
+                    "protocol_version": 2,
                     "version": 3,
                     "content_hash": "fixed-policy",
                 },
@@ -100,7 +99,7 @@ async def test_remote_runtime_rejects_policy_change_and_oversized_response() -> 
             return httpx.Response(
                 200,
                 json={
-                    "protocol_version": 1,
+                    "protocol_version": 2,
                     "decision": _decision(
                         pending,
                         policy_hash="changed-policy",
@@ -128,7 +127,7 @@ async def test_remote_runtime_rejects_policy_change_and_oversized_response() -> 
 
 @pytest.mark.asyncio
 async def test_remote_runtime_rejects_oversized_request_without_core_call() -> None:
-    pending = PendingTrace.from_context(tool_context(body="safe"))
+    pending = tool_context(body="safe")
     analyze_calls = 0
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -139,7 +138,7 @@ async def test_remote_runtime_rejects_oversized_request_without_core_call() -> N
             return httpx.Response(
                 200,
                 json={
-                    "protocol_version": 1,
+                    "protocol_version": 2,
                     "version": 3,
                     "content_hash": "fixed-policy",
                 },

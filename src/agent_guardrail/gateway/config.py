@@ -40,7 +40,6 @@ class GatewaySettings(BaseSettings):
     )
     max_trace_events: int = Field(default=16, ge=2, le=1_000)
     upstream_timeout_seconds: float = Field(default=60.0, gt=0, le=600)
-    evaluate_endpoint_enabled: bool = False
     detector_profile: Literal["local", "full_local_v1"] = "local"
     prompt_model_device: Literal["cpu", "cuda"] = "cpu"
     detector_assets_dir: Path | None = None

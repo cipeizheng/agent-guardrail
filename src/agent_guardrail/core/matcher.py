@@ -66,6 +66,7 @@ from agent_guardrail.models import (
     FindingEvidence,
     FindingLocation,
     PendingTrace,
+    RelationKind,
     Trace,
     compute_binding_key,
 )
@@ -476,8 +477,6 @@ def _event_domain(
         ):
             continue
         if event.kind is not binding.kind:
-            continue
-        if binding.phases and event.phase not in binding.phases:
             continue
         if binding.origins and event.origin not in binding.origins:
             continue
@@ -968,7 +967,6 @@ async def _evaluate_detector(
         context = DetectionContext(
             trace_id=trace_id,
             event_id=context_event.id,
-            phase=context_event.phase,
         )
         cache_key = (
             condition.capability,
@@ -976,7 +974,6 @@ async def _evaluate_detector(
             sha256(encoded).digest(),
             context.trace_id,
             context.event_id,
-            context.phase.value,
             detector_input.encoding.value,
         )
         if cache_key in runtime.detector_cache:
@@ -1148,7 +1145,6 @@ async def _evaluate_similarity(
     context = DetectionContext(
         trace_id=trace_id,
         event_id=context_event.id,
-        phase=context_event.phase,
     )
     cache_key = (
         condition.capability,
@@ -1156,7 +1152,6 @@ async def _evaluate_similarity(
         sha256(encoded).digest(),
         context.trace_id,
         context.event_id,
-        context.phase.value,
     )
     if cache_key in runtime.similarity_cache:
         detections = runtime.similarity_cache[cache_key]
@@ -1559,20 +1554,39 @@ def _evaluate_relation(
     if operator in {
         RelationOperator.PRECEDES,
         RelationOperator.IMMEDIATELY_PRECEDES,
-        RelationOperator.MAY_INFLUENCE,
     }:
         ledger.consume(rule_id, CostDimension.RELATION_NODES)
         if operator is RelationOperator.IMMEDIATELY_PRECEDES:
             return _ConditionResult(source_event.sequence + 1 == target_event.sequence)
         return _ConditionResult(source_event.sequence < target_event.sequence)
+    if operator is RelationOperator.MAY_INFLUENCE:
+        return _ConditionResult(
+            _has_relation_path(
+                source_event,
+                target_event,
+                allowed_kinds=frozenset(
+                    {RelationKind.DERIVED_FROM, RelationKind.MAY_INFLUENCE}
+                ),
+                rule_id=rule_id,
+                events_by_id=events_by_id,
+                ledger=ledger,
+            )
+        )
     if operator is RelationOperator.DERIVED_FROM_DIRECT:
         relations = target_event.relations
         ledger.consume(rule_id, CostDimension.RELATION_NODES, max(1, len(relations)))
-        return _ConditionResult(source_event.id in target_event.source_event_ids)
+        return _ConditionResult(
+            any(
+                relation.source_event_id == source_event.id
+                and relation.kind is RelationKind.DERIVED_FROM
+                for relation in relations
+            )
+        )
     return _ConditionResult(
-        _is_ancestor(
+        _has_relation_path(
             source_event,
             target_event,
+            allowed_kinds=frozenset({RelationKind.DERIVED_FROM}),
             rule_id=rule_id,
             events_by_id=events_by_id,
             ledger=ledger,
@@ -1580,15 +1594,20 @@ def _evaluate_relation(
     )
 
 
-def _is_ancestor(
+def _has_relation_path(
     source: Event,
     target: Event,
     *,
+    allowed_kinds: frozenset[RelationKind],
     rule_id: str,
     events_by_id: dict[str, Event],
     ledger: MatchCostLedger,
 ) -> bool:
-    pending = list(reversed(target.source_event_ids))
+    pending = [
+        relation.source_event_id
+        for relation in reversed(target.relations)
+        if relation.kind in allowed_kinds
+    ]
     visited: set[str] = set()
     ledger.consume(rule_id, CostDimension.RELATION_NODES)
     while pending:
@@ -1601,7 +1620,11 @@ def _is_ancestor(
         visited.add(event_id)
         ledger.consume(rule_id, CostDimension.RELATION_NODES)
         event = events_by_id[event_id]
-        pending.extend(reversed(event.source_event_ids))
+        pending.extend(
+            relation.source_event_id
+            for relation in reversed(event.relations)
+            if relation.kind in allowed_kinds
+        )
     return False
 
 
@@ -1770,7 +1793,6 @@ def _event_envelope(event: Event) -> dict[str, object]:
         "id": event.id,
         "sequence": event.sequence,
         "kind": event.kind.value,
-        "phase": event.phase.value,
         "origin": event.origin.value,
         "payload": event.payload,
     }

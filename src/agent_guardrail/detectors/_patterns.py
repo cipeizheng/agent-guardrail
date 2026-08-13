@@ -110,7 +110,6 @@ def occurrence_fingerprint(
             detector_version,
             context.trace_id,
             context.event_id,
-            context.phase.value,
             detection_type,
             start,
             end,

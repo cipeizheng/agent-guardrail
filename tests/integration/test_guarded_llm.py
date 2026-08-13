@@ -16,7 +16,6 @@ from agent_guardrail.models import (
     EventOrigin,
     ModelRequest,
     ModelResponse,
-    Phase,
     RelationKind,
     SecurityDestination,
     ToolCall,
@@ -35,19 +34,29 @@ from tests.support import (
 )
 
 
-def analyzer_for_phase(phase: Phase, *, action: Action = Action.BLOCK):
-    kind = "tool_result" if phase is Phase.POST_TOOL else "message"
-    binding = "result" if phase is Phase.POST_TOOL else "message"
+def analyzer_for_kind(kind: EventKind, *, action: Action = Action.BLOCK):
+    binding = "result" if kind is EventKind.TOOL_RESULT else "event"
+    where_clause = (
+        f"""    where:
+      all:
+        - {{present: [{binding}, payload]}}
+        - compare:
+            left: {{field: [{binding}, payload, role]}}
+            operator: equals
+            right: {{literal: assistant}}"""
+        if kind is EventKind.MESSAGE
+        else f"    where: {{present: [{binding}, payload]}}"
+    )
     return analyzer_from_yaml(
         f"""\
 version: 3
 scopes: [pending]
 rules:
-  - id: block-{phase.value}
+  - id: block-{kind.value}
     action: {action.value}
     events:
-      {binding}: {{kind: {kind}, domain: pending, phases: [{phase.value}]}}
-    where: {{present: [{binding}, payload]}}
+      {binding}: {{kind: {kind.value}, domain: pending}}
+{where_clause}
     finding:
       code: test_block
       message: The boundary is blocked for this deterministic test.
@@ -72,27 +81,29 @@ async def test_allow_checks_both_sides_and_returns_response() -> None:
     assert inner.call_count == 1
     assert [event.kind for event in session.trace.events] == [
         EventKind.MESSAGE,
+        EventKind.MODEL_CALL,
         EventKind.MESSAGE,
     ]
-    assert session.trace.events[1].source_event_ids == (session.trace.events[0].id,)
+    assert session.trace.events[2].source_event_ids == (session.trace.events[1].id,)
     assert [event.origin for event in session.trace.events] == [
         EventOrigin.CLIENT_ASSERTED,
         EventOrigin.OBSERVED,
+        EventOrigin.OBSERVED,
     ]
-    assert session.trace.events[1].relations[0].kind is RelationKind.DERIVED_FROM
-    assert "source_event_ids" not in session.trace.events[1].metadata
+    assert session.trace.events[2].relations[0].kind is RelationKind.DERIVED_FROM
+    assert "source_event_ids" not in session.trace.events[2].metadata
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("phase", "destination", "expected_provider_calls"),
+    ("kind", "destination", "expected_provider_calls"),
     [
-        (Phase.PRE_LLM, SecurityDestination.LLM_PROVIDER, 0),
-        (Phase.POST_LLM, SecurityDestination.AGENT_RUNTIME, 1),
+        (EventKind.MODEL_CALL, SecurityDestination.LLM_PROVIDER, 0),
+        (EventKind.MESSAGE, SecurityDestination.AGENT_RUNTIME, 1),
     ],
 )
 async def test_inline_llm_injects_the_actual_flow_destination(
-    phase: Phase,
+    kind: EventKind,
     destination: SecurityDestination,
     expected_provider_calls: int,
 ) -> None:
@@ -100,8 +111,7 @@ async def test_inline_llm_injects_the_actual_flow_destination(
     session = EnforcementSession(
         analyzer=security_destination_analyzer(
             destination=destination,
-            phase=phase,
-            kind=EventKind.MESSAGE,
+            kind=kind,
         ),
         trace=Trace(id="trace-1"),
     )
@@ -110,7 +120,6 @@ async def test_inline_llm_injects_the_actual_flow_destination(
     with pytest.raises(GuardrailBlocked) as blocked:
         await guarded.complete(request())
 
-    assert blocked.value.decision.phase is phase
     assert blocked.value.decision.violations[0].code == "destination_seen"
     assert inner.call_count == expected_provider_calls
 
@@ -119,13 +128,15 @@ async def test_inline_llm_injects_the_actual_flow_destination(
 async def test_pre_llm_block_never_calls_provider_or_keeps_raw_request() -> None:
     inner = ScriptedLLM([ModelResponse(content="must not be used")])
     trace = Trace(id="trace-1")
-    session = EnforcementSession(analyzer=analyzer_for_phase(Phase.PRE_LLM), trace=trace)
+    session = EnforcementSession(
+        analyzer=analyzer_for_kind(EventKind.MODEL_CALL),
+        trace=trace,
+    )
     guarded = GuardedLLMClient(inner=inner, session=session)
 
-    with pytest.raises(GuardrailBlocked) as blocked:
+    with pytest.raises(GuardrailBlocked):
         await guarded.complete(request(FAKE_SECRET))
 
-    assert blocked.value.decision.phase is Phase.PRE_LLM
     assert inner.call_count == 0
     assert [event.kind for event in trace.events] == [EventKind.GUARDRAIL_DECISION]
     assert FAKE_SECRET not in trace.model_dump_json()
@@ -135,16 +146,19 @@ async def test_pre_llm_block_never_calls_provider_or_keeps_raw_request() -> None
 async def test_post_llm_block_hides_provider_response_from_agent_and_trace() -> None:
     inner = ScriptedLLM([ModelResponse(content=FAKE_SECRET)])
     trace = Trace(id="trace-1")
-    session = EnforcementSession(analyzer=analyzer_for_phase(Phase.POST_LLM), trace=trace)
+    session = EnforcementSession(
+        analyzer=analyzer_for_kind(EventKind.MESSAGE),
+        trace=trace,
+    )
     guarded = GuardedLLMClient(inner=inner, session=session)
 
     with pytest.raises(GuardrailBlocked) as blocked:
         await guarded.complete(request())
 
-    assert blocked.value.decision.phase is Phase.POST_LLM
     assert inner.call_count == 1
     assert [event.kind for event in trace.events] == [
         EventKind.MESSAGE,
+        EventKind.MODEL_CALL,
         EventKind.GUARDRAIL_DECISION,
     ]
     assert FAKE_SECRET not in trace.model_dump_json()
@@ -156,7 +170,7 @@ async def test_log_audits_response_and_still_returns_it() -> None:
     inner = ScriptedLLM([ModelResponse(content="Logged response")])
     audit = InMemoryAuditSink()
     session = EnforcementSession(
-        analyzer=analyzer_for_phase(Phase.POST_LLM, action=Action.LOG),
+        analyzer=analyzer_for_kind(EventKind.MESSAGE, action=Action.LOG),
         trace=Trace(id="trace-1"),
         audit=audit,
     )
@@ -186,17 +200,20 @@ async def test_tool_access_post_llm_block_hides_tool_call_from_agent() -> None:
         ]
     )
     trace = Trace(id="trace-1")
-    session = EnforcementSession(analyzer=tool_access_analyzer(), trace=trace)
+    session = EnforcementSession(
+        analyzer=tool_access_analyzer(kind=EventKind.TOOL_CALL_PROPOSAL),
+        trace=trace,
+    )
     guarded = GuardedLLMClient(inner=inner, session=session)
 
     with pytest.raises(GuardrailBlocked) as blocked:
         await guarded.complete(request())
 
     assert inner.call_count == 1
-    assert blocked.value.decision.phase is Phase.POST_LLM
     assert blocked.value.decision.violations[0].code == "tool_access_denied"
     assert [event.kind for event in trace.events] == [
         EventKind.MESSAGE,
+        EventKind.MODEL_CALL,
         EventKind.GUARDRAIL_DECISION,
     ]
 
@@ -220,18 +237,21 @@ async def test_pii_post_llm_block_hides_tool_call_from_agent_and_trace(
         ]
     )
     trace = Trace(id="trace-1")
-    session = EnforcementSession(analyzer=pii_analyzer(), trace=trace)
+    session = EnforcementSession(
+        analyzer=pii_analyzer(kind=EventKind.TOOL_CALL_PROPOSAL),
+        trace=trace,
+    )
     guarded = GuardedLLMClient(inner=inner, session=session)
 
     with pytest.raises(GuardrailBlocked) as blocked:
         await guarded.complete(request())
 
     assert inner.call_count == 1
-    assert blocked.value.decision.phase is Phase.POST_LLM
     assert blocked.value.decision.violations[0].code == "pii_exfiltration"
     assert sensitive_value not in blocked.value.decision.model_dump_json()
     assert sensitive_value not in trace.model_dump_json()
     assert [event.kind for event in trace.events] == [
         EventKind.MESSAGE,
+        EventKind.MODEL_CALL,
         EventKind.GUARDRAIL_DECISION,
     ]

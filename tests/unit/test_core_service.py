@@ -7,7 +7,6 @@ import pytest
 from pydantic import SecretStr, ValidationError
 
 from agent_guardrail.core_service import CoreSettings, create_core_app
-from agent_guardrail.models import PendingTrace
 from agent_guardrail.runtime import GuardrailRuntime
 from agent_guardrail.runtime.remote_protocol import RemoteAnalyzeRequest
 from tests.support import FAKE_SECRET, secret_policy_yaml, tool_context
@@ -41,7 +40,7 @@ async def test_core_analyze_authenticates_and_returns_closed_decision(tmp_path: 
             base_url="http://core.test",
         ) as client:
             unauthenticated = await client.post("/v1/analyze", json={})
-            pending = PendingTrace.from_context(tool_context(body=FAKE_SECRET))
+            pending = tool_context(body=FAKE_SECRET)
             response = await client.post(
                 "/v1/analyze",
                 headers={"authorization": "Bearer core-test-key"},
@@ -50,7 +49,7 @@ async def test_core_analyze_authenticates_and_returns_closed_decision(tmp_path: 
 
     assert unauthenticated.status_code == 401
     assert response.status_code == 200
-    assert response.json()["protocol_version"] == 1
+    assert response.json()["protocol_version"] == 2
     assert response.json()["decision"]["action"] == "block"
     assert FAKE_SECRET not in response.text
 

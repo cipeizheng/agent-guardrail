@@ -15,21 +15,12 @@ class CanonicalModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class Phase(StrEnum):
-    """A point at which guardrail evaluation can occur."""
-
-    PRE_LLM = "pre_llm"
-    POST_LLM = "post_llm"
-    PRE_TOOL = "pre_tool"
-    POST_TOOL = "post_tool"
-
-
 class EventKind(StrEnum):
-    """Provider-neutral categories; aggregate model kinds are compatibility-only."""
+    """Provider-neutral semantic events in an agent trace."""
 
     MESSAGE = "message"
-    MODEL_REQUEST = "model_request"
-    MODEL_RESPONSE = "model_response"
+    MODEL_CALL = "model_call"
+    TOOL_CALL_PROPOSAL = "tool_call_proposal"
     TOOL_CALL = "tool_call"
     TOOL_RESULT = "tool_result"
     GUARDRAIL_DECISION = "guardrail_decision"
@@ -275,13 +266,14 @@ ACTION_PRIORITY: dict[Action, int] = {
 MAX_PENDING_EVENTS = 1_000
 MAX_RELATIONS_PER_EVENT = 64
 MAX_TRACE_EVENTS = 1_000
-_LEGACY_SOURCE_EVENT_IDS_METADATA_KEY = "source_event_ids"
+_SOURCE_EVENT_IDS_METADATA_KEY = "source_event_ids"
 
 
 class RelationKind(StrEnum):
     """A typed, explicitly observed relationship between canonical events."""
 
     DERIVED_FROM = "derived_from"
+    MAY_INFLUENCE = "may_influence"
 
 
 class MessageRole(StrEnum):
@@ -341,6 +333,12 @@ class Message(CanonicalModel):
     content: TextContent
 
 
+class ModelCall(CanonicalModel):
+    """A lightweight provider-neutral model operation, never a request snapshot."""
+
+    model: str | None = Field(default=None, min_length=1)
+
+
 class ToolCall(CanonicalModel):
     """A normalized request to execute a tool."""
 
@@ -364,7 +362,6 @@ class CandidateEvent(CanonicalModel):
 
     key: str = Field(min_length=1)
     kind: EventKind
-    phase: Phase
     payload: dict[str, JsonValue] = Field(default_factory=dict)
     metadata: dict[str, JsonValue] = Field(default_factory=dict)
     origin: EventOrigin = EventOrigin.CLIENT_ASSERTED
@@ -379,7 +376,7 @@ class CandidateEvent(CanonicalModel):
             raise ValueError("candidate key must be a non-blank trimmed string")
         if self.kind is EventKind.GUARDRAIL_DECISION:
             raise ValueError("guardrail decision events are created only by the session")
-        if _LEGACY_SOURCE_EVENT_IDS_METADATA_KEY in self.metadata:
+        if _SOURCE_EVENT_IDS_METADATA_KEY in self.metadata:
             raise ValueError("source_event_ids metadata is reserved; use typed relations")
         relation_keys = [
             (
@@ -401,12 +398,11 @@ class Event(CanonicalModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    model_version: Literal[2] = 2
+    model_version: Literal[3] = 3
     id: str = Field(min_length=1)
     trace_id: str = Field(min_length=1)
     sequence: int = Field(ge=0)
     kind: EventKind
-    phase: Phase
     timestamp: datetime
     origin: EventOrigin = EventOrigin.CLIENT_ASSERTED
     payload: dict[str, JsonValue] = Field(default_factory=dict)
@@ -420,20 +416,14 @@ class Event(CanonicalModel):
     def validate_typed_payload(self) -> Self:
         if self.kind is EventKind.MESSAGE:
             Message.model_validate(self.payload)
-        elif self.kind is EventKind.MODEL_REQUEST:
-            from agent_guardrail.models.chat import ModelRequest
-
-            ModelRequest.model_validate(self.payload)
-        elif self.kind is EventKind.MODEL_RESPONSE:
-            from agent_guardrail.models.chat import ModelResponse
-
-            ModelResponse.model_validate(self.payload)
-        elif self.kind is EventKind.TOOL_CALL:
+        elif self.kind is EventKind.MODEL_CALL:
+            ModelCall.model_validate(self.payload)
+        elif self.kind in {EventKind.TOOL_CALL_PROPOSAL, EventKind.TOOL_CALL}:
             ToolCall.model_validate(self.payload)
         elif self.kind is EventKind.TOOL_RESULT:
             ToolResult.model_validate(self.payload)
 
-        if _LEGACY_SOURCE_EVENT_IDS_METADATA_KEY in self.metadata:
+        if _SOURCE_EVENT_IDS_METADATA_KEY in self.metadata:
             raise ValueError("source_event_ids metadata is reserved; use typed relations")
         relation_keys = [(relation.source_event_id, relation.kind) for relation in self.relations]
         if len(relation_keys) != len(set(relation_keys)):
@@ -444,7 +434,7 @@ class Event(CanonicalModel):
 
     @property
     def source_event_ids(self) -> tuple[str, ...]:
-        """Return unique direct source IDs from the event's typed relations."""
+        """Return unique direct Event IDs from all typed relations."""
 
         return tuple(dict.fromkeys(relation.source_event_id for relation in self.relations))
 
@@ -510,7 +500,6 @@ class Trace(CanonicalModel):
         self,
         *,
         kind: EventKind | None = None,
-        phase: Phase | None = None,
         tool_name: str | None = None,
         source_event_id: str | None = None,
     ) -> tuple[Event, ...]:
@@ -519,8 +508,6 @@ class Trace(CanonicalModel):
         matches: list[Event] = []
         for event in self.events:
             if kind is not None and event.kind is not kind:
-                continue
-            if phase is not None and event.phase is not phase:
                 continue
             if tool_name is not None and event.payload.get("name") != tool_name:
                 continue
@@ -544,7 +531,10 @@ class Trace(CanonicalModel):
         if event.trace_id != self.id:
             raise ValueError("event belongs to another trace")
         sources: list[Event] = []
-        for source_event_id in event.source_event_ids:
+        for relation in event.relations:
+            if relation.kind is not RelationKind.DERIVED_FROM:
+                continue
+            source_event_id = relation.source_event_id
             source = self.by_id(source_event_id)
             if source is None or source.kind is EventKind.GUARDRAIL_DECISION:
                 raise ValueError("source event is not available in this trace")
@@ -571,7 +561,11 @@ class Trace(CanonicalModel):
             if source is None or source.kind is EventKind.GUARDRAIL_DECISION:
                 raise ValueError("source event is not available in this trace")
             ancestor_ids.add(source_event_id)
-            pending.extend(source.source_event_ids)
+            pending.extend(
+                relation.source_event_id
+                for relation in source.relations
+                if relation.kind is RelationKind.DERIVED_FROM
+            )
         return tuple(
             historical
             for historical in self.events
@@ -620,22 +614,7 @@ class Trace(CanonicalModel):
             known_events[source_event_id].kind is EventKind.GUARDRAIL_DECISION
             for source_event_id in event.source_event_ids
         ):
-            raise ValueError("guardrail decision events cannot be provenance sources")
-
-
-class GuardrailContext(CanonicalModel):
-    """The current event plus bounded task-level context."""
-
-    event: Event
-    trace: Trace
-    attributes: dict[str, JsonValue] = Field(default_factory=dict)
-
-    @model_validator(mode="after")
-    def validate_trace(self) -> Self:
-        if self.event.trace_id != self.trace.id:
-            raise ValueError("event and trace IDs must match")
-        self.trace.sources_of(self.event)
-        return self
+            raise ValueError("guardrail decision events cannot be relation sources")
 
 
 class PendingTrace(CanonicalModel):
@@ -661,9 +640,6 @@ class PendingTrace(CanonicalModel):
             raise ValueError("primary_event_id must identify a pending event")
         if any(event.kind is EventKind.GUARDRAIL_DECISION for event in self.events):
             raise ValueError("guardrail decision events cannot be pending inputs")
-        phases = {event.phase for event in self.events}
-        if len(phases) != 1:
-            raise ValueError("all pending events must use the same enforcement phase")
 
         expected_sequence = self.trace.next_sequence
         for offset, event in enumerate(self.events):
@@ -679,17 +655,6 @@ class PendingTrace(CanonicalModel):
             max_events=self.trace.max_events,
         )
         return self
-
-    @classmethod
-    def from_context(cls, context: GuardrailContext) -> Self:
-        """Adapt the direct v0.1 single-event API to the pending analyzer boundary."""
-
-        return cls(
-            trace=context.trace.model_copy(deep=True),
-            events=(context.event,),
-            primary_event_id=context.event.id,
-            attributes=dict(context.attributes),
-        )
 
     @property
     def primary_event(self) -> Event:
@@ -708,7 +673,6 @@ class DetectionContext(CanonicalModel):
 
     trace_id: str
     event_id: str
-    phase: Phase
 
 
 class Detection(CanonicalModel):
@@ -736,10 +700,9 @@ class Detection(CanonicalModel):
 class Violation(CanonicalModel):
     """A rule match; Engine attaches the configured action before returning it."""
 
-    model_version: Literal[2] = 2
+    model_version: Literal[3] = 3
     rule_id: str = Field(min_length=1)
     code: str = Field(min_length=1)
-    phase: Phase
     message: str = Field(min_length=1)
     action: Action | None = None
     event_ids: tuple[str, ...] = ()
@@ -758,12 +721,11 @@ class Violation(CanonicalModel):
 class Decision(CanonicalModel):
     """The complete, serializable result of one Engine evaluation."""
 
-    model_version: Literal[2] = 2
+    model_version: Literal[3] = 3
     action: Action
     trace_id: str = Field(min_length=1)
     event_id: str = Field(min_length=1)
     pending_event_ids: tuple[str, ...] = Field(min_length=1)
-    phase: Phase
     policy_version: int = Field(ge=1)
     policy_hash: str = Field(min_length=8)
     violations: tuple[Violation, ...] = ()

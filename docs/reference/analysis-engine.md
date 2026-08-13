@@ -41,8 +41,8 @@ event binding domains / named cartesian product
   → static Finding projection
 ```
 
-Event binding 只允许独立 `message/tool_call/tool_result`，字段首段限定为
-`id/sequence/kind/phase/origin/payload`，不能读取 metadata 或任意 Python 属性。
+Event binding 只允许独立 `message/model_call/tool_call_proposal/tool_call/tool_result`，字段首段限定为
+`id/sequence/kind/origin/payload`，不能读取 metadata 或任意 Python 属性。
 
 pending 分析中的 domain：
 
@@ -63,8 +63,9 @@ Predicate/Detector 和有界量词。
   写条件。
 - collection 缺失或类型不适用产生空 domain；实际访问元素仍计预算。
 - `forall` 空 domain 为 true，`exists` 为空为 false；`count` 至少声明一个上下界。
-- `precedes/immediately_precedes/may_influence` 不创建来源边。
-- `derived_from_direct/ancestor` 只查询 Trace 中已有的类型化 Relation。
+- `precedes/immediately_precedes` 只比较 sequence，不创建 Relation。
+- `may_influence` 查询显式 `may_influence` 或 `derived_from` 关系路径；
+  `derived_from_direct/ancestor` 只查询显式 `derived_from` Relation。
 - 未链接 capability 在 Rule 搜索前产生 `capability_error`，不会因空 domain 或短路退化为 no-match。
 
 ## 4. 分项成本
@@ -131,7 +132,7 @@ Schema 硬上限包括：每个 Finding 64 subject、128 binding、64 location�
 Matcher 每次调用深拷贝输入 Event tuple，创建独立 ledger 和 analysis-local capability cache，返回
 `emission=all`。相同 Plan、Policy hash、输入和参数必须产生相同 Report。
 
-cache key 包含 capability/version、规范输入哈希以及 trace/Event/phase/Rule/condition 上下文。cache hit
+cache key 包含 capability/version、规范输入哈希以及 trace/Event/Rule/condition 上下文。cache hit
 仍计 calls/input bytes；cache miss 在调度前预留 deadline，并受真实异步 timeout 控制。
 
 Finding 投影前会过滤 past-only subject，因此历史匹配不消费 pending Finding/evidence 输出预算。

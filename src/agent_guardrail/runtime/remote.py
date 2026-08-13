@@ -10,7 +10,7 @@ from typing import Self
 import httpx
 from pydantic import ValidationError
 
-from agent_guardrail.models import Decision, GuardrailContext, PendingTrace
+from agent_guardrail.models import Decision, PendingTrace
 from agent_guardrail.runtime.remote_protocol import (
     RemoteAnalyzeRequest,
     RemoteAnalyzeResponse,
@@ -96,9 +96,6 @@ class RemoteGuardrailRuntime:
             self._state = RuntimeState.CLOSED
             if self._owns_client:
                 await self._client.aclose()
-
-    async def evaluate(self, context: GuardrailContext) -> Decision:
-        return await self.analyze_pending(PendingTrace.from_context(context))
 
     async def analyze_pending(self, pending: PendingTrace) -> Decision:
         if not self.ready:

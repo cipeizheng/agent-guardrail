@@ -13,10 +13,16 @@ rules:
     events:
       message:
         kind: message
+        domain: visible
+      call:
+        kind: model_call
         domain: pending
-        phases: [pre_llm]
     where:
       all:
+        - relation:
+            source: message
+            target: call
+            operator: may_influence
         - compare:
             left: {field: [message, payload, role]}
             operator: equals
@@ -30,6 +36,6 @@ rules:
     finding:
       code: prompt_injection_detected
       message: The message contains a high-signal prompt injection pattern.
-      subjects: [message]
+      subjects: [call]
       evidence:
         - {source: detector, id: injection_scan}

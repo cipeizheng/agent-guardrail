@@ -9,7 +9,6 @@ rules:
       call:
         kind: tool_call
         domain: pending
-        phases: [post_llm, pre_tool]
     where:
       compare:
         left: {field: [call, payload, name]}

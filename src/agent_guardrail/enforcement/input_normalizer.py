@@ -18,9 +18,10 @@ from agent_guardrail.models import (
     EventOrigin,
     Message,
     MessageRole,
+    ModelCall,
     ModelRequest,
     ModelResponse,
-    Phase,
+    RelationKind,
     TextContent,
     ToolCall,
     ToolResult,
@@ -65,8 +66,6 @@ class NormalizedBatch:
             raise ValueError("normalized candidate keys must be unique")
         if self.primary_key not in candidate_keys:
             raise ValueError("normalized primary_key must identify a candidate")
-        if len({candidate.phase for candidate in self.candidates}) != 1:
-            raise ValueError("normalized candidates must use one enforcement phase")
 
 
 class InputNormalizer:
@@ -96,8 +95,8 @@ class InputNormalizer:
         self.max_candidates = max_candidates
         self.max_relations_per_event = max_relations_per_event
 
-    def normalize_request_snapshot(self, request: ModelRequest) -> NormalizedBatch:
-        """Expand one full request history as client-asserted pre-LLM events."""
+    def normalize_model_call(self, request: ModelRequest) -> NormalizedBatch:
+        """Expand client-asserted inputs and one lightweight pending model call."""
 
         validated = self._validated_request(request)
         candidates: list[CandidateEvent] = []
@@ -127,7 +126,6 @@ class InputNormalizer:
                     CandidateEvent(
                         key=f"request-message-{message_index}",
                         kind=EventKind.MESSAGE,
-                        phase=Phase.PRE_LLM,
                         payload=self._message_payload(chat_message),
                         origin=EventOrigin.CLIENT_ASSERTED,
                     ),
@@ -143,8 +141,7 @@ class InputNormalizer:
                         candidates,
                         CandidateEvent(
                             key=candidate_key,
-                            kind=EventKind.TOOL_CALL,
-                            phase=Phase.PRE_LLM,
+                            kind=EventKind.TOOL_CALL_PROPOSAL,
                             payload=cast(
                                 dict[str, JsonValue],
                                 call.model_dump(mode="json"),
@@ -157,13 +154,37 @@ class InputNormalizer:
 
         if unresolved_call_ids:
             raise InputNormalizationError("incomplete_tool_call_group")
+        if len(candidates) > self.max_relations_per_event:
+            raise InputNormalizationError("relation_limit_exceeded")
+        model_call = ModelCall(model=validated.model)
+        self._append(
+            candidates,
+            CandidateEvent(
+                key="model-call",
+                kind=EventKind.MODEL_CALL,
+                payload=cast(dict[str, JsonValue], model_call.model_dump(mode="json")),
+                origin=EventOrigin.OBSERVED,
+                relations=tuple(
+                    CandidateRelation(
+                        source_candidate_key=candidate.key,
+                        kind=RelationKind.MAY_INFLUENCE,
+                    )
+                    for candidate in candidates
+                ),
+            ),
+        )
         return NormalizedBatch(
             candidates=tuple(candidates),
-            primary_key=candidates[-1].key,
+            primary_key="model-call",
         )
 
-    def normalize_response(self, response: ModelResponse) -> NormalizedBatch:
-        """Expand one observed model response as post-LLM events."""
+    def normalize_model_output(
+        self,
+        response: ModelResponse,
+        *,
+        model_call_event_id: str,
+    ) -> NormalizedBatch:
+        """Expand one observed model output derived from its model-call Event."""
 
         validated = self._validated_response(response)
         candidates: list[CandidateEvent] = []
@@ -177,12 +198,14 @@ class InputNormalizer:
                 CandidateEvent(
                     key="response-message",
                     kind=EventKind.MESSAGE,
-                    phase=Phase.POST_LLM,
                     payload=cast(
                         dict[str, JsonValue],
                         message.model_dump(mode="json"),
                     ),
                     origin=EventOrigin.OBSERVED,
+                    relations=(
+                        CandidateRelation(source_event_id=model_call_event_id),
+                    ),
                 ),
             )
 
@@ -191,10 +214,12 @@ class InputNormalizer:
                 candidates,
                 CandidateEvent(
                     key=f"response-tool-call-{call_index}",
-                    kind=EventKind.TOOL_CALL,
-                    phase=Phase.POST_LLM,
+                    kind=EventKind.TOOL_CALL_PROPOSAL,
                     payload=cast(dict[str, JsonValue], call.model_dump(mode="json")),
                     origin=EventOrigin.OBSERVED,
+                    relations=(
+                        CandidateRelation(source_event_id=model_call_event_id),
+                    ),
                 ),
             )
 
@@ -228,11 +253,13 @@ class InputNormalizer:
             CandidateEvent(
                 key=f"request-tool-result-{message_index}",
                 kind=EventKind.TOOL_RESULT,
-                phase=Phase.PRE_LLM,
                 payload=cast(dict[str, JsonValue], result.model_dump(mode="json")),
                 origin=EventOrigin.CLIENT_ASSERTED,
                 relations=(
-                    CandidateRelation(source_candidate_key=source_candidate_key),
+                    CandidateRelation(
+                        source_candidate_key=source_candidate_key,
+                        kind=RelationKind.MAY_INFLUENCE,
+                    ),
                 ),
             ),
         )

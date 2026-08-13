@@ -40,7 +40,6 @@ rules:
       call:
         kind: tool_call
         domain: pending
-        phases: [post_llm, pre_tool]
     where:
       all:
         - tool: {binding: call, name: send_email}
@@ -59,7 +58,8 @@ rules:
 ```
 
 Rule 的 Event 名称都是普通 binding，没有保留 `anchor`。多个 binding 平等选择 `visible/past/pending`，
-不同对象、顺序和来源必须在 `where` 中显式表达。
+不同对象、顺序和来源必须在 `where` 中显式表达。YAML 不选择 `pre/post LLM/Tool` 执行位置；执行位置由
+SDK 调用方或 Gateway Adapter 决定。
 
 ## 3. 顶层与 Rule
 
@@ -75,7 +75,7 @@ Rule 的 Event 名称都是普通 binding，没有保留 `anchor`。多个 bindi
 
 每条 Rule 最多声明有限数量的：
 
-- `events`：`message/tool_call/tool_result` 与 phase/origin/domain filter；
+- `events`：`message/model_call/tool_call_proposal/tool_call/tool_result` 与 origin/domain filter；
 - `derive`：当前白名单纯操作只有 `split_lines`；
 - `collections`：从字段或派生结果展开有界数组；
 - `where`：封闭条件树；
@@ -100,7 +100,7 @@ Rule 的 Event 名称都是普通 binding，没有保留 `anchor`。多个 bindi
 - `all/any/not`；
 - `compare`：`equals/not_equals/in/not_in/contains/not_contains`；
 - `present`：区分字段缺失和存在但为 null；
-- `relation`：顺序、保守影响或 direct/ancestor 精确来源；
+- `relation`：sequence 顺序，以及显式 `may_influence` 或 direct/ancestor `derived_from`；
 - `tool`：工具名比较语法糖；
 - `predicate/detector`：可信 Registry capability；
 - `use`：只在编译期存在的声明式 predicate 调用；

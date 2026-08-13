@@ -16,9 +16,7 @@ from agent_guardrail.core import MatchPolicyAnalyzer
 from agent_guardrail.models import (
     Event,
     EventKind,
-    GuardrailContext,
-    ModelResponse,
-    Phase,
+    PendingTrace,
     SecurityDestination,
     ToolCall,
     ToolResult,
@@ -51,7 +49,12 @@ def fake_cn_resident_id(master_number: str = "11000020000101001") -> str:
 FAKE_CN_RESIDENT_ID = fake_cn_resident_id()
 
 
-def secret_policy_yaml(*, action: str = "block", engine: str = "") -> str:
+def secret_policy_yaml(
+    *,
+    action: str = "block",
+    engine: str = "",
+    kind: EventKind = EventKind.TOOL_CALL,
+) -> str:
     return f"""\
 version: 3
 engine:
@@ -63,7 +66,7 @@ rules:
   - id: prevent-secret-email
     action: {action}
     events:
-      call: {{kind: tool_call, domain: pending, phases: [post_llm, pre_tool]}}
+      call: {{kind: {kind.value}, domain: pending}}
     where:
       all:
         - tool: {{binding: call, name: send_email}}
@@ -81,8 +84,12 @@ rules:
 """
 
 
-def secret_analyzer(*, action: str = "block") -> MatchPolicyAnalyzer:
-    return analyzer_from_yaml(secret_policy_yaml(action=action))
+def secret_analyzer(
+    *,
+    action: str = "block",
+    kind: EventKind = EventKind.TOOL_CALL,
+) -> MatchPolicyAnalyzer:
+    return analyzer_from_yaml(secret_policy_yaml(action=action, kind=kind))
 
 
 def pii_policy_yaml(
@@ -97,7 +104,7 @@ def pii_policy_yaml(
         "cn_resident_id",
         "cn_mobile_phone",
     ),
-    phases: str = "[post_llm, pre_tool]",
+    kind: EventKind = EventKind.TOOL_CALL,
 ) -> str:
     return f"""\
 version: 3
@@ -107,7 +114,7 @@ rules:
   - id: prevent-pii-email
     action: {action}
     events:
-      call: {{kind: tool_call, domain: pending, phases: {phases}}}
+      call: {{kind: {kind.value}, domain: pending}}
     where:
       all:
         - compare:
@@ -140,8 +147,11 @@ def pii_analyzer(
         "cn_resident_id",
         "cn_mobile_phone",
     ),
+    kind: EventKind = EventKind.TOOL_CALL,
 ) -> MatchPolicyAnalyzer:
-    return analyzer_from_yaml(pii_policy_yaml(action=action, entities=entities))
+    return analyzer_from_yaml(
+        pii_policy_yaml(action=action, entities=entities, kind=kind)
+    )
 
 
 def tool_access_policy_yaml(
@@ -149,7 +159,7 @@ def tool_access_policy_yaml(
     mode: str = "denylist",
     tools: tuple[str, ...] = ("send_email",),
     action: str = "block",
-    phases: str = "[post_llm, pre_tool]",
+    kind: EventKind = EventKind.TOOL_CALL,
 ) -> str:
     operator = "in" if mode == "denylist" else "not_in"
     return f"""\
@@ -159,7 +169,7 @@ rules:
   - id: restrict-tools
     action: {action}
     events:
-      call: {{kind: tool_call, domain: pending, phases: {phases}}}
+      call: {{kind: {kind.value}, domain: pending}}
     where:
       compare:
         left: {{field: [call, payload, name]}}
@@ -177,9 +187,10 @@ def tool_access_analyzer(
     mode: str = "denylist",
     tools: tuple[str, ...] = ("send_email",),
     action: str = "block",
+    kind: EventKind = EventKind.TOOL_CALL,
 ) -> MatchPolicyAnalyzer:
     return analyzer_from_yaml(
-        tool_access_policy_yaml(mode=mode, tools=tools, action=action)
+        tool_access_policy_yaml(mode=mode, tools=tools, action=action, kind=kind)
     )
 
 
@@ -198,7 +209,7 @@ rules:
     events:
       source: {{kind: tool_call, domain: past}}
       result: {{kind: tool_result, domain: past}}
-      destination: {{kind: tool_call, domain: pending, phases: [pre_tool]}}
+      destination: {{kind: tool_call, domain: pending}}
     where:
       all:
         - compare:
@@ -216,7 +227,7 @@ rules:
         - relation:
             source: result
             target: destination
-            operator: derived_from_ancestor
+            operator: may_influence
     finding:
       code: tool_result_flow_denied
       message: The requested tool flow is not allowed by policy.
@@ -242,7 +253,6 @@ def tool_result_flow_analyzer(
 def security_destination_analyzer(
     *,
     destination: SecurityDestination,
-    phase: Phase,
     kind: EventKind,
 ) -> MatchPolicyAnalyzer:
     """Build a deterministic policy proving Adapter-owned destination injection."""
@@ -257,7 +267,7 @@ rules:
   - id: destination-boundary-test
     action: block
     events:
-      subject: {{kind: {kind.value}, domain: pending, phases: [{phase.value}]}}
+      subject: {{kind: {kind.value}, domain: pending}}
     where:
       compare:
         left: {{parameter: security_destination}}
@@ -297,9 +307,8 @@ def tool_context(
     *,
     body: JsonValue,
     tool_name: str = "send_email",
-    phase: Phase = Phase.PRE_TOOL,
     kind: EventKind = EventKind.TOOL_CALL,
-) -> GuardrailContext:
+) -> PendingTrace:
     trace = Trace(id="trace-1")
     call = ToolCall(
         call_id="call-1",
@@ -318,32 +327,7 @@ def tool_context(
         trace_id=trace.id,
         sequence=0,
         kind=kind,
-        phase=phase,
         timestamp=FIXED_TIME,
         payload=payload,
     )
-    return GuardrailContext(event=event, trace=trace)
-
-
-def model_response_context(
-    *,
-    body: JsonValue,
-    tool_name: str = "send_email",
-) -> GuardrailContext:
-    trace = Trace(id="trace-1")
-    call = ToolCall(
-        call_id="call-1",
-        name=tool_name,
-        arguments={"to": "outside@example.com", "body": body},
-    )
-    response = ModelResponse(tool_calls=(call,))
-    event = Event(
-        id="event-1",
-        trace_id=trace.id,
-        sequence=0,
-        kind=EventKind.MODEL_RESPONSE,
-        phase=Phase.POST_LLM,
-        timestamp=FIXED_TIME,
-        payload=response.model_dump(mode="json"),
-    )
-    return GuardrailContext(event=event, trace=trace)
+    return PendingTrace(trace=trace, events=(event,), primary_event_id=event.id)

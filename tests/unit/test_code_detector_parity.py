@@ -33,13 +33,13 @@ from agent_guardrail.detectors.yara_injection import (
     YaraRuleBinding,
     YaraSignatureMatch,
 )
-from agent_guardrail.models import AnalysisErrorCode, DetectionContext, Phase
+from agent_guardrail.models import AnalysisErrorCode, DetectionContext
 from tests.unit.test_matcher import field as match_field
 from tests.unit.test_matcher import message, plan, rule, trace
 
 
 def _context(*, event_id: str = "event-1") -> DetectionContext:
-    return DetectionContext(trace_id="trace-1", event_id=event_id, phase=Phase.PRE_TOOL)
+    return DetectionContext(trace_id="trace-1", event_id=event_id)
 
 
 @pytest.mark.asyncio
@@ -1124,12 +1124,10 @@ async def test_external_fingerprint_has_unambiguous_context_boundaries() -> None
     first_context = DetectionContext(
         trace_id="trace:a",
         event_id="event",
-        phase=Phase.PRE_TOOL,
     )
     second_context = DetectionContext(
         trace_id="trace",
         event_id="a:event",
-        phase=Phase.PRE_TOOL,
     )
     semgrep = SemgrepDetector(
         _SemgrepBackend(

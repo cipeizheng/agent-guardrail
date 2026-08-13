@@ -17,7 +17,12 @@ from agent_guardrail.adapters.mcp.adapter import (
     INVALID_REQUEST,
     PARSE_ERROR,
 )
-from agent_guardrail.enforcement import AuditSink, EnforcementSession, GuardrailUnavailable
+from agent_guardrail.enforcement import (
+    AuditSink,
+    EnforcementCheckpoint,
+    EnforcementSession,
+    GuardrailUnavailable,
+)
 from agent_guardrail.gateway.auth import GatewayAuthenticationError, GatewayAuthenticator
 from agent_guardrail.gateway.config import GatewaySettings
 from agent_guardrail.gateway.http import RequestReadError, read_json_body
@@ -30,7 +35,6 @@ from agent_guardrail.models import (
     Decision,
     EventKind,
     EventOrigin,
-    Phase,
     SecurityDestination,
     Trace,
 )
@@ -164,9 +168,8 @@ class MCPGateway:
         )
         tool_call = self.adapter.request_to_tool_call(request)
         try:
-            pre_decision = await session.evaluate(
+            pre_decision = await session.submit(
                 kind=EventKind.TOOL_CALL,
-                phase=Phase.PRE_TOOL,
                 payload=cast(dict[str, JsonValue], tool_call.model_dump(mode="json")),
                 metadata={"adapter": "mcp_gateway", "protocol_version": request.protocol_version},
                 origin=EventOrigin.CLIENT_ASSERTED,
@@ -175,9 +178,17 @@ class MCPGateway:
                 ),
             )
         except GuardrailUnavailable:
-            return self._guardrail_unavailable(request, trace_id, Phase.PRE_TOOL)
+            return self._guardrail_unavailable(
+                request,
+                trace_id,
+                EnforcementCheckpoint.BEFORE_TOOL_CALL,
+            )
         if pre_decision.blocked:
-            return self._guardrail_blocked(request, pre_decision)
+            return self._guardrail_blocked(
+                request,
+                pre_decision,
+                EnforcementCheckpoint.BEFORE_TOOL_CALL,
+            )
 
         try:
             upstream = await self._forward(request, http_request, client_authorization)
@@ -193,9 +204,8 @@ class MCPGateway:
             return self._rpc_error(exc, trace_id=trace_id)
 
         try:
-            post_decision = await session.evaluate(
+            post_decision = await session.submit(
                 kind=EventKind.TOOL_RESULT,
-                phase=Phase.POST_TOOL,
                 payload=cast(dict[str, JsonValue], result.model_dump(mode="json")),
                 metadata={"adapter": "mcp_gateway", "protocol_version": request.protocol_version},
                 source_event_ids=(pre_decision.event_id,),
@@ -205,9 +215,17 @@ class MCPGateway:
                 ),
             )
         except GuardrailUnavailable:
-            return self._guardrail_unavailable(request, trace_id, Phase.POST_TOOL)
+            return self._guardrail_unavailable(
+                request,
+                trace_id,
+                EnforcementCheckpoint.BEFORE_TOOL_OUTPUT_RELEASE,
+            )
         if post_decision.blocked:
-            return self._guardrail_blocked(request, post_decision)
+            return self._guardrail_blocked(
+                request,
+                post_decision,
+                EnforcementCheckpoint.BEFORE_TOOL_OUTPUT_RELEASE,
+            )
 
         return Response(
             content=upstream.body,
@@ -234,6 +252,7 @@ class MCPGateway:
         self,
         request: ParsedMCPRequest,
         decision: Decision,
+        checkpoint: EnforcementCheckpoint,
     ) -> JSONResponse:
         error = MCPAdapterError(
             code="guardrail_blocked",
@@ -244,7 +263,7 @@ class MCPGateway:
             data={
                 "type": "guardrail_violation",
                 "trace_id": decision.trace_id,
-                "phase": decision.phase.value,
+                "checkpoint": checkpoint.value,
                 "violations": cast(
                     JsonValue,
                     [
@@ -260,7 +279,7 @@ class MCPGateway:
         self,
         request: ParsedMCPRequest,
         trace_id: str,
-        phase: Phase,
+        checkpoint: EnforcementCheckpoint,
     ) -> JSONResponse:
         return self._rpc_error(
             MCPAdapterError(
@@ -269,7 +288,7 @@ class MCPGateway:
                 rpc_code=GUARDRAIL_UNAVAILABLE,
                 status_code=503,
                 request_id=request.envelope.id,
-                data={"trace_id": trace_id, "phase": phase.value},
+                data={"trace_id": trace_id, "checkpoint": checkpoint.value},
             ),
             trace_id=trace_id,
         )

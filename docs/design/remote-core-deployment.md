@@ -10,13 +10,13 @@
 | Core | Policy、MatchPlan、Detector profile、模型、规则、Decision | Provider Key、Gateway Client Key、Agent 副作用、Audit payload |
 | Gateway | Provider/MCP 配置与 Key、请求级 Trace、Enforcement、脱敏 Audit | Policy 文件、Detector 模型、规则文件 |
 
-Inline SDK 继续把 `GuardrailRuntime` 直接注入 `EnforcementSession`。远程 Gateway 注入
+编程式 SDK 和 Inline Wrapper 继续把 `GuardrailRuntime` 直接注入 `EnforcementSession`。远程 Gateway 注入
 `RemoteGuardrailRuntime`；两者实现同一 `PolicyAnalyzer.analyze_pending` 边界。
 
-## 2. Core HTTP v1
+## 2. Core HTTP
 
-- `POST /v1/analyze`：Bearer 服务认证；请求 `protocol_version=1` 与一个 `PendingTrace`，响应
-  `protocol_version=1` 与一个 `Decision`。
+- `POST /v1/analyze`：Bearer 服务认证；请求 `protocol_version=2` 与一个 phase-free `PendingTrace`，响应
+  `protocol_version=2` 与一个 phase-free `Decision`。
 - `GET /v1/policies/current`：Bearer 服务认证；返回协议版本、Policy version 和 content hash。
 - `GET /health/live`：只证明进程存活。
 - `GET /health/ready`：只有固定 Policy、Registry 和可选模型完成加载且 Runtime ready 时返回 200。
@@ -27,8 +27,8 @@ Detector 输出或下游异常。
 ## 3. 失败与一致性
 
 Gateway 启动时必须读取 Core readiness 和 Policy identity。运行中任何网络错误、非 200、超限响应、非法 JSON、
-非法 Schema 或 Decision identity 不匹配都转换为 `GuardrailUnavailable`。pre 失败时上游调用数为 0；post 失败
-时不释放已经取得的原始上游结果。
+非法 Schema 或 Decision identity 不匹配都转换为 `GuardrailUnavailable`。调用前失败时上游调用数为 0；
+输出释放前失败时不释放已经取得的原始上游结果。
 
 Core 首版不保存 Trace。Gateway 每次发送 `past_events + pending_events` 的完整有界快照，并在 allow 后本地
 提交；block 只提交脱敏 Decision Event。同一 Session 的首次 Decision 固定 Policy identity，后续变化失败。

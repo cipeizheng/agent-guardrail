@@ -32,7 +32,7 @@ Presidio/Transformers detector。
 
 | ID | 能力 | 本项目合同 |
 | --- | --- | --- |
-| I01 | typed selection | Event binding 与 phase/origin filter |
+| I01 | typed selection | Event binding 与 origin/domain filter |
 | I02 | multi Event | 命名笛卡尔积与组合预算 |
 | I03 | nested Tool | 安全字段路径与 collection |
 | I04 | derive | 有界 `split_lines` |

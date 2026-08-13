@@ -345,7 +345,6 @@ def _match_fingerprint(
             rule_id,
             context.trace_id,
             context.event_id,
-            context.phase.value,
             detection_type,
             start,
             end,

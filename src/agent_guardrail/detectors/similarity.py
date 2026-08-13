@@ -249,7 +249,6 @@ def _similarity_fingerprint(
             "agent-guardrail.similarity",
             context.trace_id,
             context.event_id,
-            context.phase.value,
             version,
             data_index,
             target_index,

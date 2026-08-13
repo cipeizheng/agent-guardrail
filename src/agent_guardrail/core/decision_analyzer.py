@@ -79,7 +79,6 @@ class MatchPolicyAnalyzer:
             trace_id=pending.trace.id,
             event_id=pending.primary_event_id,
             pending_event_ids=pending.event_ids,
-            phase=pending.primary_event.phase,
             policy_version=self.policy.version,
             policy_hash=self.policy.content_hash,
             violations=retained,
@@ -107,7 +106,6 @@ class MatchPolicyAnalyzer:
         return Violation(
             rule_id=finding.rule_id,
             code=finding.code,
-            phase=pending.primary_event.phase,
             message=finding.message,
             action=self._actions[finding.rule_id],
             event_ids=pending_subjects,
@@ -136,7 +134,6 @@ class MatchPolicyAnalyzer:
         return Violation(
             rule_id=error.rule_id or "policy_analysis",
             code=error.code.value,
-            phase=pending.primary_event.phase,
             message=error.message,
             action=action,
             event_ids=event_ids,

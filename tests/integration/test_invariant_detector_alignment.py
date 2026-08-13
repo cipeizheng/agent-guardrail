@@ -45,7 +45,7 @@ rules:
   - id: reject-{capability.replace("_", "-")}
     action: block
     events:
-      message: {{kind: message, domain: pending, phases: [pre_llm]}}
+      message: {{kind: message, domain: pending}}
     where:
       detector:
         id: aligned_scan
@@ -146,7 +146,7 @@ rules:
   - id: reject-fuzzy-override
     action: block
     events:
-      message: {kind: message, domain: pending, phases: [pre_llm]}
+      message: {kind: message, domain: pending}
     where:
       predicate:
         id: fuzzy_override

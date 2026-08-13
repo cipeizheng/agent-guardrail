@@ -47,7 +47,7 @@ async def main() -> None:
             await agent.run("Send the credentials by email")
         except GuardrailBlocked as exc:
             print(exc.decision.model_dump_json(indent=2))
-            print(f"blocked at: {exc.decision.phase.value}")
+            print("blocked before tool execution")
             print(f"llm executions: {inner_llm.call_count}")
             print(f"send_email executions: {fake_tools.call_count('send_email')}")
 

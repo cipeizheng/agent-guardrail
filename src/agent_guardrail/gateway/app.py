@@ -11,7 +11,6 @@ from uuid import uuid4
 import httpx
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
-from pydantic import ValidationError
 from starlette.requests import Request
 from starlette.responses import Response
 
@@ -19,6 +18,7 @@ from agent_guardrail.adapters.openai import OpenAIAdapter, OpenAIAdapterError
 from agent_guardrail.config import create_deployment_detector_registry
 from agent_guardrail.enforcement import (
     AuditSink,
+    EnforcementCheckpoint,
     EnforcementSession,
     GuardrailUnavailable,
     InputNormalizationError,
@@ -32,14 +32,7 @@ from agent_guardrail.gateway.http import RequestReadError, read_json_body
 from agent_guardrail.gateway.mcp import MCPGateway
 from agent_guardrail.gateway.mcp_upstream import MCPUpstream
 from agent_guardrail.gateway.upstream import OpenAIUpstream, UpstreamError
-from agent_guardrail.models import (
-    CandidateRelation,
-    Decision,
-    GuardrailContext,
-    Phase,
-    SecurityDestination,
-    Trace,
-)
+from agent_guardrail.models import Decision, SecurityDestination, Trace
 from agent_guardrail.runtime import GuardrailRuntime, RuntimeNotReadyError
 from agent_guardrail.runtime.remote import RemoteGuardrailRuntime
 
@@ -133,7 +126,7 @@ def create_app(
         settings=settings,
         runtime=active_runtime,
         adapter=OpenAIAdapter(),
-        normalizer=InputNormalizer(max_candidates=settings.max_trace_events - 1),
+        normalizer=InputNormalizer(max_candidates=settings.max_trace_events),
         upstream=openai_upstream,
         mcp=mcp_gateway,
         audit=active_audit,
@@ -189,45 +182,6 @@ def create_app(
             {"version": info.version, "content_hash": info.content_hash},
         )
 
-    @app.post("/v1/evaluate")
-    async def evaluate(request: Request) -> JSONResponse:
-        authentication_error = _authenticate(services, request)
-        if authentication_error is not None:
-            return authentication_error
-        if not settings.evaluate_endpoint_enabled:
-            return _error_response(
-                404,
-                error_type="not_found",
-                code="evaluate_disabled",
-                message="Direct evaluation is disabled.",
-            )
-        try:
-            payload = await read_json_body(request, settings.max_request_bytes)
-            context = GuardrailContext.model_validate(payload)
-            decision = await services.runtime.evaluate(context)
-        except RequestReadError as exc:
-            return _error_response(
-                exc.status_code,
-                error_type="invalid_request_error",
-                code=exc.code,
-                message=str(exc),
-            )
-        except ValidationError:
-            return _error_response(
-                422,
-                error_type="invalid_request_error",
-                code="invalid_guardrail_context",
-                message="The canonical guardrail context is malformed.",
-            )
-        except Exception:
-            return _error_response(
-                503,
-                error_type="guardrail_unavailable",
-                code="evaluation_failed",
-                message="Guardrail evaluation is unavailable.",
-            )
-        return JSONResponse(decision.model_dump(mode="json"))
-
     @app.post("/v1/openai/chat/completions")
     async def chat_completions(request: Request) -> JSONResponse:
         client_authorization_or_error = _authenticate_with_value(services, request)
@@ -251,9 +205,7 @@ def create_app(
                 )
             provider_request = services.adapter.parse_request(raw_request)
             canonical_request = services.adapter.request_to_canonical(provider_request)
-            normalized_request = services.normalizer.normalize_request_snapshot(
-                canonical_request
-            )
+            normalized_request = services.normalizer.normalize_model_call(canonical_request)
         except RequestReadError as exc:
             return _error_response(
                 exc.status_code,
@@ -277,7 +229,7 @@ def create_app(
                 code=exc.code,
                 message=str(exc),
                 trace_id=trace_id,
-                phase=Phase.PRE_LLM.value,
+                checkpoint=EnforcementCheckpoint.BEFORE_MODEL_CALL.value,
             )
 
         session = EnforcementSession(
@@ -286,7 +238,7 @@ def create_app(
             audit=services.audit,
         )
         try:
-            pre_decision = await session.evaluate_candidates(
+            pre_decision = await session.submit_candidates(
                 normalized_request.candidates,
                 primary_key=normalized_request.primary_key,
                 security_context=session.security_context.with_enforcement_destination(
@@ -294,9 +246,15 @@ def create_app(
                 ),
             )
         except GuardrailUnavailable:
-            return _unavailable_response(trace_id, Phase.PRE_LLM)
+            return _unavailable_response(
+                trace_id,
+                EnforcementCheckpoint.BEFORE_MODEL_CALL,
+            )
         if pre_decision.blocked:
-            return _blocked_response(pre_decision)
+            return _blocked_response(
+                pre_decision,
+                EnforcementCheckpoint.BEFORE_MODEL_CALL,
+            )
 
         try:
             raw_response = await services.upstream.complete(
@@ -308,8 +266,9 @@ def create_app(
                 provider_response,
                 request=provider_request,
             )
-            normalized_response = services.normalizer.normalize_response(
-                canonical_response
+            normalized_response = services.normalizer.normalize_model_output(
+                canonical_response,
+                model_call_event_id=pre_decision.event_id,
             )
         except UpstreamError as exc:
             return _error_response(
@@ -334,7 +293,7 @@ def create_app(
                 code=exc.code,
                 message=str(exc),
                 trace_id=trace_id,
-                phase=Phase.POST_LLM.value,
+                checkpoint=EnforcementCheckpoint.BEFORE_MODEL_OUTPUT_RELEASE.value,
             )
         except Exception:
             return _error_response(
@@ -346,27 +305,23 @@ def create_app(
             )
 
         try:
-            post_decision = await session.evaluate_candidates(
-                tuple(
-                    candidate.model_copy(
-                        update={
-                            "relations": (
-                                *candidate.relations,
-                                CandidateRelation(source_event_id=pre_decision.event_id),
-                            )
-                        }
-                    )
-                    for candidate in normalized_response.candidates
-                ),
+            post_decision = await session.submit_candidates(
+                normalized_response.candidates,
                 primary_key=normalized_response.primary_key,
                 security_context=session.security_context.with_enforcement_destination(
                     SecurityDestination.CLIENT
                 ),
             )
         except GuardrailUnavailable:
-            return _unavailable_response(trace_id, Phase.POST_LLM)
+            return _unavailable_response(
+                trace_id,
+                EnforcementCheckpoint.BEFORE_MODEL_OUTPUT_RELEASE,
+            )
         if post_decision.blocked:
-            return _blocked_response(post_decision)
+            return _blocked_response(
+                post_decision,
+                EnforcementCheckpoint.BEFORE_MODEL_OUTPUT_RELEASE,
+            )
 
         return JSONResponse(
             services.adapter.response_payload(provider_response),
@@ -401,7 +356,10 @@ def _authenticate_with_value(
         )
 
 
-def _blocked_response(decision: Decision) -> JSONResponse:
+def _blocked_response(
+    decision: Decision,
+    checkpoint: EnforcementCheckpoint,
+) -> JSONResponse:
     violations = [
         {
             "rule_id": violation.rule_id,
@@ -416,19 +374,22 @@ def _blocked_response(decision: Decision) -> JSONResponse:
         code="guardrail_blocked",
         message="Request blocked by guardrail policy.",
         trace_id=decision.trace_id,
-        phase=decision.phase.value,
+        checkpoint=checkpoint.value,
         violations=violations,
     )
 
 
-def _unavailable_response(trace_id: str, phase: Phase) -> JSONResponse:
+def _unavailable_response(
+    trace_id: str,
+    checkpoint: EnforcementCheckpoint,
+) -> JSONResponse:
     return _error_response(
         503,
         error_type="guardrail_unavailable",
         code="evaluation_failed",
         message="Guardrail evaluation is unavailable.",
         trace_id=trace_id,
-        phase=phase.value,
+        checkpoint=checkpoint.value,
     )
 
 
@@ -439,15 +400,15 @@ def _error_response(
     code: str,
     message: str,
     trace_id: str | None = None,
-    phase: str | None = None,
+    checkpoint: str | None = None,
     violations: list[dict[str, str]] | None = None,
     headers: dict[str, str] | None = None,
 ) -> JSONResponse:
     error: dict[str, Any] = {"type": error_type, "code": code, "message": message}
     if trace_id is not None:
         error["trace_id"] = trace_id
-    if phase is not None:
-        error["phase"] = phase
+    if checkpoint is not None:
+        error["checkpoint"] = checkpoint
     if violations is not None:
         error["violations"] = violations
     response_headers = dict(headers or {})

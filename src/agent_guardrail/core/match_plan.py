@@ -21,7 +21,7 @@ from pydantic import (
     model_validator,
 )
 
-from agent_guardrail.models import AnalysisScope, EventKind, EventOrigin, Phase
+from agent_guardrail.models import AnalysisScope, EventKind, EventOrigin
 
 MATCH_PLAN_VERSION = 1
 
@@ -43,14 +43,15 @@ MAX_PATH_SEGMENT_LENGTH = 64
 _IDENTIFIER_PATTERN = r"^[A-Za-z][A-Za-z0-9_.:-]{0,127}$"
 _CAPABILITY_PATTERN = r"^[a-z][a-z0-9_]{0,127}$"
 _INDEPENDENT_EVENT_KINDS = frozenset(
-    {EventKind.MESSAGE, EventKind.TOOL_CALL, EventKind.TOOL_RESULT}
+    {
+        EventKind.MESSAGE,
+        EventKind.MODEL_CALL,
+        EventKind.TOOL_CALL_PROPOSAL,
+        EventKind.TOOL_CALL,
+        EventKind.TOOL_RESULT,
+    }
 )
-_EVENT_ENVELOPE_FIELDS = frozenset({"id", "sequence", "kind", "phase", "origin", "payload"})
-_KIND_PHASES: dict[EventKind, frozenset[Phase]] = {
-    EventKind.MESSAGE: frozenset({Phase.PRE_LLM, Phase.POST_LLM}),
-    EventKind.TOOL_CALL: frozenset({Phase.PRE_LLM, Phase.POST_LLM, Phase.PRE_TOOL}),
-    EventKind.TOOL_RESULT: frozenset({Phase.PRE_LLM, Phase.POST_TOOL}),
-}
+_EVENT_ENVELOPE_FIELDS = frozenset({"id", "sequence", "kind", "origin", "payload"})
 
 type ScalarLiteral = StrictStr | StrictInt | StrictFloat | StrictBool
 
@@ -235,19 +236,14 @@ class EventBinding(MatchPlanModel):
     name: StrictStr = Field(pattern=_IDENTIFIER_PATTERN)
     kind: EventKind
     domain: BindingDomain = BindingDomain.VISIBLE
-    phases: tuple[Phase, ...] = Field(default=(), max_length=4)
     origins: tuple[EventOrigin, ...] = Field(default=(), max_length=3)
 
     @model_validator(mode="after")
     def validate_event_domain(self) -> Self:
         if self.kind not in _INDEPENDENT_EVENT_KINDS:
             raise ValueError("MatchPlan Event bindings require an independent Event kind")
-        if len(self.phases) != len(set(self.phases)):
-            raise ValueError("MatchPlan Event binding phases must be unique")
         if len(self.origins) != len(set(self.origins)):
             raise ValueError("MatchPlan Event binding origins must be unique")
-        if any(phase not in _KIND_PHASES[self.kind] for phase in self.phases):
-            raise ValueError("MatchPlan Event binding phase is incompatible with its kind")
         return self
 
 

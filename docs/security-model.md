@@ -27,7 +27,7 @@ Audit 数据的机密性与可追责性、分析服务的可用性和所有受�
 - 部署所有者及其只读 Policy、启动配置和 capability 注册清单；
 - 本项目 Runtime、EnforcementSession、InputNormalizer 和协议 Adapter 的实现；
 - 双容器部署中的 Core 实现、只读 Policy/模型资产以及 Gateway→Core 专用服务凭据；
-- 由可信 Enforcement Point 实际建立的 phase、Event origin 和类型化 Relation；
+- 由可信 Enforcement Point 实际建立的执行 checkpoint、Event origin 和类型化 Relation；
 - 只接收已经脱敏结构的 AuditSink。
 
 默认不信任其安全断言：
@@ -59,12 +59,12 @@ Source(principal, trust, sensitivity, owner)
 主要运行路径：
 
 ```text
-用户/私有数据 ── pre_llm ──> 模型提供商 ── post_llm ──> Agent/用户
+用户/私有数据 ── before_model_call ──> 模型提供商 ── before_model_output_release ──> Agent/用户
 外部内容/ToolResult ───────────────┘             │
                                                   ▼
                                                 Agent
                                                   │
-                                               pre_tool
+                                           before_tool_call
                                                   ▼
                                       外部或高权限 Tool/资源
 ```
@@ -123,13 +123,16 @@ security_destination
 security_authorization
 ```
 
-普通 attributes/metadata 和 `/v1/evaluate` 客户端不能进入这个通道。OpenAI、MCP 和 Inline Enforcement
-当前会按 pre/post 边界建立 destination；其他事实只有可信嵌入式宿主明确提供时才非 unknown。authority
+普通 attributes/metadata 和 SDK Event payload 不能进入这个通道。OpenAI、MCP 和 Inline Enforcement
+当前会按执行 checkpoint 建立 destination；其他事实只有可信嵌入式宿主明确提供时才非 unknown。authority
 是信任边界内的类型化声明，不是加密凭证。非 unknown authorization 必须同时绑定已知 destination；
 Enforcement 切换 sink 时会清空旧 authorization，避免跨目的地复用授权。
 
 后续仍需要 Event 级 owner/sensitivity、真实主体与目的地 Registry、认证映射、跨请求租户状态和
 `tool_effect` descriptor。它们也不能由外部 YAML 获得 I/O 或动态代码权限。
+
+单用户 Agent 不需要构造 principal/tenant 划分：保持 `owner_scope=unknown`，并且不要在 Policy 中声明对应
+参数即可。owner/tenant/authorization 是可选的高阶部署语境，不是 SDK 或单用户运行的前置条件。
 
 `derived_from` 只用于可信 Adapter 掌握的精确来源；保守的控制影响使用 `may_influence`。两者都不能由
 Detector 或 Policy 写回 Trace。内容级外泄判断仍需敏感数据 Detector，不能只凭先后关系证明相同数据被
@@ -139,11 +142,14 @@ Detector 或 Policy 写回 Trace。内容级外泄判断仍需敏感数据 Detec
 
 | Point | 主要保护 | 当前保证 |
 | --- | --- | --- |
-| `pre_llm` | 数据不进入未经授权的模型目的地；恶意输入不进入模型 | Decision 完成前不请求上游 |
-| `post_llm` | 原始模型内容/ToolCall 不释放给 Agent 或用户 | 非流式响应完整通过后才释放 |
-| `pre_tool` | 外发和资源副作用 | block 时实际 Tool 调用次数为零 |
-| `post_tool` | ToolResult 不进入后续 Agent/模型/用户 | 不能撤销已经执行的 Tool 副作用 |
+| `before_model_call` | 数据不进入未经授权的模型目的地；恶意输入不进入模型 | Decision 完成前不请求上游 |
+| `before_model_output_release` | 原始模型内容/ToolCallProposal 不释放给 Agent 或用户 | 非流式响应完整通过后才释放 |
+| `before_tool_call` | 外发和资源副作用 | block 时实际 Tool 调用次数为零 |
+| `before_tool_output_release` | ToolResult 不进入后续 Agent/模型/用户 | 不能撤销已经执行的 Tool 副作用 |
 | Audit | 原始 Secret/PII 不进入诊断面 | 只接受脱敏 Decision；可信 producer 仍负责遮罩 |
+
+这些 checkpoint 是 OpenAI/MCP Gateway 的执行概念，不是 Event/Inline Wrapper 字段，也不能写入 YAML
+选择条件。
 
 LLM Gateway 只能中介经过它的模型请求和响应；MCP Gateway 只能中介经过固定 MCP Server 的
 `tools/call`。Agent 直接调用本地 Shell、函数或 HTTP 是 T10，需要 Framework Hook、Sandbox 或网络代理。
@@ -152,21 +158,53 @@ LLM Gateway 只能中介经过它的模型请求和响应；MCP Gateway 只能�
 
 | ID | 威胁路径 | Point | 当前覆盖 |
 | --- | --- | --- | --- |
-| T01 | 敏感数据 → 未授权模型提供商 | `pre_llm` | 部分：Detector、严格 pre、destination context 已有；owner/auth Policy 未实现 |
-| T02 | 敏感数据 → 外部 Tool | `pre_tool` | 部分：Detector、external_tool context、邮件与来源路径示例已实现 |
-| T03 | 不可信 ToolResult 注入 → 后续模型请求 | `pre_llm` | 部分：Detector/关系/context 可组合；Adapter 尚未自动分类 trust |
-| T04 | 不可信影响 → 未授权高权限 Tool | `pre_tool` | 部分：静态 Tool Rule/context 已有；risk/独立授权 Policy 未实现 |
-| T05 | 敏感模型输出 → 错误用户 | `post_llm` | 部分：严格 post/client destination 已有；owner-aware Policy 未实现 |
+| T01 | 敏感数据 → 未授权模型提供商 | `before_model_call` | 部分：Detector、调用前检查、destination context 已有；owner/auth Policy 未实现 |
+| T02 | 敏感数据 → 外部 Tool | `before_tool_call` | 部分：Detector、external_tool context、邮件与来源路径示例已实现 |
+| T03 | 不可信 ToolResult 注入 → 后续模型请求 | `before_model_call` | 部分：Detector/关系/context 可组合；Adapter 尚未自动分类 trust |
+| T04 | 不可信影响 → 未授权高权限 Tool | `before_tool_call` | 部分：静态 Tool Rule/context 已有；risk/独立授权 Policy 未实现 |
+| T05 | 敏感模型输出 → 错误用户 | `before_model_output_release` | 部分：输出释放前检查/client destination 已有；owner-aware Policy 未实现 |
 | T06 | 原始敏感数据 → Finding/Error/Audit | Audit | 已支持结构、遮罩和测试；受信任 producer 仍是边界 |
-| T07 | Unicode 控制/格式字符绕过 Detector | `pre_llm` | 部分：Unicode fact、type 选择和严格 pre 已有；来源 trust/意图语境 Policy 未完整交付 |
+| T07 | Unicode 控制/格式字符绕过 Detector | `before_model_call` | 部分：Unicode fact、type 选择和调用前检查已有；来源 trust/意图语境 Policy 未完整交付 |
 | T08 | 预算/timeout/异常 → 隐式 allow | Analyzer | 已支持显式失败映射与 fail-closed 配置 |
-| T09 | 一个租户的数据 → 另一个租户 | `post_llm` | 部分 Schema：owner_scope 已有；主体 Registry/跨请求可信状态未实现 |
+| T09 | 一个租户的数据 → 另一个租户 | `before_model_output_release` | 部分 Schema：owner_scope 已有；主体 Registry/跨请求可信状态未实现 |
 | T10 | Agent 绕过 Wrapper/Gateway 直接副作用 | 无 | 明确边界外，需要 Hook/Sandbox/代理 |
 
 T01–T10 是本文中的威胁分类，不是第二套 Policy 解释器。生产覆盖由 Matcher/capability 单元测试以及
 Inline、OpenAI、MCP 的实际副作用集成测试证明；“部分”或“边界外”不能因文档场景而写成已交付。
 
-## 8. Detector 与交付状态
+## 8. Guardrail 无法替代的 Sandbox 控制
+
+Guardrail 的强制保证始于一个调用进入 `EnforcementSession`。它可以拒绝已经观察到的 LLM/Tool Event，
+但不能证明不可信 Agent 没有从另一个未中介路径产生副作用。增加命令模式、代码或 URL Detector 只能改善
+已观察输入的判断，不能把可绕过的 Hook 变成完整中介。
+
+以下威胁不由本项目当前 Runtime/Gateway 解决，部署 Agent 具备 Shell、代码执行或本地函数能力时必须由
+Sandbox、网络与主机安全层处理：
+
+| 边界外威胁 | Guardrail 无法解决的原因 | 所需强制控制 |
+| --- | --- | --- |
+| 直接网络外发 | `curl`、Python/Node socket、DNS 或自带二进制可跳过 Wrapper/Gateway | Sandbox default-deny egress；只允许 Guardrail Gateway/受控 Broker；同时限制 DNS、IPv4/IPv6、loopback 和云 metadata |
+| 直接文件、进程和本地 IPC 副作用 | 原生 syscall、子进程、Unix socket 和未包装函数不会形成可信 Tool Event | 只读或临时文件系统、最小挂载、PID/IPC namespace、syscall/capability 限制；真实副作用移到外部 Broker |
+| 宿主或控制面访问 | Docker socket、host network/PID、设备、Kubernetes API 等可绕开应用层 Policy | 不使用 privileged/host namespace，不挂载控制面 socket，最小 service account 与设备访问 |
+| 凭据窃取与直接使用 | Agent 能读取环境变量、文件或 metadata 中的 Key 时，可直接访问上游 | Sandbox 内不放 Provider/Tool 凭据；凭据只由外部 Gateway/Broker 持有并绑定用户授权 |
+| 持久化和跨任务污染 | 后台进程、共享可写目录或复用工作区可在本次 Decision 之后继续生效 | 每任务短生命周期 Sandbox、临时文件系统、禁止后台守护进程、显式且最小的持久卷 |
+| 资源耗尽 | Policy 无法撤销已经开始的 fork bomb、内存/磁盘填满或长时间计算 | CPU、内存、PID、磁盘、文件描述符和 wall-clock 配额，超限强制终止整个 Sandbox |
+| Sandbox 逃逸或内核/运行时漏洞 | 内容 Detector 不是 syscall、内核或虚拟化安全边界 | 独立 VM/强化容器运行时、seccomp/LSM、无 capabilities、及时修补；高风险场景使用更强隔离 |
+
+推荐把不可信 Agent 放在 Sandbox 内，把 Guardrail Gateway、Policy/Core、真实 Tool Broker 和凭据放在
+Sandbox 外。Sandbox 只允许访问 Gateway/Broker；可选的内部 Wrapper/探针只用于增加 Event 可见性，不能
+作为最终授权者。仅将代码/Shell Executor 沙箱化时，Agent 与 Guardrail 可在外部，但该 Executor 仍不得
+持有生产凭据或任意公网 egress。
+
+Sandbox 同样不能替代 Guardrail。它通常不知道数据属于谁、某个收件人是否获授权、ToolResult 是否包含
+Prompt Injection、PII 是否可以发给当前模型提供商，或 Audit 是否已经脱敏。因此 T01–T09 的数据流、意图、
+业务授权和内容判断继续由 Guardrail、身份系统和参数化 Tool Broker 共同处理。
+
+当前仓库不交付 Agent Sandbox，也不验证任何 Sandbox 产品或集群网络策略。`docker compose` 中 Core/Gateway
+的只读文件系统、non-root 和私网是服务加固，不是 Agent 的隔离证明。部署清单见
+[运行指南](guides/operations.md#3-agent-sandbox-与不可绕过部署边界)。
+
+## 9. Detector 与交付状态
 
 Detector 按 T01–T10 威胁覆盖排序，而不是按函数名数量排序。命中仍须与可信 source/sink/trust 语境
 组合，不能单独宣称解决了威胁路径。

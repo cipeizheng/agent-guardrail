@@ -21,12 +21,10 @@ from agent_guardrail.models import (
     EventRelation,
     FlowAuthorization,
     FlowSecurityContext,
-    GuardrailContext,
     Message,
     MessageRole,
     OwnerScope,
     PendingTrace,
-    Phase,
     RelationKind,
     SecurityDestination,
     SecurityFactAuthorities,
@@ -43,7 +41,6 @@ def event(*, sequence: int, trace_id: str = "trace-1") -> Event:
         trace_id=trace_id,
         sequence=sequence,
         kind=EventKind.TOOL_CALL,
-        phase=Phase.PRE_TOOL,
         timestamp=datetime(2026, 8, 4, tzinfo=UTC),
         payload={"call_id": f"call-{sequence}", "name": "safe", "arguments": {}},
     )
@@ -145,19 +142,6 @@ def test_trace_rejects_guardrail_decision_as_a_source() -> None:
         Trace(id="trace-1", events=(decision, derived))
 
 
-def test_context_rejects_source_that_does_not_precede_current_event() -> None:
-    source = event(sequence=0)
-    current = event(sequence=0).model_copy(
-        update={
-            "id": "event-current",
-            "relations": (EventRelation(source_event_id=source.id),),
-        }
-    )
-
-    with pytest.raises(ValidationError, match="precede"):
-        GuardrailContext(event=current, trace=Trace(id="trace-1", events=(source,)))
-
-
 def test_trace_rejects_wrong_sequence_and_bounds() -> None:
     trace = Trace(id="trace-1", max_events=1)
 
@@ -186,7 +170,6 @@ def test_tool_event_rejects_malformed_canonical_payload() -> None:
             trace_id="trace-1",
             sequence=0,
             kind=EventKind.TOOL_CALL,
-            phase=Phase.PRE_TOOL,
             timestamp=datetime(2026, 8, 4, tzinfo=UTC),
             payload={"name": "send_email", "arguments": {}},
         )
@@ -202,7 +185,6 @@ def test_message_event_uses_closed_text_content_schema() -> None:
         trace_id="trace-1",
         sequence=0,
         kind=EventKind.MESSAGE,
-        phase=Phase.PRE_LLM,
         timestamp=datetime(2026, 8, 4, tzinfo=UTC),
         payload=message.model_dump(mode="json"),
     )
@@ -243,7 +225,6 @@ def test_canonical_graph_limits_are_hard_bounded() -> None:
         CandidateEvent(
             key="target",
             kind=EventKind.MESSAGE,
-            phase=Phase.PRE_LLM,
             payload=Message(
                 role=MessageRole.USER,
                 content=TextContent(text="hello"),
@@ -256,7 +237,6 @@ def test_decision_requires_aggregated_action() -> None:
     violation = Violation(
         rule_id="rule-1",
         code="matched",
-        phase=Phase.PRE_TOOL,
         message="matched",
         action=Action.BLOCK,
         event_ids=("event-1",),
@@ -268,7 +248,6 @@ def test_decision_requires_aggregated_action() -> None:
             trace_id="trace-1",
             event_id="event-1",
             pending_event_ids=("event-1",),
-            phase=Phase.PRE_TOOL,
             policy_version=1,
             policy_hash="12345678",
             violations=(violation,),
@@ -296,16 +275,7 @@ def test_pending_trace_preserves_whole_pending_batch_identity() -> None:
     assert combined.sources_of(second) == (first,)
 
 
-def test_pending_trace_rejects_mixed_phase_and_sequence_gap() -> None:
-    first = event(sequence=0)
-    wrong_phase = event(sequence=1).model_copy(update={"phase": Phase.POST_LLM})
-    with pytest.raises(ValidationError, match="same enforcement phase"):
-        PendingTrace(
-            trace=Trace(id="trace-1"),
-            events=(first, wrong_phase),
-            primary_event_id=wrong_phase.id,
-        )
-
+def test_pending_trace_rejects_sequence_gap() -> None:
     with pytest.raises(ValidationError, match="continue the committed trace"):
         PendingTrace(
             trace=Trace(id="trace-1"),
@@ -323,7 +293,6 @@ def test_candidate_relation_requires_one_explicit_source() -> None:
     candidate = CandidateEvent(
         key="candidate-1",
         kind=EventKind.TOOL_CALL,
-        phase=Phase.PRE_TOOL,
         payload={"call_id": "call-1", "name": "safe", "arguments": {}},
     )
     assert candidate.origin is EventOrigin.CLIENT_ASSERTED
@@ -420,15 +389,13 @@ def test_flow_security_context_rejects_untrusted_fact_sources(
         FlowSecurityContext.model_validate(context)
 
 
-def test_direct_context_cannot_submit_a_security_context() -> None:
-    current = event(sequence=0)
-    payload = GuardrailContext(event=current, trace=Trace(id="trace-1")).model_dump(
-        mode="json"
-    )
-    payload["security_context"] = {
-        "authorization": "allowed",
-        "authorities": {"authorization": "authorization_service"},
-    }
+def test_candidate_event_cannot_submit_a_security_context() -> None:
+    payload = CandidateEvent(
+        key="event",
+        kind=EventKind.TOOL_CALL,
+        payload={"call_id": "call-1", "name": "safe", "arguments": {}},
+    ).model_dump(mode="json")
+    payload["security_context"] = {"authorization": "allowed"}
 
     with pytest.raises(ValidationError, match="Extra inputs"):
-        GuardrailContext.model_validate(payload)
+        CandidateEvent.model_validate(payload)

@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from agent_guardrail.detectors.secrets import SecretDetector
-from agent_guardrail.models import DetectionContext, Phase
+from agent_guardrail.models import DetectionContext
 
 # Synthetic, inert shapes are assembled so repository scanners never mistake
 # detector fixtures for deployable credentials.
@@ -20,7 +20,6 @@ def _context(*, event_id: str = "event-1") -> DetectionContext:
     return DetectionContext(
         trace_id="trace-1",
         event_id=event_id,
-        phase=Phase.PRE_TOOL,
     )
 
 
@@ -158,11 +157,11 @@ async def test_occurrence_fingerprint_has_unambiguous_context_boundaries() -> No
     detector = SecretDetector()
     first = await detector.detect(
         _GITHUB_TOKEN,
-        context=DetectionContext(trace_id="trace:a", event_id="event", phase=Phase.PRE_TOOL),
+        context=DetectionContext(trace_id="trace:a", event_id="event"),
     )
     second = await detector.detect(
         _GITHUB_TOKEN,
-        context=DetectionContext(trace_id="trace", event_id="a:event", phase=Phase.PRE_TOOL),
+        context=DetectionContext(trace_id="trace", event_id="a:event"),
     )
 
     assert first[0].fingerprint != second[0].fingerprint

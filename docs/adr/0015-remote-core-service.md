@@ -19,23 +19,25 @@
 3. 远程协议 MUST 版本化，输入只能是完整、封闭的 `PendingTrace`，输出只能是脱敏 `Decision`。
 4. Core 首版 MUST 是无跨请求状态的分析服务；Gateway 继续拥有请求级 Trace、提交顺序、Audit 和全部受保护
    副作用。
-5. Gateway MUST 在 pre Decision 明确允许前禁止上游调用，并在 post Decision 明确允许前禁止释放原始结果。
-   Core 不可达、timeout、认证失败、协议错误、超限或非法 Decision MUST 失败关闭。
+5. Gateway MUST 在 `before_*_call` Decision 明确允许前禁止上游调用，并在
+   `before_*_output_release` Decision 明确允许前禁止释放原始结果。Core 不可达、timeout、认证失败、
+   协议错误、超限或非法 Decision MUST 失败关闭。
 6. Core 与 Gateway MUST 使用独立服务凭据。Core 不持有 LLM/MCP 上游凭据；Gateway 不挂载 Policy、Detector
    模型或规则文件。
 7. 同一 EnforcementSession 内的 Decision MUST 使用相同 Policy version/hash；中途变化按 Core 不可用处理。
-8. 现有嵌入式 Runtime MUST 保留，供 Inline SDK、测试和单进程开发使用。
+8. 现有嵌入式 Runtime MUST 保留，供编程式 SDK、Inline Wrapper、测试和单进程开发使用。
 
 ## 安全与兼容性
 
 - `PendingTrace` 可能包含敏感 payload，只允许经受限内部网络传输；双方不得记录请求体或原始响应体。
-- Core 响应仍由 Gateway 校验 trace、pending event、phase、Policy identity 和封闭 Schema，不能仅信任 HTTP
+- Core 响应仍由 Gateway 校验 trace、pending event、Policy identity 和封闭 Schema，不能仅信任 HTTP
   成功状态。
-- 现有 Policy v3、Canonical Event、Relation、Finding、Decision 和 Detector 合同不变。
+- ADR-0016 已把 Canonical Event/Decision 改为 phase-free，并将远程协议显式升级为 v2；Policy v3、Finding
+  和 Detector 主链保持不变。
 - 远程协议的破坏性升级需要新版本路径或新 ADR；不得静默复用旧版本号。
 
 ## 后果
 
 - Gateway 镜像保持轻量，模型、Semgrep、YARA 和 GPU 只存在于 Core 镜像。
-- 每次 pre/post 分析增加一次内部网络往返，并新增服务认证、可用性和部署配置成本。
+- 每次调用前/输出释放前分析增加一次内部网络往返，并新增服务认证、可用性和部署配置成本。
 - Policy 热加载、跨请求 Session Store、远程 Policy 上传、原始内容取证和多租户控制平面仍不交付。

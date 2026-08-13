@@ -88,7 +88,7 @@ URL allowlist 支持精确 host 和 `*.example.test` 子域形式；wildcard 不
 | `python_ast_ipython` | import/builtin/call、syntax error、IPython 与有限危险代码类别 | text | 16 KiB |
 | `hidden_content` | HTML alt/meta/comment/hidden/CSS 与有界 Base64/百分号/实体编码 | text、canonical JSON | 16 KiB |
 
-固定模式 Detector 是启发式事实，会有漏报和误报。Rule 应结合 Event kind、phase、origin、Tool 和显式
+固定模式 Detector 是启发式事实，会有漏报和误报。Rule 应结合 Event kind、origin、Tool 和显式
 Relation；必要时用 `types_any` 限定类型。
 
 `unicode_security` 按原始 code point 分类，普通换行、回车和 tab 不命中。混合脚本只在同一字母数字 token

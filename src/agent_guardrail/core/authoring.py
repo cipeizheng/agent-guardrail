@@ -58,7 +58,7 @@ from agent_guardrail.core.match_plan import (
     ValueReference,
     ValueType,
 )
-from agent_guardrail.models import AnalysisScope, EventKind, EventOrigin, Phase
+from agent_guardrail.models import AnalysisScope, EventKind, EventOrigin
 
 AUTHOR_POLICY_VERSION = 1
 
@@ -117,7 +117,6 @@ class AuthorParameterSpec(AuthorModel):
 class AuthorEventSpec(AuthorModel):
     kind: EventKind
     domain: BindingDomain = BindingDomain.VISIBLE
-    phases: tuple[Phase, ...] = Field(default=(), max_length=4)
     origins: tuple[EventOrigin, ...] = Field(default=(), max_length=3)
 
 
@@ -210,7 +209,6 @@ class AuthorLocalEvent(AuthorModel):
     name: StrictStr = Field(pattern=_IDENTIFIER_PATTERN)
     kind: EventKind
     domain: BindingDomain = BindingDomain.VISIBLE
-    phases: tuple[Phase, ...] = Field(default=(), max_length=4)
     origins: tuple[EventOrigin, ...] = Field(default=(), max_length=3)
 
 
@@ -418,7 +416,6 @@ def _compile_rule(
             name=name,
             kind=spec.kind,
             domain=spec.domain,
-            phases=spec.phases,
             origins=spec.origins,
         )
         for name, spec in rule.events.items()
@@ -579,7 +576,6 @@ def _compile_condition(
                 name=local_name,
                 kind=quantifier.event.kind,
                 domain=quantifier.event.domain,
-                phases=quantifier.event.phases,
                 origins=quantifier.event.origins,
             )
         elif quantifier.collection is not None:

@@ -13,11 +13,11 @@ from agent_guardrail.detectors.model_prompt_injection import (
     TransformersPipelineClassifier,
 )
 from agent_guardrail.detectors.prompt_injection import PromptInjectionDetector
-from agent_guardrail.models import DetectionContext, Phase
+from agent_guardrail.models import DetectionContext
 
 
 def _context(*, event_id: str = "event-1") -> DetectionContext:
-    return DetectionContext(trace_id="trace-1", event_id=event_id, phase=Phase.PRE_LLM)
+    return DetectionContext(trace_id="trace-1", event_id=event_id)
 
 
 @pytest.mark.asyncio

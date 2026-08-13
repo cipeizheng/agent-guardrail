@@ -7,10 +7,11 @@
 
 - 唯一严格 v3 YAML → MatchPlan → AnalysisReport → Decision 生产链；
 - typed/multi Event binding、derive、量词、顺序/精确 Relation 和 whole-pending Matcher；
-- PendingTrace batch 原子提交、EventOrigin、显式 provenance 和脱敏 Audit；
+- phase-free 语义 Event、PendingTrace batch 原子提交、EventOrigin、显式 `derived_from/may_influence` 和脱敏 Audit；
+- 框架无关 `GuardrailRun` 编程式 SDK 与跨 Event `EventRef`；
 - OpenAI 非流式、MCP `2026-07-28` 无状态 Gateway 与 Inline LLM/Tool Enforcement；
 - 固定 Policy 的无状态远程 Core、失败关闭 DecisionClient 与 Core/Gateway 双容器 Compose；
-- `pre_llm/pre_tool` 副作用前置，非流式 `post_llm` 完整检查后释放；
+- Gateway 调用前副作用控制与非流式输出释放前完整检查；
 - FlowSecurityContext 的 trust/sensitivity/owner/destination/authorization 专用可信通道；
 - I01–I14 生产行为测试、T01–T10 威胁基线和分项预算；
 - 当前架构短合同、精简 ADR 路由和 capability 状态矩阵。
@@ -28,7 +29,7 @@ Presidio/spaCy、P0-D04 的锁定 checkpoint 和 P0-D06 的真实 YARA ruleset�
 同一 `secrets`，不创建平行的 `enhanced_secrets`。
 
 每项退出条件：真实算法/后端运行，正常/攻击/边界/失败/预算/脱敏测试，Registry→MatchPlan→Decision
-集成，以及 pre block 的上游副作用为 0。Detector hit 仍只是事实，不能单独宣称威胁路径完成。
+集成，以及调用前 block 的上游副作用为 0。Detector hit 仍只是事实，不能单独宣称威胁路径完成。
 
 ## 阶段 B：P1 检测与结构能力
 
@@ -47,27 +48,33 @@ backend。Semgrep/YARA/模型只允许部署 profile 固定后端，Policy 仍�
 
 ## 阶段 C：从 Detector fact 到威胁路径
 
-- 建立 principal/tenant/destination Registry 和可信解析边界；
-- 实现 T01–T05/T09 的 owner/destination/authorization-aware v3 Policy；
+- 先建立部署可提供的 destination、source trust 与 Tool risk 分类，不要求单用户 Agent 引入 tenant 模型；
+- 实现 T01–T04 的 destination/trust-aware v3 Policy，authorization 只在已有独立授权服务时接入；
 - 为不可信 ToolResult → LLM/高风险 Tool 建立 trust 与显式 Relation 组合策略；
-- 增加真实 Gateway/Inline source→sink 回放，验证受保护副作用和跨租户隔离；
+- 增加真实 Gateway/SDK source→sink 回放，验证受保护副作用；
 - 保持 T10 为明确边界外，直到存在 Framework Hook、Sandbox 或网络代理。
+
+principal/tenant Registry、跨租户状态以及 T05/T09 owner-aware Policy 只在项目出现真实多用户部署需求后
+启动，不作为单用户 SDK 的默认复杂度。
 
 ## 阶段 D：可验证 Transformation
 
 - 设计独立 `TransformationPlan`，支持可审计 redact/replace；
 - Decision 绑定输入、变换 span、输出 fingerprint 和 Policy version；
 - 保持普通 `allow/log/block` Action 不承担 payload 修改；
-- 对 pre/post、重复变换、编码偏移和敏感数据泄漏建立测试。
+- 对调用前/输出释放前 checkpoint、重复变换、编码偏移和敏感数据泄漏建立测试。
 
 该阶段需要新 ADR，因为它改变当前“Analyzer 只判断、不修改 payload”的合同。
 
 ## 阶段 E：接入与部署
 
-- Framework 增量 InputNormalizer、OpenAI Agents SDK/LangGraph Adapter；
+- 增加非流式 OpenAI Responses API Adapter，并复用 phase-free Canonical Event；
+- 为常见 Framework 提供基于 `GuardrailRun` 的接入 recipe 与可选生命周期 hook；不复制一套框架专用
+  Guardrail SDK；
 - 为当前非 root 双容器构建补 SBOM、镜像签名、发布流水线和集群编排；
 - Policy 热加载、原子版本切换和回滚；
-- 跨请求 Session Store、tenant/run token、TTL/CAS 和 Monitor identity 持久化；
+- 按真实长会话需求设计跨请求 Session Store、run token、TTL/CAS 和 Monitor identity 持久化；多租户字段
+  只在对应部署需求存在时加入；
 - 多模态 Content、受控下载、OCR/媒体 Detector；
 - 经过单独设计的 chunk-guarded LLM streaming。
 

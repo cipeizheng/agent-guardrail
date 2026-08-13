@@ -9,6 +9,7 @@ from pydantic import SecretStr
 
 from agent_guardrail.core_service import CoreSettings, create_core_app
 from agent_guardrail.gateway import GatewaySettings, create_app
+from agent_guardrail.models import EventKind
 from agent_guardrail.runtime import GuardrailRuntime
 from tests.support import FAKE_SECRET, secret_policy_yaml
 
@@ -86,7 +87,9 @@ def _secret_tool_response() -> dict[str, object]:
 
 @pytest.mark.asyncio
 async def test_two_service_topology_allows_safe_and_hides_blocked_output() -> None:
-    core_runtime = GuardrailRuntime.from_policy_yaml(secret_policy_yaml())
+    core_runtime = GuardrailRuntime.from_policy_yaml(
+        secret_policy_yaml(kind=EventKind.TOOL_CALL_PROPOSAL)
+    )
     core_app = create_core_app(
         CoreSettings(
             policy_file=Path("unused.yaml"),
@@ -138,7 +141,7 @@ async def test_two_service_topology_allows_safe_and_hides_blocked_output() -> No
     await provider_client.aclose()
     assert allowed.status_code == 200
     assert blocked.status_code == 400
-    assert blocked.json()["error"]["phase"] == "post_llm"
+    assert blocked.json()["error"]["checkpoint"] == "before_model_output_release"
     assert FAKE_SECRET not in blocked.text
     assert provider_calls == 2
 
@@ -154,7 +157,7 @@ async def test_remote_core_failure_before_decision_prevents_upstream_side_effect
             return httpx.Response(
                 200,
                 json={
-                    "protocol_version": 1,
+                    "protocol_version": 2,
                     "version": 3,
                     "content_hash": "fixed-policy",
                 },

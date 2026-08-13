@@ -7,10 +7,10 @@ import pytest
 
 from agent_guardrail.adapters.mcp import MCP_PROTOCOL_VERSION
 from agent_guardrail.gateway import GatewaySettings
-from agent_guardrail.models import Phase, SecurityDestination
+from agent_guardrail.models import EventKind, SecurityDestination
 from agent_guardrail.runtime import GuardrailRuntime
 from tests.integration.test_gateway import POLICY_FILE, RecordingAnalyzer, app_client
-from tests.integration.test_guarded_llm import analyzer_for_phase
+from tests.integration.test_guarded_llm import analyzer_for_kind
 from tests.support import (
     FAKE_CN_MOBILE,
     FAKE_PII,
@@ -91,7 +91,7 @@ def tool_response(text: str) -> dict[str, object]:
 
 @pytest.mark.asyncio
 async def test_post_tool_block_hides_raw_result_after_one_upstream_execution() -> None:
-    runtime = GuardrailRuntime(analyzer_for_phase(Phase.POST_TOOL))
+    runtime = GuardrailRuntime(analyzer_for_kind(EventKind.TOOL_RESULT))
     async with app_client(
         lambda request: httpx.Response(200, json=tool_response(FAKE_SECRET)),
         settings=mcp_settings(),
@@ -105,7 +105,10 @@ async def test_post_tool_block_hides_raw_result_after_one_upstream_execution() -
 
     assert response.status_code == 200
     assert response.json()["error"]["code"] == -32040
-    assert response.json()["error"]["data"]["phase"] == "post_tool"
+    assert (
+        response.json()["error"]["data"]["checkpoint"]
+        == "before_tool_output_release"
+    )
     assert FAKE_SECRET not in response.text
     assert len(requests) == 1
 
@@ -126,7 +129,7 @@ async def test_tool_access_pre_tool_block_makes_zero_upstream_requests() -> None
 
     assert response.status_code == 200
     assert response.json()["error"]["code"] == -32040
-    assert response.json()["error"]["data"]["phase"] == "pre_tool"
+    assert response.json()["error"]["data"]["checkpoint"] == "before_tool_call"
     assert response.json()["error"]["data"]["violations"][0]["code"] == ("tool_access_denied")
     assert requests == []
 
@@ -150,7 +153,7 @@ async def test_pii_pre_tool_block_makes_zero_upstream_requests(
 
     assert response.status_code == 200
     assert response.json()["error"]["code"] == -32040
-    assert response.json()["error"]["data"]["phase"] == "pre_tool"
+    assert response.json()["error"]["data"]["checkpoint"] == "before_tool_call"
     assert response.json()["error"]["data"]["violations"][0]["code"] == ("pii_exfiltration")
     assert sensitive_value not in response.text
     assert requests == []
@@ -193,8 +196,8 @@ async def test_mcp_gateway_injects_tool_and_client_destinations() -> None:
     assert response.status_code == 200
     assert len(requests) == 1
     assert analyzer.security_destinations == [
-        (Phase.PRE_TOOL, SecurityDestination.EXTERNAL_TOOL),
-        (Phase.POST_TOOL, SecurityDestination.CLIENT),
+        SecurityDestination.EXTERNAL_TOOL,
+        SecurityDestination.CLIENT,
     ]
 
 

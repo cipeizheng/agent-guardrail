@@ -342,7 +342,6 @@ def _infer_value_type(
             "id": ValueType.STRING,
             "sequence": ValueType.INTEGER,
             "kind": ValueType.STRING,
-            "phase": ValueType.STRING,
             "origin": ValueType.STRING,
             "payload": ValueType.OBJECT,
         }.get(segment)

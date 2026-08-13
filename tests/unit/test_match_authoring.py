@@ -40,7 +40,6 @@ from agent_guardrail.models import (
     EventRelation,
     MessageRole,
     PendingTrace,
-    Phase,
     Trace,
 )
 
@@ -53,7 +52,6 @@ def event(
     kind: EventKind,
     payload: dict[str, object],
     *,
-    phase: Phase,
     origin: EventOrigin = EventOrigin.CLIENT_ASSERTED,
     relations: tuple[EventRelation, ...] = (),
 ) -> Event:
@@ -63,7 +61,6 @@ def event(
             "trace_id": "trace-1",
             "sequence": sequence,
             "kind": kind,
-            "phase": phase,
             "timestamp": datetime(2026, 8, 10, tzinfo=UTC),
             "origin": origin,
             "payload": payload,
@@ -78,7 +75,6 @@ def message(event_id: str, sequence: int, text: str, *, role: MessageRole) -> Ev
         sequence,
         EventKind.MESSAGE,
         {"role": role.value, "content": {"type": "text", "text": text}},
-        phase=Phase.POST_LLM if role is MessageRole.ASSISTANT else Phase.PRE_LLM,
     )
 
 
@@ -94,7 +90,6 @@ def call(
         sequence,
         EventKind.TOOL_CALL,
         {"call_id": f"call-{event_id}", "name": name, "arguments": {}},
-        phase=Phase.PRE_TOOL,
         relations=relations,
     )
 
@@ -134,7 +129,6 @@ def test_typed_python_author_objects_compile_to_same_plan_as_yaml() -> None:
                 events={
                     "message": AuthorEventSpec(
                         kind=EventKind.MESSAGE,
-                        phases=(Phase.POST_LLM,),
                     )
                 },
                 where=AuthorCondition(
@@ -160,7 +154,7 @@ version: 1
 rules:
   - id: assistant_blocked
     events:
-      message: {kind: message, phases: [post_llm]}
+      message: {kind: message}
     where:
       compare:
         left: {field: [message, payload, content, text]}
@@ -570,14 +564,17 @@ rules:
 
 
 @pytest.mark.parametrize(
-    "event_spec",
+    ("event_spec", "failure"),
     [
-        "{kind: model_request}",
-        "{kind: message, phases: [pre_tool]}",
-        "{kind: message, phases: [post_llm, post_llm]}",
+        ("{kind: model_request}", "schema validation failed"),
+        ("{kind: guardrail_decision}", "compilation failed"),
+        ("{kind: message, phases: [pre_llm]}", "schema validation failed"),
     ],
 )
-def test_invalid_event_binding_contracts_fail_during_compilation(event_spec: str) -> None:
+def test_invalid_event_binding_contracts_fail_closed(
+    event_spec: str,
+    failure: str,
+) -> None:
     source = f"""
 version: 1
 rules:
@@ -587,7 +584,7 @@ rules:
     finding: {{code: invalid, message: Safe message, subjects: [message]}}
 """
 
-    with pytest.raises(PolicyLoadError, match="compilation failed"):
+    with pytest.raises(PolicyLoadError, match=failure):
         load_match_plan_yaml(source)
 
 

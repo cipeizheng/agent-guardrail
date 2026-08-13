@@ -45,7 +45,7 @@ class JsonlAuditSink:
         record = {
             "timestamp": self.clock().isoformat(),
             "trace_id": decision.trace_id,
-            "phase": decision.phase.value,
+            "event_id": decision.event_id,
             "action": decision.action.value,
             "rule_ids": [violation.rule_id for violation in decision.violations],
             "codes": [violation.code for violation in decision.violations],

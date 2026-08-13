@@ -12,7 +12,6 @@ from agent_guardrail.models import (
     Action,
     EventKind,
     EventOrigin,
-    Phase,
     RelationKind,
     SecurityDestination,
     ToolCall,
@@ -65,16 +64,14 @@ async def test_allow_executes_tool_exactly_once() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("phase", "destination", "kind", "expected_tool_calls"),
+    ("destination", "kind", "expected_tool_calls"),
     [
         (
-            Phase.PRE_TOOL,
             SecurityDestination.EXTERNAL_TOOL,
             EventKind.TOOL_CALL,
             0,
         ),
         (
-            Phase.POST_TOOL,
             SecurityDestination.AGENT_RUNTIME,
             EventKind.TOOL_RESULT,
             1,
@@ -82,7 +79,6 @@ async def test_allow_executes_tool_exactly_once() -> None:
     ],
 )
 async def test_inline_tool_injects_the_actual_flow_destination(
-    phase: Phase,
     destination: SecurityDestination,
     kind: EventKind,
     expected_tool_calls: int,
@@ -91,7 +87,6 @@ async def test_inline_tool_injects_the_actual_flow_destination(
     session = EnforcementSession(
         analyzer=security_destination_analyzer(
             destination=destination,
-            phase=phase,
             kind=kind,
         ),
         trace=Trace(id="trace-1"),
@@ -101,7 +96,6 @@ async def test_inline_tool_injects_the_actual_flow_destination(
     with pytest.raises(GuardrailBlocked) as blocked:
         await guarded.execute(email_call("safe body"))
 
-    assert blocked.value.decision.phase is phase
     assert blocked.value.decision.violations[0].code == "destination_seen"
     assert fake.call_count("send_email") == expected_tool_calls
 
@@ -226,7 +220,7 @@ rules:
   - id: block-tool-result
     action: block
     events:
-      result: {kind: tool_result, domain: pending, phases: [post_tool]}
+      result: {kind: tool_result, domain: pending}
     where: {present: [result, payload]}
     finding:
       code: blocked_result

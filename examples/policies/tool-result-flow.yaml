@@ -15,7 +15,6 @@ rules:
       destination:
         kind: tool_call
         domain: pending
-        phases: [pre_tool]
     where:
       all:
         - compare:
@@ -33,7 +32,7 @@ rules:
         - relation:
             source: result
             target: destination
-            operator: derived_from_ancestor
+            operator: may_influence
     finding:
       code: tool_result_flow_denied
       message: The requested tool flow is not allowed by policy.

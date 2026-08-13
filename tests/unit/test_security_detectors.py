@@ -7,14 +7,13 @@ from agent_guardrail.config import (
     create_default_predicate_registry,
 )
 from agent_guardrail.detectors import PromptInjectionDetector
-from agent_guardrail.models import DetectionContext, Phase
+from agent_guardrail.models import DetectionContext
 
 
 def detection_context(*, event_id: str = "event-1") -> DetectionContext:
     return DetectionContext(
         trace_id="trace-1",
         event_id=event_id,
-        phase=Phase.PRE_TOOL,
     )
 
 

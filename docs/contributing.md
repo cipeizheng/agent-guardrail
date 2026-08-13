@@ -30,6 +30,7 @@ flowchart TD
     Runtime[runtime/] --> Analyzer
     Remote[core_service/ remote HTTP] --> Runtime
     Gateway[gateway/] --> Session[enforcement/session.py]
+    SDK[sdk.py GuardrailRun] --> Session
     Inline[inline_llm.py + inline_tools.py] --> Session
     Session --> Runtime
     Session --> Remote
@@ -50,12 +51,13 @@ flowchart TD
 | Finding/Error → Decision | `core/decision_analyzer.py` |
 | v3 Policy Loader | `config/loader.py` |
 | Session 与 normalization | `enforcement/session.py`、`input_normalizer.py` |
+| 框架无关编程式接入 | `sdk.py` |
 | OpenAI/MCP | `gateway/app.py`、`gateway/mcp.py`、`adapters/` |
 | 远程 Core/双容器 | `core_service/`、`runtime/remote.py`、`compose.yaml`、`docker/` |
 
 调试意外 allow/block：`Matcher Report → Decision Analyzer → Session commit`。关系未命中先看
-`Event.relations` 和 provenance 建立点，不根据 sequence 猜来源。副作用顺序从 Gateway/Wrapper 的 pre
-Decision 开始检查。
+`Event.relations` 和 Relation 建立点，不根据 sequence 猜来源。副作用顺序从 Gateway/Wrapper 的
+`before_*_call` Decision 开始检查。
 
 ## 4. 实现边界
 
@@ -76,6 +78,7 @@ Decision 开始检查。
 - `test_analysis_models.py`：Finding identity 与 Report；
 - `test_models.py`：Event、Relation、PendingTrace 和安全上下文；
 - `test_session.py`：batch 原子性、block、异常和可信来源；
+- `test_sdk.py`：编程式 EventRef、显式关系和跨 run 防伪；
 - `test_security_detectors.py` / `test_priority_detectors.py`：既有 Detector 算法边界；
 - `test_secret_detector_parity.py` / `test_pii_detector.py` / `test_prompt_detector_parity.py`：
   Secret、PII、Prompt/模型适配边界；
@@ -90,15 +93,15 @@ Decision 开始检查。
 
 ## 6. 新行为测试要求
 
-至少覆盖：安全输入、明确违规、不适用阶段、缺失/畸形字段、相邻边界、预算/timeout/异常、失败动作、
-脱敏、pre block 副作用为零和 post block 不释放结果。
+至少覆盖：安全输入、明确违规、不适用 Event/语境、缺失/畸形字段、相邻边界、预算/timeout/异常、失败动作、
+脱敏、调用前 block 副作用为零和输出释放前 block 不释放结果。
 
 Detector 算法有效性不能用 mock 证明；外部 backend fake 只能证明 adapter 合同。Gateway 测试使用
 MockTransport/Fake Upstream，不访问真实模型 API。
 
 ## 7. Review 检查
 
-- 副作用是否只发生在 pre allow 后？
+- 副作用是否只发生在调用前 allow 后？
 - block/error 是否保持 pending batch 原子性并绑定正确 Event ID？
 - sequence 是否被错误当作 provenance？客户端是否能提升 origin/security fact？
 - 新节点是否有静态类型、成本、失败代码、脱敏和相邻超限测试？

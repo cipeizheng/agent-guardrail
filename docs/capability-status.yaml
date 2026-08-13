@@ -48,7 +48,7 @@ priority_capabilities:
     status: verified
     threat_paths: [T03, T04]
     implementation: prompt_injection_model
-    note: full_local_v1 锁定 Protect AI DeBERTa v2 提交并已在 CPU 及 CUDA 13/GTX 1650 Ti 上运行安全、攻击、预算、脱敏和 pre_llm 零上游副作用评估；运行时不下载模型。
+    note: full_local_v1 锁定 Protect AI DeBERTa v2 提交并已在 CPU 及 CUDA 13/GTX 1650 Ti 上运行安全、攻击、预算、脱敏和 before_model_call 零上游副作用评估；运行时不下载模型。
 
   - id: P0-D06
     name: yara_injection_signatures
@@ -72,7 +72,7 @@ priority_capabilities:
     status: adapter_only
     threat_paths: [T03, T04]
     implementation: is_similar
-    note: Invariant 的 string/list、max-pair、严格阈值和三个命名阈值已实现；EmbeddingProfile 固定 model，Policy 不能选择 model/endpoint/凭据；OpenAI-compatible adapter、预算、timeout、脱敏和 pre_llm 零副作用路径已测试，真实外部 embedding backend 尚未 smoke/eval。
+    note: Invariant 的 string/list、max-pair、严格阈值和三个命名阈值已实现；EmbeddingProfile 固定 model，Policy 不能选择 model/endpoint/凭据；OpenAI-compatible adapter、预算、timeout、脱敏和 before_model_call 零副作用路径已测试，真实外部 embedding backend 尚未 smoke/eval。
 
   - id: P1-D01
     name: python_ast_ipython

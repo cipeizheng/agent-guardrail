@@ -16,7 +16,6 @@ from agent_guardrail.models import (
     EventKind,
     EventOrigin,
     PendingTrace,
-    Phase,
     SecurityDestination,
 )
 from agent_guardrail.runtime import GuardrailRuntime
@@ -28,7 +27,6 @@ from tests.support import (
     empty_analyzer,
     pii_analyzer,
     tool_access_analyzer,
-    tool_context,
 )
 
 POLICY_FILE = Path(__file__).parents[2] / "examples/policies/secret-email.yaml"
@@ -181,7 +179,7 @@ async def test_post_llm_block_hides_response_and_records_sanitized_audit() -> No
 
     assert response.status_code == 400
     assert response.json()["error"]["type"] == "guardrail_violation"
-    assert response.json()["error"]["phase"] == "post_llm"
+    assert response.json()["error"]["checkpoint"] == "before_model_output_release"
     assert FAKE_SECRET not in response.text
     assert len(requests) == 1
     assert len(audit.records) == 1
@@ -219,7 +217,9 @@ async def test_post_llm_message_and_tool_call_are_one_atomic_batch() -> None:
 
 @pytest.mark.asyncio
 async def test_tool_access_post_llm_block_hides_tool_call() -> None:
-    runtime = GuardrailRuntime(tool_access_analyzer())
+    runtime = GuardrailRuntime(
+        tool_access_analyzer(kind=EventKind.TOOL_CALL_PROPOSAL)
+    )
     async with app_client(
         lambda request: httpx.Response(200, json=tool_response("safe")),
         runtime=runtime,
@@ -231,7 +231,7 @@ async def test_tool_access_post_llm_block_hides_tool_call() -> None:
         )
 
     assert response.status_code == 400
-    assert response.json()["error"]["phase"] == "post_llm"
+    assert response.json()["error"]["checkpoint"] == "before_model_output_release"
     assert response.json()["error"]["violations"][0]["code"] == "tool_access_denied"
     assert "tool_calls" not in response.text
     assert len(requests) == 1
@@ -242,7 +242,7 @@ async def test_tool_access_post_llm_block_hides_tool_call() -> None:
 async def test_pii_post_llm_block_hides_tool_call_and_records_safe_audit(
     sensitive_value: str,
 ) -> None:
-    runtime = GuardrailRuntime(pii_analyzer())
+    runtime = GuardrailRuntime(pii_analyzer(kind=EventKind.TOOL_CALL_PROPOSAL))
     audit = InMemoryAuditSink()
     async with app_client(
         lambda request: httpx.Response(200, json=tool_response(sensitive_value)),
@@ -256,7 +256,7 @@ async def test_pii_post_llm_block_hides_tool_call_and_records_safe_audit(
         )
 
     assert response.status_code == 400
-    assert response.json()["error"]["phase"] == "post_llm"
+    assert response.json()["error"]["checkpoint"] == "before_model_output_release"
     assert response.json()["error"]["violations"][0]["code"] == "pii_exfiltration"
     assert sensitive_value not in response.text
     assert sensitive_value not in audit.records[0].model_dump_json()
@@ -266,19 +266,14 @@ async def test_pii_post_llm_block_hides_tool_call_and_records_safe_audit(
 class RecordingAnalyzer(MatchPolicyAnalyzer):
     def __init__(self) -> None:
         super().__init__(empty_analyzer().policy)
-        self.events: list[
-            tuple[EventKind, Phase, EventOrigin, str, tuple[str, ...]]
-        ] = []
-        self.security_destinations: list[tuple[Phase, SecurityDestination]] = []
+        self.events: list[tuple[EventKind, EventOrigin, str, tuple[str, ...]]] = []
+        self.security_destinations: list[SecurityDestination] = []
 
     async def analyze_pending(self, pending: PendingTrace):
-        self.security_destinations.append(
-            (pending.primary_event.phase, pending.security_context.destination)
-        )
+        self.security_destinations.append(pending.security_context.destination)
         self.events.extend(
             (
                 event.kind,
-                event.phase,
                 event.origin,
                 event.id,
                 event.source_event_ids,
@@ -298,7 +293,7 @@ rules:
   - id: block-pre-llm
     action: block
     events:
-      message: {kind: message, domain: pending, phases: [pre_llm]}
+      message: {kind: message, domain: pending}
     where: {present: [message, payload]}
     finding:
       code: blocked_for_test
@@ -326,13 +321,14 @@ async def test_gateway_submits_independent_events_with_boundary_owned_origins() 
 
     assert response.status_code == 200
     assert len(requests) == 1
-    assert [(kind, phase, origin) for kind, phase, origin, _, _ in analyzer.events] == [
-        (EventKind.MESSAGE, Phase.PRE_LLM, EventOrigin.CLIENT_ASSERTED),
-        (EventKind.MESSAGE, Phase.POST_LLM, EventOrigin.OBSERVED),
+    assert [(kind, origin) for kind, origin, _, _ in analyzer.events] == [
+        (EventKind.MESSAGE, EventOrigin.CLIENT_ASSERTED),
+        (EventKind.MODEL_CALL, EventOrigin.OBSERVED),
+        (EventKind.MESSAGE, EventOrigin.OBSERVED),
     ]
     assert analyzer.security_destinations == [
-        (Phase.PRE_LLM, SecurityDestination.LLM_PROVIDER),
-        (Phase.POST_LLM, SecurityDestination.CLIENT),
+        SecurityDestination.LLM_PROVIDER,
+        SecurityDestination.CLIENT,
     ]
 
 
@@ -376,12 +372,13 @@ async def test_gateway_normalizes_valid_tool_history_as_one_related_batch() -> N
     assert len(requests) == 1
     assert [event[0] for event in analyzer.events] == [
         EventKind.MESSAGE,
-        EventKind.TOOL_CALL,
+        EventKind.TOOL_CALL_PROPOSAL,
         EventKind.TOOL_RESULT,
+        EventKind.MODEL_CALL,
         EventKind.MESSAGE,
     ]
-    tool_call_event_id = analyzer.events[1][3]
-    assert analyzer.events[2][4] == (tool_call_event_id,)
+    tool_call_event_id = analyzer.events[1][2]
+    assert analyzer.events[2][3] == (tool_call_event_id,)
 
 
 @pytest.mark.asyncio
@@ -402,7 +399,7 @@ async def test_orphan_tool_result_is_rejected_before_upstream() -> None:
 
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "orphan_tool_result"
-    assert response.json()["error"]["phase"] == "pre_llm"
+    assert response.json()["error"]["checkpoint"] == "before_model_call"
     assert "untrusted result" not in response.text
     assert "unknown" not in response.text
     assert requests == []
@@ -433,7 +430,7 @@ async def test_normalized_candidate_limit_is_rejected_before_upstream() -> None:
 
 
 @pytest.mark.asyncio
-async def test_response_candidate_limit_does_not_release_upstream_payload() -> None:
+async def test_response_trace_capacity_does_not_release_upstream_payload() -> None:
     settings = gateway_settings().model_copy(update={"max_trace_events": 3})
     oversized_response = tool_response("safe", content="private upstream text")
     tool_calls = oversized_response["choices"][0]["message"]["tool_calls"]  # type: ignore[index]
@@ -460,9 +457,9 @@ async def test_response_candidate_limit_does_not_release_upstream_payload() -> N
             json=request_payload(),
         )
 
-    assert response.status_code == 502
-    assert response.json()["error"]["code"] == "candidate_limit_exceeded"
-    assert response.json()["error"]["phase"] == "post_llm"
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "evaluation_failed"
+    assert response.json()["error"]["checkpoint"] == "before_model_output_release"
     assert "private upstream text" not in response.text
     assert "call-2" not in response.text
     assert len(requests) == 1
@@ -492,7 +489,7 @@ async def test_combined_trace_capacity_does_not_release_upstream_payload() -> No
 
     assert response.status_code == 503
     assert response.json()["error"]["code"] == "evaluation_failed"
-    assert response.json()["error"]["phase"] == "post_llm"
+    assert response.json()["error"]["checkpoint"] == "before_model_output_release"
     assert "private upstream text" not in response.text
     assert len(requests) == 1
 
@@ -510,7 +507,7 @@ async def test_pre_llm_block_makes_zero_upstream_requests() -> None:
         )
 
     assert response.status_code == 400
-    assert response.json()["error"]["phase"] == "pre_llm"
+    assert response.json()["error"]["checkpoint"] == "before_model_call"
     assert requests == []
 
 
@@ -537,7 +534,7 @@ async def test_request_snapshot_is_atomic_and_does_not_deduplicate_messages() ->
     assert response.status_code == 400
     assert requests == []
     assert len(audit.records) == 1
-    assert len(audit.records[0].pending_event_ids) == 2
+    assert len(audit.records[0].pending_event_ids) == 3
     assert len(audit.records[0].violations) == 2
 
 
@@ -591,82 +588,6 @@ async def test_authentication_and_readiness_do_not_call_upstream() -> None:
     assert ready.status_code == 200
     assert unauthorized.status_code == 401
     assert "wrong-key" not in unauthorized.text
-    assert requests == []
-
-
-@pytest.mark.asyncio
-async def test_direct_evaluate_is_explicit_and_has_no_upstream_side_effect() -> None:
-    settings = gateway_settings().model_copy(update={"evaluate_endpoint_enabled": True})
-    async with app_client(
-        lambda request: httpx.Response(200, json=text_response()),
-        settings=settings,
-    ) as (client, requests):
-        response = await client.post(
-            "/v1/evaluate",
-            headers=auth_headers(),
-            json=tool_context(body=FAKE_SECRET).model_dump(mode="json"),
-        )
-
-    assert response.status_code == 200
-    assert response.json()["action"] == "block"
-    assert response.json()["phase"] == "pre_tool"
-    assert FAKE_SECRET not in response.text
-    assert requests == []
-
-
-@pytest.mark.asyncio
-async def test_direct_evaluate_cannot_spoof_the_trusted_security_channel() -> None:
-    analyzer = analyzer_from_yaml(
-        """\
-version: 3
-scopes: [pending]
-parameters:
-  security_authorization: {type: string, required: false, default: unknown}
-rules:
-  - id: trusted-authorization-only
-    action: block
-    events:
-      call: {kind: tool_call, domain: pending, phases: [pre_tool]}
-    where:
-      compare:
-        left: {parameter: security_authorization}
-        operator: equals
-        right: {literal: allowed}
-    finding:
-      code: spoofed_authorization
-      message: A trusted authorization fact was present.
-      subjects: [call]
-"""
-    )
-    settings = gateway_settings().model_copy(update={"evaluate_endpoint_enabled": True})
-    claimed_attributes = tool_context(body="safe").model_dump(mode="json")
-    claimed_attributes["attributes"] = {"security_authorization": "allowed"}
-    claimed_context = dict(claimed_attributes)
-    claimed_context["security_context"] = {
-        "authorization": "allowed",
-        "authorities": {"authorization": "authorization_service"},
-    }
-
-    async with app_client(
-        lambda request: httpx.Response(200, json=text_response()),
-        settings=settings,
-        runtime=GuardrailRuntime(analyzer),
-    ) as (client, requests):
-        attributes_response = await client.post(
-            "/v1/evaluate",
-            headers=auth_headers(),
-            json=claimed_attributes,
-        )
-        context_response = await client.post(
-            "/v1/evaluate",
-            headers=auth_headers(),
-            json=claimed_context,
-        )
-
-    assert attributes_response.status_code == 200
-    assert attributes_response.json()["action"] == "allow"
-    assert context_response.status_code == 422
-    assert context_response.json()["error"]["code"] == "invalid_guardrail_context"
     assert requests == []
 
 

@@ -115,7 +115,34 @@ docker compose down
 
 命名 Audit volume 会保留；上述命令不删除它。只有明确希望删除 Audit 时才另行执行带 `--volumes` 的清理。
 
-## 3. 环境变量
+## 3. Agent Sandbox 与不可绕过部署边界
+
+本仓库的 Compose 只运行可信的 Core 和 Gateway，**没有启动或隔离 Agent**。容器的 non-root、只读 root
+filesystem、drop capabilities 和 Core 私网用于加固 Guardrail 服务本身，不能证明 Agent 的 Shell、原生
+函数、文件系统或网络请求都经过 Gateway。
+
+如果 Agent 可以执行代码或 Shell，生产部署应把它放入独立的不可信 Sandbox，并把 Guardrail、真实 Tool
+Broker 和凭据留在 Sandbox 外。最低部署合同是：
+
+- Agent egress 默认拒绝，只允许固定 Guardrail Gateway/Tool Broker；禁止直连 Provider、MCP Server、
+  数据库、邮件/云 API，并覆盖 DNS、IPv4/IPv6、loopback、Unix socket 和云 metadata 路径；
+- Sandbox 不含 Provider、MCP、数据库或其他生产凭据；凭据只由外部服务持有并按用户授权使用；
+- 不使用 privileged、host network/PID/IPC，不挂载 Docker/container runtime socket、宿主敏感目录或多余
+  设备；
+- 文件系统默认只读或按任务临时创建，只挂载完成任务所需的最小目录，不允许后台进程跨任务存活；
+- 设置 CPU、内存、PID、磁盘、文件描述符和 wall-clock 上限，并能在超限时终止整个 Sandbox；
+- Sandbox 内的 Agent 不能修改 Policy、Gateway/Core 配置、Detector 资产或 Audit；内部 Wrapper/探针失效
+  不能扩大 Sandbox 的网络或主机权限。
+
+仅把代码/Shell 工具放进 Sandbox 也可以：此时 Agent 与 Guardrail 位于外部，`before_tool_call` allow 后
+才调用 Sandbox Executor，`before_tool_output_release` allow 后才释放结果。该 Executor 仍应无生产凭据、
+无任意公网 egress，并按
+任务销毁。
+
+`url_host_allowed`、命令/代码 Detector 或 Provider/MCP host allowlist 都是已中介流量上的策略或纵深防御，
+不能代替上述 OS/网络强制。完整的责任矩阵见[安全模型](../security-model.md#8-guardrail-无法替代的-sandbox-控制)。
+
+## 4. 环境变量
 
 字段、默认值和校验以 `GatewaySettings` 为事实来源：
 
@@ -141,7 +168,6 @@ docker compose down
 | `AGENT_GUARDRAIL_MAX_UPSTREAM_RESPONSE_BYTES` | `4194304` | OpenAI 响应体上限 |
 | `AGENT_GUARDRAIL_MAX_TRACE_EVENTS` | `16` | 请求级 Trace Event 上限 |
 | `AGENT_GUARDRAIL_UPSTREAM_TIMEOUT_SECONDS` | `60` | OpenAI 上游总超时 |
-| `AGENT_GUARDRAIL_EVALUATE_ENDPOINT_ENABLED` | `false` | 是否启用直接 Decision API |
 | `AGENT_GUARDRAIL_DETECTOR_PROFILE` | `local` | `local/full_local_v1` 固定部署 profile |
 | `AGENT_GUARDRAIL_DETECTOR_ASSETS_DIR` | 空 | `full_local_v1` 必填的已校验模型资产根目录 |
 | `AGENT_GUARDRAIL_PROMPT_MODEL_DEVICE` | `cpu` | `full_local_v1` 的 `cpu/cuda` 推理设备 |
@@ -161,7 +187,7 @@ Core 使用独立前缀：`AGENT_GUARDRAIL_CORE_POLICY_FILE` 与
 默认覆盖为 `full_local_v1`；另有 `..._DETECTOR_ASSETS_DIR`、`..._PROMPT_MODEL_DEVICE`、
 `..._MAX_REQUEST_BYTES`、`..._HOST`、`..._PORT` 和 `..._LOG_LEVEL`。事实来源是 `CoreSettings`。
 
-## 4. Secret
+## 5. Secret
 
 - 示例只写变量名，不含真实值。
 - 开发可使用已 gitignore 的 `.env`；生产使用部署平台 Secret。
@@ -169,14 +195,14 @@ Core 使用独立前缀：`AGENT_GUARDRAIL_CORE_POLICY_FILE` 与
 - `server_managed` 使用服务端 Key；`pass_through` 才转发客户端 Authorization。
 - Gateway→Core Key 必须与 Provider、MCP 和 Gateway Client Key 分离；Core 不配置任何上游 Key。
 
-## 5. Audit
+## 6. Audit
 
 设置 `AGENT_GUARDRAIL_AUDIT_PATH` 后，append-only JSONL 只保存含 Violation 的 Decision 摘要；普通 allow
 不逐条持久化。它不接收 Event payload、完整 prompt、Tool arguments 或 Detector 原文。
 
 当前没有内容取证模式。保存原始敏感内容必须先改变架构合同并定义访问权限、脱敏和保留期。
 
-## 6. Health 与可观测性
+## 7. Health 与可观测性
 
 - `GET /health/live`：进程和事件循环存活。
 - Gateway `GET /health/ready`：embedded 报告本地 Runtime；remote 同时验证 Core readiness 与启动时固定的

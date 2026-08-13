@@ -35,7 +35,7 @@ rules:
   - id: reject-prompt-injection
     action: block
     events:
-      message: {kind: message, domain: pending, phases: [pre_llm]}
+      message: {kind: message, domain: pending}
     where:
       all:
         - compare:
@@ -62,7 +62,7 @@ rules:
   - id: restrict-fetch-host
     action: block
     events:
-      call: {kind: tool_call, domain: pending, phases: [pre_tool]}
+      call: {kind: tool_call, domain: pending}
     where:
       all:
         - tool: {binding: call, name: fetch_url}
@@ -88,7 +88,7 @@ rules:
   - id: restrict-transfer-amount
     action: block
     events:
-      call: {kind: tool_call, domain: pending, phases: [pre_tool]}
+      call: {kind: tool_call, domain: pending}
     where:
       all:
         - tool: {binding: call, name: transfer_funds}
@@ -115,7 +115,7 @@ rules:
   - id: restrict-email-body-length
     action: block
     events:
-      call: {kind: tool_call, domain: pending, phases: [pre_tool]}
+      call: {kind: tool_call, domain: pending}
     where:
       all:
         - tool: {binding: call, name: send_email}
@@ -142,7 +142,7 @@ rules:
   - id: reject-bidi-control
     action: block
     events:
-      message: {kind: message, domain: pending, phases: [pre_llm]}
+      message: {kind: message, domain: pending}
     where:
       all:
         - compare:
@@ -170,7 +170,7 @@ rules:
   - id: reject-model-prompt-injection
     action: block
     events:
-      message: {kind: message, domain: pending, phases: [pre_llm]}
+      message: {kind: message, domain: pending}
     where:
       all:
         - compare:

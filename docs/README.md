@@ -13,7 +13,7 @@
 
 - [当前架构合同](current-architecture-contract.md)：当前事实和不可破坏约束。
 - [架构概览](overview.md)：从 Event、Policy 到 Enforcement 的完整主线。
-- [安全模型](security-model.md)：资产、信任边界和 T01–T10。
+- [安全模型](security-model.md)：资产、信任边界、T01–T10，以及 Guardrail/Sandbox 责任矩阵。
 
 ## 编写 Policy
 
@@ -33,7 +33,7 @@ Policy 作者指南 → Capability 参考
 
 - [Agent 与 Enforcement 接入](guides/integration.md)：Runtime、Session、Inline、OpenAI 和 MCP。
 - [Gateway 协议参考](reference/gateway-protocol.md)：端点、映射、生命周期和错误。
-- [Gateway 运行指南](guides/operations.md)：启动、环境变量、Secret、Audit 和 Health。
+- [Gateway 运行指南](guides/operations.md)：启动、Agent Sandbox 部署边界、环境变量、Secret、Audit 和 Health。
 - [Remote Core 双容器设计](design/remote-core-deployment.md)：Core/Gateway 责任、协议与失败边界。
 
 ## 修改 Core

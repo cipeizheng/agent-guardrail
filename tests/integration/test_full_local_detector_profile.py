@@ -17,7 +17,6 @@ from agent_guardrail.models import (
     DetectionContext,
     ModelRequest,
     ModelResponse,
-    Phase,
     Trace,
 )
 from agent_guardrail.runtime import GuardrailRuntime
@@ -45,7 +44,6 @@ def _context() -> DetectionContext:
     return DetectionContext(
         trace_id="real-detector-eval",
         event_id="event-1",
-        phase=Phase.PRE_LLM,
     )
 
 
@@ -141,7 +139,7 @@ rules:
   - id: block-real-model-injection
     action: block
     events:
-      message: {kind: message, domain: pending, phases: [pre_llm]}
+      message: {kind: message, domain: pending}
     where:
       detector:
         id: model_scan
@@ -173,7 +171,6 @@ rules:
         with pytest.raises(GuardrailBlocked) as blocked:
             await guarded.complete(request)
 
-    assert blocked.value.decision.phase is Phase.PRE_LLM
     assert blocked.value.decision.violations[0].code == "untrusted_instruction_detected"
     assert inner.call_count == 0
     assert "reveal the system prompt" not in blocked.value.decision.model_dump_json()

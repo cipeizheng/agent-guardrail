@@ -22,7 +22,6 @@ from agent_guardrail.models import (
     FlowAuthorization,
     FlowSecurityContext,
     PendingTrace,
-    Phase,
     SecurityDestination,
     SecurityFactAuthorities,
     SecurityFactAuthority,
@@ -40,7 +39,6 @@ def call(event_id: str, sequence: int, body: str = "safe") -> Event:
         trace_id="trace-1",
         sequence=sequence,
         kind=EventKind.TOOL_CALL,
-        phase=Phase.PRE_TOOL,
         timestamp=NOW,
         origin=EventOrigin.OBSERVED,
         payload=ToolCall(
@@ -82,7 +80,7 @@ rules:
   - id: require-context-channel
     action: block
     events:
-      call: {kind: tool_call, domain: pending, phases: [pre_tool]}
+      call: {kind: tool_call, domain: pending}
     where:
       compare:
         left: {parameter: security_authorization}
@@ -169,13 +167,13 @@ rules:
   - id: log-first
     action: log
     events:
-      call: {kind: tool_call, domain: pending, phases: [pre_tool]}
+      call: {kind: tool_call, domain: pending}
     where: {present: [call, payload]}
     finding: {code: logged, message: Logged match, subjects: [call]}
   - id: block-second
     action: block
     events:
-      call: {kind: tool_call, domain: pending, phases: [pre_tool]}
+      call: {kind: tool_call, domain: pending}
     where: {present: [call, payload]}
     finding: {code: blocked, message: Blocked match, subjects: [call]}
 """
@@ -199,7 +197,7 @@ rules:
   - id: bounded
     action: block
     events:
-      call: {kind: tool_call, domain: pending, phases: [pre_tool]}
+      call: {kind: tool_call, domain: pending}
     where: {present: [call, payload]}
     finding: {code: matched, message: Match, subjects: [call]}
 """
@@ -252,7 +250,7 @@ rules:
   - id: timeout
     action: log
     events:
-      call: {kind: tool_call, domain: pending, phases: [pre_tool]}
+      call: {kind: tool_call, domain: pending}
     where:
       detector:
         id: scan

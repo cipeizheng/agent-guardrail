@@ -9,25 +9,27 @@
 [![Status](https://img.shields.io/badge/status-alpha-f59e0b)](docs/roadmap.md)
 [![License](https://img.shields.io/badge/license-MIT-22c55e)](LICENSE)
 
-Agent Guardrail 在 LLM 和 Tool 边界前后执行显式、失败安全的 Policy 检查。它把严格 YAML Policy 编译为
-不可变 MatchPlan，分析类型化 Agent Event，并在受保护数据或副作用释放前给出可解释 Decision。
+Agent Guardrail 把严格 YAML Policy 编译为不可变 MatchPlan，分析与 Provider 无关的 Agent Event，并返回
+可解释 Decision。应用可通过框架无关 SDK 在任意位置提交 Event；Gateway 还会在具体模型与工具执行检查点
+强制落实 Decision。
 
 项目聚焦三类资产：**用户数据、用户意图和用户资源**。Detector 命中只是证据，不会单独成为安全结论；
 Policy 还需要把这些事实与可信的 source、destination、owner 和 authorization 语境组合。
 
-> **项目状态 — v0.1.0 alpha。** Core Runtime、Inline Wrapper、非流式 OpenAI-compatible Gateway、
+> **项目状态 — v0.1.0 alpha。** 编程式 SDK、Core Runtime、Inline Wrapper、非流式 OpenAI-compatible Gateway、
 > 无状态 MCP Gateway 和远程 Core 路径已经实现并通过测试。当前版本不是完整 Sandbox、流式代理或多租户
 > 控制平面。
 
 ## 为什么使用 Agent Guardrail？
 
-- **不只检测，还执行约束。** `pre_llm` 阻断时不会请求模型；`pre_tool` 阻断时不会执行工具。
+- **分析与可执行边界。** SDK 用户自行决定 Decision 的执行位置；Gateway 会在模型/工具调用前以及输出释放前
+  实施阻断。
 - **唯一、可审计的 Policy 链。** 严格 `version: 3` YAML 进入 `MatchPlan → AnalysisReport → Decision`，
   不存在第二套生产解释器。
 - **Policy 不是可执行载荷。** YAML 不能 import Python、注册 callback、选择文件或网络 endpoint，也不能
   获得任意 I/O 权限。
-- **类型化 Trace 与显式 Relation。** Message、ToolCall、ToolResult 都是不可变 Event；时间先后不会被
-  静默当作 provenance。
+- **类型化 Trace 与显式 Relation。** Message、ModelCall、ToolCallProposal、实际 ToolCall 和 ToolResult
+  都是不可变 Event；时间先后不会被静默当作 provenance。
 - **部署方拥有 capability。** 模型、规则集、进程和凭据由部署选择，Policy 只能看到审查过的 capability
   名称与有界参数。
 - **默认脱敏。** Finding、Violation、Error 和可选 Audit 保存结构化遮罩证据，不保存原始 Secret、PII
@@ -37,20 +39,22 @@ Policy 还需要把这些事实与可信的 source、destination、owner 和 aut
 
 ```mermaid
 flowchart LR
-    A[Agent 或 Client] --> B[Inline / OpenAI / MCP Adapter]
+    A[Agent 或 Client] --> B[编程式 SDK / OpenAI / MCP Adapter]
     B --> C[EnforcementSession]
     C -->|PendingTrace| D[Embedded Runtime 或 Remote Core]
     D --> E[Policy v3 → MatchPlan → SnapshotMatcher]
     E -->|AnalysisReport| F[Decision Analyzer]
     F -->|allow / log / block| C
-    C -->|pre allow / post release| G[LLM 或 Tool 边界]
+    C -->|调用前 allow / 输出释放| G[LLM 或 Tool 边界]
     C -->|脱敏 Violation| H[(Audit)]
 ```
 
-四个 Enforcement Point 复用同一套 Policy 语义：
+Policy 描述语义 Event 与 Relation，不绑定执行位置。Gateway Adapter 将 Provider 流量转换为这些 Event，
+并在四个执行检查点实施 Decision：
 
 ```text
-request → pre_llm → LLM → post_llm → Agent → pre_tool → Tool → post_tool → Agent
+before_model_call → LLM → before_model_output_release
+before_tool_call  → Tool → before_tool_output_release
 ```
 
 分析始终读取已提交 Trace 加完整 pending Event batch。allow/log 会原子提交整批 Event；block 会丢弃原始
@@ -70,7 +74,7 @@ uv run python examples/secret_email_demo.py
 演示使用确定性的 Fake Model 和 Fake Tool，不需要 API Key。关键输出是：
 
 ```text
-blocked at: post_llm
+blocked before tool execution
 llm executions: 1
 send_email executions: 0
 ```
@@ -95,9 +99,8 @@ rules:
     action: block
     events:
       call:
-        kind: tool_call
+        kind: tool_call_proposal
         domain: pending
-        phases: [post_llm, pre_tool]
     where:
       all:
         - tool: {binding: call, name: send_email}
@@ -122,6 +125,7 @@ binding、relation、quantifier、派生值、Finding、预算和可信安全参
 
 | 接入方式 | 适用场景 | 当前保证 |
 | --- | --- | --- |
+| 编程式 SDK | 任意 Python Agent/Framework 能暴露语义 Event | 无需框架专用 Adapter；应用选择插入点并携带显式 `EventRef` Relation |
 | Inline Wrapper | 可以注入 LLM 与 Tool 接口 | 中介经过共享任务级 Session 的调用 |
 | OpenAI-compatible Gateway | Agent 可以修改 OpenAI base URL | 检查完整请求和非流式响应 |
 | MCP Gateway | Tool 来自固定 MCP Server | 每个无状态 `tools/call` 都经过执行前后检查 |
@@ -217,6 +221,12 @@ Agent Guardrail 只能中介实际经过 Wrapper 或 Gateway 的流量。当前�
 - 对直接 Shell、函数、文件系统或任意 HTTP 的 Sandbox/拦截；
 - Web 管理界面或分布式 Policy 服务；
 - Moderation、copyright 或 OCR capability。
+
+如果 Agent 能执行 Shell 或任意代码，应将其部署在独立 Sandbox 中：网络 egress 默认拒绝、文件系统临时且
+最小化、资源有硬上限，并且不持有 Provider 或 Tool 凭据。Guardrail Gateway、Policy/Core、持有凭据的
+Tool Broker 和 Audit 应位于 Sandbox 外。模式、代码和 URL Detector 无法阻止未被观察到的 `curl`、socket、
+syscall、凭据读取、持久化、资源耗尽或 Sandbox 逃逸。详见[威胁边界矩阵](docs/security-model.md#8-guardrail-无法替代的-sandbox-控制)
+和[部署检查清单](docs/guides/operations.md#3-agent-sandbox-与不可绕过部署边界)。
 
 Detector 命中不能证明恶意意图、数据所有权或授权。生产 Rule 应当把 Detector fact 与可信 source/sink
 语境组合。权威边界以[当前架构合同](docs/current-architecture-contract.md)和

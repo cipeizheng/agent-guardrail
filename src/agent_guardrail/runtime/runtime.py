@@ -10,7 +10,7 @@ from typing import Self
 from pydantic import BaseModel, ConfigDict, Field
 
 from agent_guardrail.core import DetectorRegistry, MatchPolicyAnalyzer, PredicateRegistry
-from agent_guardrail.models import Decision, GuardrailContext, PendingTrace
+from agent_guardrail.models import Decision, PendingTrace
 from agent_guardrail.runtime.bootstrap import (
     build_analyzer_from_policy_file,
     build_analyzer_from_policy_yaml,
@@ -117,13 +117,6 @@ class GuardrailRuntime:
         """Return local readiness through the shared Gateway runtime facade."""
 
         return self.ready
-
-    async def evaluate(self, context: GuardrailContext) -> Decision:
-        """Compatibility bridge for the v0.1 single-event decision endpoint."""
-
-        if not self.ready:
-            raise RuntimeNotReadyError("guardrail runtime is not ready")
-        return await self._analyzer.analyze_pending(PendingTrace.from_context(context))
 
     async def analyze_pending(self, pending: PendingTrace) -> Decision:
         """Analyze an atomic pending event batch only while the runtime is ready."""

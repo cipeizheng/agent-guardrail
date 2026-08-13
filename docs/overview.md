@@ -30,15 +30,15 @@ Matcher 和 Analyzer 都不执行 LLM、Tool 或其他 Agent 业务副作用。
 ## 2. 运行图
 
 ```text
-Provider / Framework payload
+Semantic SDK call / Provider payload
           │
           ▼
-Adapter / InputNormalizer
+GuardrailRun / Adapter / InputNormalizer
           │ CandidateEvent batch
           ▼
 EnforcementSession
   ├─ 分配 Event identity、sequence 和 time
-  ├─ 校验 origin、phase、relation、security context 和容量
+  ├─ 校验 origin、relation、security context 和容量
   └─ 构造 immutable PendingTrace
           │
           ▼
@@ -63,14 +63,21 @@ Gateway 的 Decision backend 可以是进程内 `GuardrailRuntime`，也可以�
 长期策略 Event 是：
 
 - `MESSAGE`：封闭的 role 和 TextContent；
-- `TOOL_CALL`：规范化 call ID、工具名和 JSON arguments；
+- `MODEL_CALL`：一次即将发生的模型操作；
+- `TOOL_CALL_PROPOSAL`：模型建议、尚未实际执行的 ToolCall；
+- `TOOL_CALL`：实际准备执行的 call ID、工具名和 JSON arguments；
 - `TOOL_RESULT`：规范化 call ID、工具名和 JSON output。
+
+Event 不含 `pre/post LLM/Tool` Phase；Policy 因而可以用于 Agent 的 memory、retrieval、prompt builder、
+handoff 等任意语义插入位置。`GuardrailRun` 是框架无关 SDK：应用提交这些 Event，并用同一 run 返回的
+`EventRef` 显式连接关系，不需要为每个 Framework 编写专用 Adapter。
 
 `EventOrigin` 只回答声明来自客户端、实际观察还是可信派生，不代表内容可信或已授权。外部输入默认
 `client_asserted`；只有 Enforcement 可以建立 `observed/derived`。
 
 精确来源只存在于类型化 `Event.relations`。Adapter/Enforcement 只能在掌握对应事实时建立
-`derived_from`；`precedes/immediately_precedes/may_influence` 只是顺序或保守可见性，不能冒充数据来源。
+`derived_from` 或 `may_influence`；`precedes/immediately_precedes` 只由 sequence 得出，绝不自动生成
+Relation。
 
 ## 4. Snapshot 与 pending 分析
 
@@ -98,15 +105,19 @@ profile；默认仍为 `local`。文本 `is_similar` 只在部署注入 `Embeddi
 
 ## 6. Enforcement 保证
 
-- `pre_llm` allow 前不请求模型上游。
-- `pre_tool` allow 前不执行工具。
-- 非流式 `post_llm` allow 前不向客户端/Agent 释放原始模型响应。
-- `post_tool` allow 前不释放 ToolResult；但 post block 不能撤销已经执行的工具。
+- `before_model_call` allow 前不请求模型上游。
+- `before_tool_call` allow 前不执行工具。
+- 非流式 `before_model_output_release` allow 前不向客户端/Agent 释放原始模型响应。
+- `before_tool_output_release` allow 前不释放 ToolResult；但输出检查 block 不能撤销已经执行的工具。
 - block 不提交原始 pending Event，Audit 只接收脱敏 Decision。
+
+这些名称只属于 OpenAI/MCP Gateway 的执行检查点，不进入 Event、PendingTrace、Decision、Inline Wrapper
+或 YAML。编程式 SDK 只负责分析并返回 Decision；应用必须在真正副作用前检查 `blocked`。
 
 OpenAI 和 MCP Gateway 每个受保护 HTTP 请求创建独立 Session；Inline LLM 与 Tool Wrapper 则必须共享同一
 任务级 Session/Trace。Gateway 只能中介经过它的流量，Agent 直接 Shell/函数/HTTP 需要 Framework Hook、
-Sandbox 或网络代理。
+Sandbox 或网络代理。Guardrail 不拦截 syscall、进程、宿主文件系统或任意网络 egress；对应边界外威胁和
+所需强制控制见[安全模型的 Sandbox 责任矩阵](security-model.md#8-guardrail-无法替代的-sandbox-控制)。
 
 ## 7. 接下来读什么
 

@@ -9,28 +9,29 @@ English | [简体中文](README.zh-CN.md)
 [![Status](https://img.shields.io/badge/status-alpha-f59e0b)](docs/roadmap.md)
 [![License](https://img.shields.io/badge/license-MIT-22c55e)](LICENSE)
 
-Agent Guardrail places explicit, fail-safe policy checks before and after LLM and tool
-boundaries. It compiles a strict YAML policy into an immutable match plan, analyzes typed agent
-events, and returns an explainable decision before protected data or side effects are released.
+Agent Guardrail compiles a strict YAML policy into an immutable match plan, analyzes
+provider-neutral agent events, and returns explainable decisions. Applications can submit events
+through a framework-neutral SDK; Gateways additionally enforce decisions at concrete model and
+tool execution checkpoints.
 
 The project focuses on three assets: **user data, user intent, and user resources**. Detector hits
 are evidence, not security decisions by themselves; policies combine those facts with trusted
 source, destination, ownership, and authorization context.
 
-> **Project status — v0.1.0 alpha.** The core runtime, Inline wrappers, non-streaming
+> **Project status — v0.1.0 alpha.** The programmatic SDK, core runtime, Inline wrappers, non-streaming
 > OpenAI-compatible Gateway, stateless MCP Gateway, and remote Core path are implemented and
 > tested. This release is not a complete sandbox, streaming proxy, or multi-tenant control plane.
 
 ## Why Agent Guardrail?
 
-- **Enforcement, not just detection.** A blocked `pre_llm` request never reaches the model; a
-  blocked `pre_tool` request never executes the tool.
+- **Analysis plus enforceable boundaries.** SDK users choose where decisions apply; Gateway blocks
+  before model/tool calls and before model/tool outputs are released.
 - **One auditable policy chain.** Strict `version: 3` YAML becomes `MatchPlan → AnalysisReport →
   Decision`; there is no second production interpreter.
 - **No executable policy payloads.** YAML cannot import Python, register callbacks, select files,
   choose network endpoints, or acquire arbitrary I/O permissions.
-- **Typed traces and explicit relations.** Messages, tool calls, and tool results are immutable
-  events. Temporal order is never silently treated as provenance.
+- **Typed traces and explicit relations.** Messages, model calls, tool proposals, actual tool calls,
+  and tool results are immutable events. Temporal order is never silently treated as provenance.
 - **Deployment-owned capabilities.** Models, rulesets, processes, and credentials are selected by
   the deployment, while Policy sees only reviewed capability names and bounded parameters.
 - **Redacted by construction.** Findings, violations, errors, and optional audit records contain
@@ -40,20 +41,22 @@ source, destination, ownership, and authorization context.
 
 ```mermaid
 flowchart LR
-    A[Agent or client] --> B[Inline / OpenAI / MCP adapter]
+    A[Agent or client] --> B[Programmatic SDK / OpenAI / MCP adapter]
     B --> C[EnforcementSession]
     C -->|PendingTrace| D[Embedded Runtime or Remote Core]
     D --> E[Policy v3 → MatchPlan → SnapshotMatcher]
     E -->|AnalysisReport| F[Decision Analyzer]
     F -->|allow / log / block| C
-    C -->|pre allow / post release| G[LLM or Tool boundary]
+    C -->|allow before call / output release| G[LLM or Tool boundary]
     C -->|redacted violations| H[(Audit)]
 ```
 
-The same policy semantics are reused at four enforcement points:
+Policies describe semantic events and relations, independently of enforcement placement. Gateway
+adapters map provider traffic into those events and use four execution checkpoints:
 
 ```text
-request → pre_llm → LLM → post_llm → Agent → pre_tool → Tool → post_tool → Agent
+before_model_call → LLM → before_model_output_release
+before_tool_call  → Tool → before_tool_output_release
 ```
 
 Analysis always sees the committed trace plus the complete pending event batch. Allow and log
@@ -74,7 +77,7 @@ uv run python examples/secret_email_demo.py
 The demo uses a deterministic fake model and tool, so it needs no API key. The important output is:
 
 ```text
-blocked at: post_llm
+blocked before tool execution
 llm executions: 1
 send_email executions: 0
 ```
@@ -99,9 +102,8 @@ rules:
     action: block
     events:
       call:
-        kind: tool_call
+        kind: tool_call_proposal
         domain: pending
-        phases: [post_llm, pre_tool]
     where:
       all:
         - tool: {binding: call, name: send_email}
@@ -127,6 +129,7 @@ derived values, findings, budgets, and trusted security parameters.
 
 | Integration | Best fit | Current guarantee |
 | --- | --- | --- |
+| Programmatic SDK | Any Python agent/framework can expose semantic events | No framework adapter required; the application chooses every insertion point and carries explicit `EventRef` relations |
 | Inline wrappers | You can inject LLM and tool interfaces | Mediates calls passing through the shared task-level session |
 | OpenAI-compatible Gateway | The agent can change its OpenAI base URL | Checks complete requests and non-streaming responses |
 | MCP Gateway | Tools are exposed by a fixed MCP server | Checks every stateless `tools/call` before and after execution |
@@ -227,6 +230,14 @@ currently provide:
 - a sandbox or interception for direct shell, function, filesystem, or arbitrary HTTP access;
 - a web management UI or distributed policy service;
 - moderation, copyright, or OCR capabilities.
+
+If an agent can execute shell commands or arbitrary code, deploy it in a separate sandbox with
+default-deny network egress, ephemeral/minimal filesystem access, resource limits, and no
+provider or tool credentials. Keep the Guardrail Gateway, Policy/Core, credentialed tool brokers,
+and audit outside that sandbox. Pattern, code, and URL detectors cannot stop an unobserved
+`curl`, socket, syscall, credential read, persistence attempt, resource-exhaustion attack, or
+sandbox escape. See the [threat boundary matrix](docs/security-model.md#8-guardrail-无法替代的-sandbox-控制)
+and [deployment checklist](docs/guides/operations.md#3-agent-sandbox-与不可绕过部署边界).
 
 A detector hit is not proof of malicious intent, data ownership, or authorization. Production
 rules should combine detector facts with trusted source/sink context. The authoritative boundaries

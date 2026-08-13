@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from agent_guardrail.models import Decision, PendingTrace
 
-REMOTE_CORE_PROTOCOL_VERSION = 1
+REMOTE_CORE_PROTOCOL_VERSION = 2
 
 
 class RemoteAnalyzeRequest(BaseModel):
@@ -16,7 +16,7 @@ class RemoteAnalyzeRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    protocol_version: Literal[1] = REMOTE_CORE_PROTOCOL_VERSION
+    protocol_version: Literal[2] = REMOTE_CORE_PROTOCOL_VERSION
     pending: PendingTrace
 
 
@@ -25,7 +25,7 @@ class RemoteAnalyzeResponse(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    protocol_version: Literal[1] = REMOTE_CORE_PROTOCOL_VERSION
+    protocol_version: Literal[2] = REMOTE_CORE_PROTOCOL_VERSION
     decision: Decision
 
 
@@ -34,7 +34,7 @@ class RemotePolicyInfoResponse(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    protocol_version: Literal[1] = REMOTE_CORE_PROTOCOL_VERSION
+    protocol_version: Literal[2] = REMOTE_CORE_PROTOCOL_VERSION
     version: int = Field(ge=1)
     content_hash: str = Field(min_length=8)
 

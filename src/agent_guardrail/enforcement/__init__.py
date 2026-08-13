@@ -1,6 +1,7 @@
 """Production enforcement sessions, protocols and inline boundary wrappers."""
 
 from agent_guardrail.enforcement.audit import InMemoryAuditSink, JsonlAuditSink, NullAuditSink
+from agent_guardrail.enforcement.checkpoints import EnforcementCheckpoint
 from agent_guardrail.enforcement.exceptions import GuardrailBlocked, GuardrailUnavailable
 from agent_guardrail.enforcement.inline_llm import GuardedLLMClient
 from agent_guardrail.enforcement.inline_tools import GuardedToolExecutor
@@ -16,6 +17,7 @@ __all__ = [
     "AuditSink",
     "Clock",
     "EnforcementSession",
+    "EnforcementCheckpoint",
     "GuardedLLMClient",
     "GuardedToolExecutor",
     "GuardrailBlocked",

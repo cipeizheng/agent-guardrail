@@ -42,7 +42,7 @@ from agent_guardrail.core.match_plan import (
     SplitLinesDerivation,
     ValueType,
 )
-from agent_guardrail.models import AnalysisScope, EventKind, EventOrigin, Phase
+from agent_guardrail.models import AnalysisScope, EventKind, EventOrigin
 
 
 def literal(value: str | int | float | bool) -> LiteralValue:
@@ -405,15 +405,9 @@ def test_match_plan_represents_pending_scope_capabilities_ranges_and_parameters(
     assert compiled.parameters[0].required is True
 
 
-def test_event_binding_rejects_aggregate_kinds_invalid_phases_and_duplicate_filters() -> None:
+def test_event_binding_rejects_non_semantic_kinds_and_duplicate_filters() -> None:
     with pytest.raises(ValidationError, match="independent Event kind"):
-        EventBinding(name="request", kind=EventKind.MODEL_REQUEST)
-    with pytest.raises(ValidationError, match="incompatible"):
-        EventBinding(
-            name="message",
-            kind=EventKind.MESSAGE,
-            phases=(Phase.PRE_TOOL,),
-        )
+        EventBinding(name="decision", kind=EventKind.GUARDRAIL_DECISION)
     with pytest.raises(ValidationError, match="origins must be unique"):
         EventBinding(
             name="message",

@@ -31,7 +31,6 @@ from agent_guardrail.models import (
     FlowSecurityContext,
     OwnerScope,
     PendingTrace,
-    Phase,
     RelationKind,
     SecurityDestination,
     SecurityFactAuthorities,
@@ -39,6 +38,7 @@ from agent_guardrail.models import (
     Trace,
 )
 from agent_guardrail.runtime import GuardrailRuntime, PolicyAnalyzer
+from agent_guardrail.sdk import EventRef, GuardrailRun, SubmissionResult
 
 __version__ = "0.1.0"
 
@@ -61,11 +61,13 @@ __all__ = [
     "GuardedToolExecutor",
     "GuardrailBlocked",
     "GuardrailRuntime",
+    "GuardrailRun",
     "GuardrailUnavailable",
     "OwnerScope",
-    "Phase",
     "PendingTrace",
     "PolicyAnalyzer",
+    "EventRef",
+    "SubmissionResult",
     "RelationKind",
     "SecurityDestination",
     "SecurityFactAuthorities",

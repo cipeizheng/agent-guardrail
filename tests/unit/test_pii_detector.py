@@ -14,7 +14,7 @@ from agent_guardrail.detectors.pii import (
     PresidioAnalyzerBackend,
     PresidioPIIProfile,
 )
-from agent_guardrail.models import DetectionContext, Phase
+from agent_guardrail.models import DetectionContext
 from tests.support import (
     FAKE_CN_MOBILE,
     FAKE_CN_RESIDENT_ID,
@@ -28,7 +28,6 @@ def detection_context(*, event_id: str = "event-1") -> DetectionContext:
     return DetectionContext(
         trace_id="trace-1",
         event_id=event_id,
-        phase=Phase.PRE_TOOL,
     )
 
 

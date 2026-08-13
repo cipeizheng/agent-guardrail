@@ -8,7 +8,6 @@ from pydantic import SecretStr, ValidationError
 
 from agent_guardrail.enforcement import JsonlAuditSink
 from agent_guardrail.gateway import GatewaySettings
-from agent_guardrail.models import PendingTrace
 from tests.support import FAKE_SECRET, secret_analyzer, tool_context
 
 
@@ -115,7 +114,7 @@ def test_gateway_remote_backend_requires_core_and_forbids_local_assets() -> None
 @pytest.mark.asyncio
 async def test_jsonl_audit_contains_only_sanitized_decision_summary(tmp_path: Path) -> None:
     decision = await secret_analyzer().analyze_pending(
-        PendingTrace.from_context(tool_context(body=FAKE_SECRET))
+        tool_context(body=FAKE_SECRET)
     )
     audit_path = tmp_path / "audit/decisions.jsonl"
     sink = JsonlAuditSink(audit_path)
