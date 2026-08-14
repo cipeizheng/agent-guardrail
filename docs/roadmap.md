@@ -45,11 +45,15 @@ Detector 执行器。它只返回 fact，不返回 Decision，也不控制应用
 
 ## P3：跨事件安全语境
 
-- P3 暂不增加 Tool risk、意图判断或默认 source→sink block 规则；先用锁定 AgentDojo pilot 比较同一真实
-  Agent 在无防御和当前 Detector + source fact + Relation + release block 下的正常 utility 与 targeted ASR；
+- P3 暂不增加 Tool risk、意图判断或默认 source→sink block 规则；评测分两层：策略决策点 detection
+  benchmark（见 `evals/detection/README.md`）按能力轴 replay trace 并输出混淆矩阵；锁定 AgentDojo pilot
+  保持为端到端对照，只验证 release block 不变量与正常效用，不单独承载方向是否继续的判断；
 - pilot 对正常/攻击样本使用同一 source 分类，不读取攻击标签；关系只证明事件来源，不独立决定 block；
 - 继续条件预先固定为正常 utility 下降不超过 5 个百分点、targeted ASR 相对下降至少 50%，且 block 的原始
-  ToolResult 未释放给模型；不满足时停止通用 prompt-injection 防火墙方向并重新限定产品能力；
+  ToolResult 未释放给模型；baseline ASR 为 0 时相对下降记为不可计算；
+- 判据失败后的走向（收窄产品范围、修正规则粒度或停止该方向）不在预注册内决定，在 `docs/proposals/`
+  中依据失败样本讨论。区分两类响应：修正已测量的粒度缺陷（如字段级来源）必须附带新的预注册判据后
+  重跑；事后增加放行规则直到指标通过仍然禁止；
 - 通过 pilot 后才根据真实失败样本决定是否需要 destination、Tool risk 或 T01–T04 Policy；
 - T10 保持明确边界外，直到存在 Framework Hook、Sandbox 或网络代理。
 

@@ -40,7 +40,7 @@ priority_capabilities:
     status: verified
     threat_paths: [T01, T02, T05, T09]
     implementation: pii
-    note: 校验型本地规则及 full_local_v1 的 Presidio 2.2.363/spaCy 英文 person/location NER 已真实运行，覆盖并超过固定 Invariant 基线；中文身份证/手机号是额外本地校验能力，通用多语言 NER 不属于完成定义。
+    note: 校验型本地规则及 full_local_v1 的 Presidio 2.2.363/spaCy 英文 person/location NER 已真实运行；中文身份证/手机号是额外本地校验能力，通用多语言 NER 不属于完成定义。与固定 Invariant 基线的对比数据见对应评测报告，本矩阵只记录验证状态。
 
   - id: P0-D04
     name: prompt_injection_model

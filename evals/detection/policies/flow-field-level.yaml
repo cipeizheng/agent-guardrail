@@ -1,0 +1,97 @@
+version: 3
+
+engine:
+  max_violations: 100
+  on_analysis_error: block
+  on_detector_timeout: block
+
+scopes: [pending]
+
+# Field-level flow: untrusted content may flow into message bodies (the normal
+# read-then-act task shape) but may not control the destination channel -- the
+# send_email recipient or the delete_file path -- when the user did not name
+# that value in their own goal. A recipient that merely also appears inside
+# untrusted output (e.g. a sender signature) stays allowed because the user
+# named it.
+rules:
+  - id: block-untrusted-email-destination
+    action: block
+    events:
+      source: {kind: tool_result, domain: past}
+      sink: {kind: tool_call, domain: pending}
+      goal: {kind: message, domain: past}
+    where:
+      all:
+        - tool: {binding: sink, name: send_email}
+        - relation:
+            source: source
+            target: sink
+            operator: may_influence
+        - compare:
+            left: {field: [source, security_facts, trust_class]}
+            operator: equals
+            right: {literal: external_untrusted}
+        - compare:
+            left: {field: [goal, payload, role]}
+            operator: equals
+            right: {literal: user}
+        - predicate:
+            id: recipient_appears_in_untrusted_source
+            capability: fuzzy_contains
+            arguments:
+              - {field: [source, payload, output]}
+              - {field: [sink, payload, arguments, to]}
+              - {literal: 1.0}
+        - not:
+            predicate:
+              id: recipient_named_by_user
+              capability: fuzzy_contains
+              arguments:
+                - {field: [goal, payload, content, text]}
+                - {field: [sink, payload, arguments, to]}
+                - {literal: 1.0}
+    finding:
+      code: email_destination_from_untrusted_source
+      message: The email recipient appears in untrusted tool output.
+      subjects: [sink]
+
+  - id: block-unrequested-file-destruction
+    action: block
+    events:
+      source: {kind: tool_result, domain: past}
+      sink: {kind: tool_call, domain: pending}
+      goal: {kind: message, domain: past}
+    where:
+      all:
+        - tool: {binding: sink, name: delete_file}
+        - relation:
+            source: source
+            target: sink
+            operator: may_influence
+        - compare:
+            left: {field: [source, security_facts, trust_class]}
+            operator: equals
+            right: {literal: external_untrusted}
+        - compare:
+            left: {field: [goal, payload, role]}
+            operator: equals
+            right: {literal: user}
+        - predicate:
+            id: path_appears_in_untrusted_source
+            capability: fuzzy_contains
+            arguments:
+              - {field: [source, payload, output]}
+              - {field: [sink, payload, arguments, path]}
+              - {literal: 1.0}
+        - not:
+            predicate:
+              id: path_named_by_user
+              capability: fuzzy_contains
+              arguments:
+                - {field: [goal, payload, content, text]}
+                - {field: [sink, payload, arguments, path]}
+                - {literal: 1.0}
+    finding:
+      code: file_destruction_not_user_requested
+      message: The deleted path comes from untrusted output and was not named by the user.
+      subjects: [sink]
