@@ -19,7 +19,7 @@ Presidio/Transformers detector。
 | Invariant | 本项目 |
 | --- | --- |
 | `Policy.analyze(trace)` | 无状态 snapshot → AnalysisReport |
-| `Monitor` | committed Finding identity 去重 |
+| `Monitor` | 未实现；增量 Finding 去重属于 P4 roadmap |
 | typed/collection binding | typed Event / 有界 collection binding |
 | predicate / derived variable | 声明式条件或可信 Predicate / derive |
 | `raise PolicyViolation` | 静态脱敏 Finding |
@@ -42,7 +42,7 @@ Presidio/Transformers detector。
 | I08 | exact relation | direct/ancestor 类型化 Relation |
 | I09 | stateless | 确定性 SnapshotMatcher |
 | I10 | whole-pending | past + pending，subject 含 pending |
-| I11 | incremental | `(trace_id, finding.id)` committed identity |
+| I11 | incremental | 未对齐（P4：增量 Matcher/cache） |
 | I12 | host capability | 显式 Registry；拒绝 Policy import |
 | I13 | range/evidence | 有界脱敏位置与 evidence |
 | I14 | parameter | 可信 typed scalar |
@@ -50,11 +50,10 @@ Presidio/Transformers detector。
 ## 4. 有意差异
 
 - Policy 不能 import、指定 module/function 或遍历任意 Python object。
-- Monitor/Matcher 不调用或包装 Tool/LLM。
+- Matcher 不调用或包装 Tool/LLM。
 - 时间先后不生成 data lineage。
 - Finding/Error/Decision 不携带完整 Event/content。
 - 使用分项预算，不用单一迭代上限。
-- tentative pending 不推进去重，避免 block 后重试被错误放行。
 
 新增语义先扩展相邻 I01–I14 生产行为测试。作者格式见
 [Policy 作者指南](../guides/policy-authoring.md)，执行合同见

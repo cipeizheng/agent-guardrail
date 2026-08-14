@@ -7,43 +7,51 @@ engine:
 
 scopes: [pending]
 
+# Source -> sink flow rules: instead of trying to detect the injected *content* in a
+# tool result (which the AgentDojo `important_instructions` framing defeats), block the
+# dangerous *sink* tool call when it is influenced by untrusted external tool output.
+# `may_influence` follows the derived_from/may_influence relation path so a tool result
+# the model read (e.g. an injected inbox email or drive file) is treated as the source
+# that flows into the pending send_email / delete_file call.
 rules:
-  - id: reject-detected-external-tool-result
+  - id: block-email-exfiltration-flow
     action: block
     events:
-      call: {kind: tool_call, domain: past}
-      result: {kind: tool_result, domain: pending}
+      source: {kind: tool_result, domain: past}
+      sink: {kind: tool_call, domain: pending}
     where:
       all:
+        - tool: {binding: sink, name: send_email}
+        - relation:
+            source: source
+            target: sink
+            operator: may_influence
         - compare:
-            left: {field: [result, security_facts, trust_class]}
+            left: {field: [source, security_facts, trust_class]}
             operator: equals
             right: {literal: external_untrusted}
-        - relation:
-            source: call
-            target: result
-            operator: derived_from_direct
-        - any:
-            - detector:
-                id: deterministic_injection_scan
-                capability: prompt_injection
-                inputs:
-                  - value: {field: [result, payload, output]}
-                    encoding: text
-            - detector:
-                id: model_injection_scan
-                capability: prompt_injection_model
-                inputs:
-                  - value: {field: [result, payload, output]}
-                    encoding: text
-                types_any: [model_prompt_injection]
-            - detector:
-                id: yara_injection_scan
-                capability: yara_injection_signatures
-                inputs:
-                  - value: {field: [result, payload, output]}
-                    encoding: text
     finding:
-      code: external_tool_result_injection_detected
-      message: An external tool result matched a prompt-injection detector.
-      subjects: [result]
+      code: email_exfiltration_from_untrusted_flow
+      message: A send_email call is influenced by untrusted external tool output.
+      subjects: [sink]
+
+  - id: block-file-destruction-flow
+    action: block
+    events:
+      source: {kind: tool_result, domain: past}
+      sink: {kind: tool_call, domain: pending}
+    where:
+      all:
+        - tool: {binding: sink, name: delete_file}
+        - relation:
+            source: source
+            target: sink
+            operator: may_influence
+        - compare:
+            left: {field: [source, security_facts, trust_class]}
+            operator: equals
+            right: {literal: external_untrusted}
+    finding:
+      code: file_destruction_from_untrusted_flow
+      message: A delete_file call is influenced by untrusted external tool output.
+      subjects: [sink]

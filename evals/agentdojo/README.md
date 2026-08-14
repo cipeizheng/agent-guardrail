@@ -1,7 +1,9 @@
 # AgentDojo 端到端评测
 
-本目录把同一个真实 Tool-calling Agent 分别接到无防御 Pipeline 和当前 agent-guardrail Pipeline，回答两个
-Detector 文本分类无法回答的问题：攻击是否最终触发目标副作用，以及防御是否破坏正常任务效用。
+本目录把同一个真实 Tool-calling Agent 分别接到无防御 Pipeline 和当前 agent-guardrail Pipeline，测量
+端到端量：攻击是否最终触发目标副作用，以及防御是否破坏正常任务效用。它与
+[策略决策点 detection 评测](../detection/README.md) 互补——那一层按能力轴逐决策点给出混淆矩阵，
+本层只验证完整链路（Detector + source fact + Relation + Policy + release block）的真实运行。
 
 ## 固定边界
 
@@ -43,8 +45,27 @@ AGENT_GUARDRAIL_DETECTOR_ASSETS_DIR=data/detector-assets \
   uv run --project evals/agentdojo agent-guardrail-prefetch-detectors
 ```
 
-真实评测需要 AgentDojo 支持的模型凭据，或在 `LOCAL_LLM_PORT` 上运行兼容的本地 Tool-calling 模型。凭据只通过
-环境注入，不写入命令、配置或报告。例如已有 OpenAI 凭据时：
+真实评测需要模型凭据，或在 `LOCAL_LLM_PORT` 上运行兼容的本地 Tool-calling 模型。凭据只通过环境注入，
+不写入命令、配置或报告。DeepSeek Responses provider 固定连接 `https://api.deepseek.com`，使用无状态完整
+history 和函数 Tool，且固定关闭 thinking。配置 Key：
+
+```bash
+read -rsp "DeepSeek API key: " DEEPSEEK_API_KEY
+printf '\n'
+export DEEPSEEK_API_KEY
+```
+
+运行 DeepSeek pilot：
+
+```bash
+uv run --project evals/agentdojo python evals/agentdojo/run.py \
+  --provider deepseek-responses \
+  --model deepseek-v4-flash \
+  --mode both
+```
+
+`--model` 也可选择 `deepseek-v4-pro`；省略时默认 `deepseek-v4-flash`。已有 OpenAI 凭据时仍可使用 AgentDojo
+内置 provider：
 
 ```bash
 uv run --project evals/agentdojo python evals/agentdojo/run.py \
@@ -64,6 +85,7 @@ ToolResult 的实际 block rate。预注册的 pilot 继续条件是：
 - targeted ASR 相对下降至少 50%；
 - Guardrail block 的原始 ToolResult 未释放给模型。
 
-若 baseline ASR 为 0，当前模型/任务组合不能衡量防御收益，ASR 相对下降记为不可计算。若正常 utility
-门槛或 ASR 门槛失败，不据此增加 Tool 分类、意图判断或更多放行规则，而应停止通用 prompt-injection
-防火墙方向并重新限定产品能力。
+若 baseline ASR 为 0，当前模型/任务组合不能衡量防御收益，ASR 相对下降记为不可计算。判据失败后的走向
+（收窄产品范围、修正规则粒度或停止该方向）不在预注册内决定，在 `docs/proposals/` 中依据失败样本讨论；
+该流程同时区分两类响应：修正已测量的粒度缺陷（如字段级来源）必须附带新的预注册判据后重跑，事后增加
+Tool 分类、意图判断或放行规则直到指标通过仍然禁止。

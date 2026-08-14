@@ -51,13 +51,6 @@ class AnalysisScope(StrEnum):
     PENDING = "pending"
 
 
-class FindingEmission(StrEnum):
-    """Whether a report contains all matches or only newly observed matches."""
-
-    ALL = "all"
-    NEW = "new"
-
-
 class EvidenceSource(StrEnum):
     """The trusted subsystem that produced safe evidence."""
 
@@ -262,7 +255,6 @@ class AnalysisReport(AnalysisModel):
 
     model_version: Literal[1] = 1
     scope: AnalysisScope
-    emission: FindingEmission
     policy_version: StrictInt = Field(ge=1)
     policy_hash: str = Field(min_length=8, max_length=128)
     trace_id: str = Field(min_length=1, max_length=256)

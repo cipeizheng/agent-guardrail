@@ -42,7 +42,6 @@ from agent_guardrail.core.match_plan import (
     ValueType,
 )
 from agent_guardrail.core.matcher import SnapshotMatcher
-from agent_guardrail.core.monitor import MatchMonitor
 from agent_guardrail.models import (
     AnalysisErrorCode,
     AnalysisScope,
@@ -52,7 +51,6 @@ from agent_guardrail.models import (
     EventOrigin,
     EventRelation,
     EventSecurityFacts,
-    FindingEmission,
     MessageRole,
     PendingTrace,
     RelationKind,
@@ -239,19 +237,6 @@ def matcher(match_plan: MatchPlan) -> SnapshotMatcher:
         match_plan,
         policy_version=3,
         policy_hash="policy-hash-1234",
-    )
-
-
-def monitor(
-    match_plan: MatchPlan,
-    *,
-    max_finding_identities: int = 100_000,
-) -> MatchMonitor:
-    return MatchMonitor(
-        match_plan,
-        policy_version=3,
-        policy_hash="policy-hash-1234",
-        max_finding_identities=max_finding_identities,
     )
 
 
@@ -825,7 +810,6 @@ async def test_i10_stateless_pending_analysis_filters_past_only_subjects() -> No
     ).analyze_pending(batch)
 
     assert report.scope is AnalysisScope.PENDING
-    assert report.emission is FindingEmission.ALL
     assert report.event_ids == ("h1", "n1", "n2", "n3")
     assert report.pending_event_ids == ("n1", "n2", "n3")
     assert [finding.subject_event_ids for finding in report.findings] == [
@@ -1169,151 +1153,3 @@ async def test_global_budget_exhaustion_stops_later_rules() -> None:
 
     assert [finding.rule_id for finding in report.findings] == ["first"]
     assert report.errors[0].rule_id == "second"
-
-
-@pytest.mark.asyncio
-async def test_i11_monitor_emits_only_new_committed_snapshot_findings() -> None:
-    analyzer = monitor(plan(rule()))
-    first_snapshot = trace(message("h1", 0, "blocked old"))
-
-    first = await analyzer.analyze(first_snapshot)
-    repeated = await analyzer.analyze(first_snapshot.model_copy(deep=True))
-    appended = await analyzer.analyze(
-        trace(
-            message("h1", 0, "blocked old"),
-            message("n1", 1, "blocked new"),
-        )
-    )
-    safe_append = await analyzer.analyze(
-        trace(
-            message("h1", 0, "blocked old"),
-            message("n1", 1, "blocked new"),
-            message("n2", 2, "safe"),
-        )
-    )
-
-    assert first.emission is FindingEmission.NEW
-    assert [finding.subject_event_ids for finding in first.findings] == [("h1",)]
-    assert repeated.findings == ()
-    assert [finding.subject_event_ids for finding in appended.findings] == [("n1",)]
-    assert safe_append.findings == ()
-    assert analyzer.seen_count == 2
-
-
-@pytest.mark.asyncio
-async def test_pending_findings_are_tentative_and_repeat_until_committed() -> None:
-    selected_plan = plan(
-        rule(),
-        scopes=(AnalysisScope.SNAPSHOT, AnalysisScope.PENDING),
-    )
-    analyzer = monitor(selected_plan)
-    batch = pending_trace((), (message("n1", 0, "blocked"),))
-
-    first = await analyzer.analyze_pending(batch)
-    retry = await analyzer.analyze_pending(batch.model_copy(deep=True))
-
-    assert first.emission is FindingEmission.NEW
-    assert len(first.findings) == 1
-    assert retry.findings == first.findings
-    assert analyzer.seen_count == 0
-
-    committed = await analyzer.analyze(trace(message("n1", 0, "blocked")))
-    repeated = await analyzer.analyze(trace(message("n1", 0, "blocked")))
-    assert committed.findings == first.findings
-    assert repeated.findings == ()
-    assert analyzer.seen_count == 1
-
-
-@pytest.mark.asyncio
-async def test_monitor_pending_analysis_filters_already_committed_findings() -> None:
-    selected_plan = plan(
-        rule(),
-        scopes=(AnalysisScope.SNAPSHOT, AnalysisScope.PENDING),
-    )
-    analyzer = monitor(selected_plan)
-    await analyzer.analyze(trace(message("h1", 0, "blocked old")))
-    batch = pending_trace(
-        (message("h1", 0, "blocked old"),),
-        (message("n1", 1, "blocked new"),),
-    )
-
-    report = await analyzer.analyze_pending(batch)
-
-    assert [finding.subject_event_ids for finding in report.findings] == [("n1",)]
-    assert analyzer.seen_count == 1
-
-
-@pytest.mark.asyncio
-async def test_monitor_errors_do_not_advance_dedupe_state() -> None:
-    capability_rule = rule(
-        rule_id="capability",
-        where=MatchCondition(
-            predicate=PredicateCondition(id="check", capability="trusted_check")
-        ),
-    )
-    selected_plan = plan(capability_rule, rule(rule_id="structural"))
-    analyzer = monitor(selected_plan)
-    snapshot = trace(message("m1", 0, "blocked"))
-
-    first = await analyzer.analyze(snapshot)
-    retry = await analyzer.analyze(snapshot)
-
-    assert [finding.rule_id for finding in first.findings] == ["structural"]
-    assert retry.findings == first.findings
-    assert first.errors[0].code is AnalysisErrorCode.CAPABILITY_ERROR
-    assert analyzer.seen_count == 0
-
-
-@pytest.mark.asyncio
-async def test_monitor_identity_state_budget_is_atomic_and_retryable() -> None:
-    analyzer = monitor(plan(rule()), max_finding_identities=1)
-    oversized = trace(
-        message("m1", 0, "blocked one"),
-        message("m2", 1, "blocked two"),
-    )
-
-    first = await analyzer.analyze(oversized)
-    retry = await analyzer.analyze(oversized)
-
-    assert first.findings == ()
-    assert first.errors[0].code is AnalysisErrorCode.RESOURCE_EXHAUSTED
-    assert retry == first
-    assert analyzer.seen_count == 0
-
-    accepted = await analyzer.analyze(trace(message("m1", 0, "blocked one")))
-    assert len(accepted.findings) == 1
-    assert analyzer.seen_count == 1
-
-
-@pytest.mark.asyncio
-async def test_monitor_state_is_namespaced_by_trace_and_resettable() -> None:
-    analyzer = monitor(plan(rule()))
-    first = trace(message("m1", 0, "blocked"))
-    second_event = message("m1", 0, "blocked").model_copy(
-        update={"trace_id": "trace-2"},
-        deep=True,
-    )
-    second = Trace(id="trace-2", events=(second_event,))
-
-    assert len((await analyzer.analyze(first)).findings) == 1
-    assert len((await analyzer.analyze(second)).findings) == 1
-    assert analyzer.seen_count == 2
-
-    analyzer.reset("trace-1")
-    assert analyzer.seen_count == 1
-    assert len((await analyzer.analyze(first)).findings) == 1
-    analyzer.reset()
-    assert analyzer.seen_count == 0
-
-
-def test_monitor_configuration_and_reset_are_strict() -> None:
-    with pytest.raises(TypeError, match="integer"):
-        monitor(plan(rule()), max_finding_identities=True)
-    with pytest.raises(ValueError, match="hard bounds"):
-        monitor(plan(rule()), max_finding_identities=0)
-
-    analyzer = monitor(plan(rule()))
-    with pytest.raises(TypeError, match="string"):
-        analyzer.reset(7)  # type: ignore[arg-type]
-    with pytest.raises(ValueError, match="trimmed"):
-        analyzer.reset(" trace-1")

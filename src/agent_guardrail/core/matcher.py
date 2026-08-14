@@ -63,7 +63,6 @@ from agent_guardrail.models import (
     EvidenceSource,
     Finding,
     FindingBinding,
-    FindingEmission,
     FindingEvidence,
     FindingLocation,
     PendingTrace,
@@ -238,7 +237,6 @@ class SnapshotMatcher:
         )
         base = {
             "scope": scope,
-            "emission": FindingEmission.ALL,
             "policy_version": self._policy_version,
             "policy_hash": self._policy_hash,
             "trace_id": trace_id,

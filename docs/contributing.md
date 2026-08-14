@@ -51,7 +51,7 @@ flowchart TD
 | Registry/linking | `core/registry.py`、`core/capabilities.py` |
 | 共享 Detector 执行边界 | `core/detector_executor.py` |
 | 默认 capability | `config/defaults.py`、`predicates/`、`detectors/` |
-| Matcher/Monitor | `core/matcher.py`、`core/monitor.py` |
+| Matcher | `core/matcher.py` |
 | Finding/Error → Decision | `core/decision_analyzer.py` |
 | v3 Policy Loader | `config/loader.py` |
 | Session、tentative stream inspection 与 normalization | `enforcement/session.py`、`input_normalizer.py` |
@@ -121,6 +121,7 @@ MockTransport/Fake Upstream，不访问真实模型 API。
 - 流式文档是否明确承认已释放窗口不能撤回，而没有冒充非流式原子保证？
 - Detector fact 是否与 T01–T10 的可信 source/sink 语境组合？
 - 文档是否把 planned、adapter_only、fake 或目标场景写成已交付？
+- 文档是否把未来决策写成了既定结论，或在状态/评测叙述里混入未附数据的比较性断言？
 
 ## 8. 完成与提交
 

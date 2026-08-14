@@ -6,11 +6,13 @@ requires-python = ">=3.12,<3.14"
 dependencies = [
     "agentdojo==0.1.35",
     "agent-guardrail[detectors]",
+    "openai>=2,<4",
 ]
 
 [dependency-groups]
 dev = [
     "pyright==1.1.411",
+    "pytest>=8.3,<9",
     "ruff>=0.9,<1",
 ]
 
@@ -27,6 +29,10 @@ line-length = 100
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "ASYNC"]
 
+[tool.pytest.ini_options]
+testpaths = ["."]
+addopts = "-q"
+
 [tool.pyright]
-include = ["adapter.py", "run.py"]
+include = ["adapter.py", "run.py", "test_deepseek_responses.py"]
 typeCheckingMode = "basic"

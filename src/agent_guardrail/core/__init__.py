@@ -26,7 +26,6 @@ from agent_guardrail.core.match_plan import (
     MatchRulePlan,
 )
 from agent_guardrail.core.matcher import SnapshotMatcher
-from agent_guardrail.core.monitor import MatchMonitor
 from agent_guardrail.core.policy import (
     CompiledPolicy,
     EnforcementConfig,
@@ -68,7 +67,6 @@ __all__ = [
     "MatchCostSnapshot",
     "MatchLimitOverrides",
     "MatchLimits",
-    "MatchMonitor",
     "MatchPlan",
     "MatchRulePlan",
     "PolicyDocument",

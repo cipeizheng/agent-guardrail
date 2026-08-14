@@ -14,7 +14,6 @@ from agent_guardrail.config.deployment import (
     create_deployment_detector_registry,
 )
 from agent_guardrail.config.loader import PolicyLoadError, load_policy_file, load_policy_yaml
-from agent_guardrail.config.match_loader import load_match_plan_file, load_match_plan_yaml
 
 __all__ = [
     "PolicyLoadError",
@@ -29,6 +28,4 @@ __all__ = [
     "create_deployment_detector_registry",
     "load_policy_file",
     "load_policy_yaml",
-    "load_match_plan_file",
-    "load_match_plan_yaml",
 ]

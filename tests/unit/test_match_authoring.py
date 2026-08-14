@@ -4,18 +4,19 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+import yaml
+from pydantic import TypeAdapter, ValidationError
+from yaml.constructor import ConstructorError
 
-from agent_guardrail.config import (
-    PolicyLoadError,
-    load_match_plan_file,
-    load_match_plan_yaml,
-)
+from agent_guardrail.config import PolicyLoadError
+from agent_guardrail.config.loader import _reject_yaml_indirection, _StrictSafeLoader
 from agent_guardrail.core.authoring import (
     AuthorComparison,
     AuthorCondition,
     AuthorEventSpec,
     AuthorFinding,
     AuthorPolicy,
+    AuthorPolicyCompilationError,
     AuthorRule,
     AuthorValue,
     compile_author_policy,
@@ -26,6 +27,7 @@ from agent_guardrail.core.match_plan import (
     DetectorCondition,
     EventBinding,
     FieldValue,
+    MatchPlan,
     ParameterValue,
     PredicateCondition,
     QuantifierOperator,
@@ -42,6 +44,44 @@ from agent_guardrail.models import (
     PendingTrace,
     Trace,
 )
+
+_AUTHOR_POLICY_ADAPTER = TypeAdapter(AuthorPolicy)
+
+
+def load_author_yaml(source: str) -> MatchPlan:
+    """Compile authoring YAML without capability linking (test-only seam)."""
+
+    try:
+        _reject_yaml_indirection(source)
+        raw_document = yaml.load(source, Loader=_StrictSafeLoader)
+    except PolicyLoadError:
+        raise
+    except (yaml.YAMLError, ConstructorError) as exc:
+        raise PolicyLoadError("match policy is not valid YAML") from exc
+
+    if not isinstance(raw_document, dict):
+        raise PolicyLoadError("match policy root must be a mapping")
+
+    try:
+        author_policy = _AUTHOR_POLICY_ADAPTER.validate_python(raw_document)
+    except ValidationError as exc:
+        details = exc.errors(include_input=False, include_url=False)
+        raise PolicyLoadError(f"match policy schema validation failed: {details}") from exc
+
+    try:
+        return compile_author_policy(author_policy)
+    except AuthorPolicyCompilationError as exc:
+        raise PolicyLoadError(f"match policy compilation failed: {exc}") from exc
+
+
+def load_author_file(path: str | Path) -> MatchPlan:
+    policy_path = Path(path)
+    try:
+        source = policy_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise PolicyLoadError(f"cannot read match policy file: {policy_path}") from exc
+    return load_author_yaml(source)
+
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "match_policy"
 
@@ -96,7 +136,7 @@ def call(
 
 @pytest.mark.asyncio
 async def test_readable_yaml_compiles_predicates_and_runs_snapshot_matcher() -> None:
-    plan = load_match_plan_file(FIXTURES / "assistant-blocked.yaml")
+    plan = load_author_file(FIXTURES / "assistant-blocked.yaml")
 
     serialized = plan.model_dump_json(by_alias=True)
     assert "blocked_assistant" not in serialized
@@ -148,7 +188,7 @@ def test_typed_python_author_objects_compile_to_same_plan_as_yaml() -> None:
             ),
         ),
     )
-    yaml_policy = load_match_plan_yaml(
+    yaml_policy = load_author_yaml(
         """
 version: 1
 rules:
@@ -171,7 +211,7 @@ rules:
 
 
 def test_author_compiler_maps_multi_event_tool_and_relation_sugar() -> None:
-    plan = load_match_plan_yaml(
+    plan = load_author_yaml(
         """
 version: 1
 rules:
@@ -226,7 +266,7 @@ rules:
 
 @pytest.mark.asyncio
 async def test_author_compiler_maps_derive_collection_and_quantifier() -> None:
-    plan = load_match_plan_yaml(
+    plan = load_author_yaml(
         """
 version: 1
 rules:
@@ -283,7 +323,7 @@ rules:
 
 @pytest.mark.asyncio
 async def test_author_compiler_preserves_pending_domains_and_subject_filter() -> None:
-    plan = load_match_plan_yaml(
+    plan = load_author_yaml(
         """
 version: 1
 scopes: [pending]
@@ -327,7 +367,7 @@ rules:
 
 
 def test_parameters_compile_as_trusted_typed_values() -> None:
-    plan = load_match_plan_yaml(
+    plan = load_author_yaml(
         """
 version: 1
 parameters:
@@ -356,7 +396,7 @@ rules:
 
 
 def test_author_boolean_presence_literals_and_local_collection_compile() -> None:
-    plan = load_match_plan_yaml(
+    plan = load_author_yaml(
         """
 version: 1
 rules:
@@ -407,7 +447,7 @@ rules:
 
 @pytest.mark.asyncio
 async def test_capabilities_compile_but_matcher_reports_unavailable_execution() -> None:
-    plan = load_match_plan_yaml(
+    plan = load_author_yaml(
         """
 version: 1
 rules:
@@ -498,7 +538,7 @@ rules:
 )
 def test_declarative_predicate_graph_is_rejected_atomically(source: str) -> None:
     with pytest.raises(PolicyLoadError, match="compilation failed"):
-        load_match_plan_yaml(source)
+        load_author_yaml(source)
 
 
 @pytest.mark.parametrize(
@@ -550,7 +590,7 @@ rules:
 )
 def test_match_yaml_is_strict_and_non_executable(source: str, message_text: str) -> None:
     with pytest.raises(PolicyLoadError, match=message_text):
-        load_match_plan_yaml(source)
+        load_author_yaml(source)
 
 
 def test_invalid_compiled_references_are_redacted_policy_errors() -> None:
@@ -568,7 +608,7 @@ rules:
 """
 
     with pytest.raises(PolicyLoadError, match="compilation failed") as exc_info:
-        load_match_plan_yaml(source)
+        load_author_yaml(source)
     assert "payload_secret_value" not in str(exc_info.value)
 
 
@@ -594,10 +634,10 @@ rules:
 """
 
     with pytest.raises(PolicyLoadError, match=failure):
-        load_match_plan_yaml(source)
+        load_author_yaml(source)
 
 
-def test_load_match_plan_file_reports_only_the_path_on_io_failure(tmp_path: Path) -> None:
+def test_load_author_file_reports_only_the_path_on_io_failure(tmp_path: Path) -> None:
     missing = tmp_path / "missing-policy.yaml"
     with pytest.raises(PolicyLoadError, match=str(missing)):
-        load_match_plan_file(missing)
+        load_author_file(missing)

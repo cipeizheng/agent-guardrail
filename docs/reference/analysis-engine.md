@@ -1,7 +1,7 @@
 # 分析引擎参考
 
-> 适合谁：修改 MatchPlan、SnapshotMatcher、MatchMonitor、Finding 或预算的人。
-> 解决什么：IR、执行顺序、输出身份、失败原子性和增量语义。
+> 适合谁：修改 MatchPlan、SnapshotMatcher、Finding 或预算的人。
+> 解决什么：IR、执行顺序、输出身份和失败原子性。
 > 不包含什么：生产 YAML 教程和具体 Detector 算法。
 
 ## 1. 组件关系
@@ -14,9 +14,6 @@ immutable MatchPlan ── capability linking ──► CompiledMatchPlan
     │
     ▼
 SnapshotMatcher ──► AnalysisReport[Finding, AnalysisError]
-    │
-    ├─ snapshot / whole-pending
-    └─ MatchMonitor：committed Finding identity 去重
 ```
 
 MatchPlan 是 provider-neutral、action-free 的分析 IR。它不包含 handler、callback、module path、import 或
@@ -105,7 +102,7 @@ policy_hash + rule_id + code
 + sorted (binding_name, binding_key)
 ```
 
-message、location、masked evidence 和 confidence 不参与身份。去重命名空间是
+message、location、masked evidence 和 confidence 不参与身份。Finding ID 的命名空间是
 `(trace_id, finding.id)`；Event ID 只保证 Trace 内唯一。
 
 binding key 只能散列稳定结构坐标，例如 Event ID、字段路径、collection index 或参数名；不得输入
@@ -137,21 +134,7 @@ cache key 包含 capability/version、规范输入哈希以及 trace/Event/Rule/
 
 Finding 投影前会过滤 past-only subject，因此历史匹配不消费 pending Finding/evidence 输出预算。
 
-## 8. MatchMonitor
-
-MatchMonitor 复用 SnapshotMatcher，但返回 `emission=new`：
-
-| 入口 | 是否推进 seen identity |
-| --- | --- |
-| `analyze(committed Trace)` | 无 error 且状态预算允许时原子推进 |
-| `analyze_pending(PendingTrace)` | 不推进；pending 仍是 tentative |
-
-tentative pending 不能立即去重：被 block 的原始 Event 不会提交；若先记住 Finding，同一调用重试可能被
-错误放行。Monitor 默认最多保存 100,000 个 identity，满额返回 `resource_exhausted`，不做静默 LRU。
-
-当前状态仅在进程内，不持久化、不跨进程共享，也不参与生产 Enforcement Decision。
-
-## 9. 修改要求
+## 8. 修改要求
 
 I01–I14 直接由生产 MatchPlan/Matcher/capability 行为测试覆盖。新增节点必须同时定义 Schema、静态类型、
 求值顺序、成本维度、失败代码、脱敏投影以及相邻边界测试，不得引入第二解释器或自动 provenance。

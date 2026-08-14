@@ -14,7 +14,6 @@ from agent_guardrail.models import (
     EvidenceSource,
     Finding,
     FindingBinding,
-    FindingEmission,
     FindingEvidence,
     FindingLocation,
     compute_binding_key,
@@ -341,7 +340,6 @@ def test_snapshot_report_accepts_deterministic_all_findings() -> None:
     match = finding(subjects=("event-1",))
     report = AnalysisReport(
         scope=AnalysisScope.SNAPSHOT,
-        emission=FindingEmission.ALL,
         policy_version=2,
         policy_hash=POLICY_HASH,
         trace_id="trace-1",
@@ -378,7 +376,6 @@ def test_pending_report_allows_historical_context_but_requires_pending_subject()
     )
     report = AnalysisReport(
         scope=AnalysisScope.PENDING,
-        emission=FindingEmission.NEW,
         policy_version=2,
         policy_hash=POLICY_HASH,
         trace_id="trace-1",
@@ -394,7 +391,6 @@ def test_pending_report_rejects_past_only_finding() -> None:
     with pytest.raises(ValidationError, match="pending subject"):
         AnalysisReport(
             scope=AnalysisScope.PENDING,
-            emission=FindingEmission.NEW,
             policy_version=2,
             policy_hash=POLICY_HASH,
             trace_id="trace-1",
@@ -439,7 +435,6 @@ def test_report_rejects_invalid_snapshot_identity(
 ) -> None:
     arguments: dict[str, object] = {
         "scope": AnalysisScope.SNAPSHOT,
-        "emission": FindingEmission.ALL,
         "policy_version": 2,
         "policy_hash": POLICY_HASH,
         "trace_id": "trace-1",
@@ -457,7 +452,6 @@ def test_report_rejects_finding_outside_policy_or_snapshot() -> None:
     with pytest.raises(ValidationError, match="policy hashes"):
         AnalysisReport(
             scope=AnalysisScope.SNAPSHOT,
-            emission=FindingEmission.ALL,
             policy_version=2,
             policy_hash=POLICY_HASH,
             trace_id="trace-1",
@@ -467,7 +461,6 @@ def test_report_rejects_finding_outside_policy_or_snapshot() -> None:
     with pytest.raises(ValidationError, match="outside the analyzed snapshot"):
         AnalysisReport(
             scope=AnalysisScope.SNAPSHOT,
-            emission=FindingEmission.ALL,
             policy_version=2,
             policy_hash=POLICY_HASH,
             trace_id="trace-1",
@@ -482,7 +475,6 @@ def test_report_rejects_duplicate_findings_and_unknown_error_events() -> None:
     with pytest.raises(ValidationError, match="duplicate findings"):
         AnalysisReport(
             scope=AnalysisScope.SNAPSHOT,
-            emission=FindingEmission.ALL,
             policy_version=2,
             policy_hash=POLICY_HASH,
             trace_id="trace-1",
@@ -492,7 +484,6 @@ def test_report_rejects_duplicate_findings_and_unknown_error_events() -> None:
     with pytest.raises(ValidationError, match="analysis error"):
         AnalysisReport(
             scope=AnalysisScope.SNAPSHOT,
-            emission=FindingEmission.ALL,
             policy_version=2,
             policy_hash=POLICY_HASH,
             trace_id="trace-1",
