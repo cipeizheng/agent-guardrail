@@ -1,0 +1,32 @@
+[project]
+name = "agent-guardrail-agentdojo-eval"
+version = "0.1.0"
+description = "Isolated AgentDojo evaluation adapter for agent-guardrail"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "agentdojo==0.1.35",
+    "agent-guardrail[detectors]",
+]
+
+[dependency-groups]
+dev = [
+    "pyright==1.1.411",
+    "ruff>=0.9,<1",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+agent-guardrail = { path = "../..", editable = true }
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+
+[tool.pyright]
+include = ["adapter.py", "run.py"]
+typeCheckingMode = "basic"

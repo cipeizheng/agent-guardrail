@@ -1,0 +1,49 @@
+version: 3
+
+engine:
+  max_violations: 100
+  on_analysis_error: block
+  on_detector_timeout: block
+
+scopes: [pending]
+
+rules:
+  - id: reject-detected-external-tool-result
+    action: block
+    events:
+      call: {kind: tool_call, domain: past}
+      result: {kind: tool_result, domain: pending}
+    where:
+      all:
+        - compare:
+            left: {field: [result, security_facts, trust_class]}
+            operator: equals
+            right: {literal: external_untrusted}
+        - relation:
+            source: call
+            target: result
+            operator: derived_from_direct
+        - any:
+            - detector:
+                id: deterministic_injection_scan
+                capability: prompt_injection
+                inputs:
+                  - value: {field: [result, payload, output]}
+                    encoding: text
+            - detector:
+                id: model_injection_scan
+                capability: prompt_injection_model
+                inputs:
+                  - value: {field: [result, payload, output]}
+                    encoding: text
+                types_any: [model_prompt_injection]
+            - detector:
+                id: yara_injection_scan
+                capability: yara_injection_signatures
+                inputs:
+                  - value: {field: [result, payload, output]}
+                    encoding: text
+    finding:
+      code: external_tool_result_injection_detected
+      message: An external tool result matched a prompt-injection detector.
+      subjects: [result]

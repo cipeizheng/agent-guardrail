@@ -45,12 +45,13 @@ Detector 执行器。它只返回 fact，不返回 Decision，也不控制应用
 
 ## P3：跨事件安全语境
 
-- Event 已能持久保存可信接入显式提供的 source trust；下一步以 benchmark 失败样本校准 Adapter 分类、
-  destination 与 Tool risk 的最小枚举；
-- 实现 T01–T04 的 destination/trust-aware v3 Policy，authorization 只在已有独立授权服务时接入；
-- 为不可信 ToolResult → LLM/高风险 Tool 建立 trust 与显式 Relation 组合策略；
-- 增加真实 Gateway/SDK source→sink 回放，验证受保护副作用；
-- 保持 T10 为明确边界外，直到存在 Framework Hook、Sandbox 或网络代理。
+- P3 暂不增加 Tool risk、意图判断或默认 source→sink block 规则；先用锁定 AgentDojo pilot 比较同一真实
+  Agent 在无防御和当前 Detector + source fact + Relation + release block 下的正常 utility 与 targeted ASR；
+- pilot 对正常/攻击样本使用同一 source 分类，不读取攻击标签；关系只证明事件来源，不独立决定 block；
+- 继续条件预先固定为正常 utility 下降不超过 5 个百分点、targeted ASR 相对下降至少 50%，且 block 的原始
+  ToolResult 未释放给模型；不满足时停止通用 prompt-injection 防火墙方向并重新限定产品能力；
+- 通过 pilot 后才根据真实失败样本决定是否需要 destination、Tool risk 或 T01–T04 Policy；
+- T10 保持明确边界外，直到存在 Framework Hook、Sandbox 或网络代理。
 
 P3 只围绕单用户数据流构建规则，不引入 principal/tenant Registry、owner-aware Policy 或跨用户状态。
 T09 使用跨目的地授权复用/confused-deputy 路径，不使用跨租户泄漏定义。

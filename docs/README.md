@@ -37,6 +37,7 @@ Policy 作者指南 → Capability 参考
 - [Gateway 运行指南](guides/operations.md)：启动、Agent Sandbox 部署边界、环境变量、Secret、Audit 和 Health。
 - [Remote Core 双容器设计](design/remote-core-deployment.md)：Core/Gateway 责任、协议与失败边界。
 - [Prompt injection Detector 评测](../evals/prompt_injection/README.md)：不调用 Agent/LLM 的锁定公开数据回归。
+- [AgentDojo 端到端评测](../evals/agentdojo/README.md)：真实 Agent 的正常效用、targeted ASR 与 ToolResult release block 对照。
 
 ## 修改 Core
 
