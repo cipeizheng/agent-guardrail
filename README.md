@@ -209,10 +209,12 @@ Deployment-fixed optional capabilities are deliberately separate:
 | `full_local_v1` | `yara_injection_signatures` | Pinned yara-python, bundled ruleset, and fixed rule-to-type mapping |
 | Explicit injection | `is_similar` | Deployment-selected `EmbeddingProfile` and async embedding backend |
 
-`is_similar` currently has `adapter_only` status: its schema, budgets, timeout behavior,
-redaction, and enforcement path are tested, but a real external embedding service has not been
-accepted as verified. The exact, non-marketing status of every capability lives in the
-[capability matrix](docs/capability-status.yaml).
+The real `prompt_injection_model` backend is currently a `baseline`, not a complete defense: the
+locked public BIPIA/NotInject evaluation exposes low attack recall and substantial over-defense.
+`is_similar` remains `adapter_only` because no real external embedding service has been accepted
+as verified. The exact, non-marketing status of every capability lives in the
+[capability matrix](docs/capability-status.yaml); the reproducible Detector evaluation lives under
+[`evals/prompt_injection`](evals/prompt_injection/README.md).
 
 ## Deployment profiles
 

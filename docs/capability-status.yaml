@@ -45,10 +45,10 @@ priority_capabilities:
   - id: P0-D04
     name: prompt_injection_model
     kind: detector
-    status: verified
+    status: baseline
     threat_paths: [T03, T04]
     implementation: prompt_injection_model
-    note: full_local_v1 锁定 Protect AI DeBERTa v2 提交并已在 CPU 及 CUDA 13/GTX 1650 Ti 上运行安全、攻击、预算、脱敏和 before_model_call 零上游副作用评估；运行时不下载模型。
+    note: full_local_v1 锁定 Protect AI DeBERTa v2 提交，真实 backend、预算、脱敏和 Enforcement 路径均已运行；但固定 0.85 阈值在锁定的 BIPIA 125 条攻击载荷与 NotInject 339 条良性难例上只有 8% recall、39.82% false-positive rate，因此仅为已接入基线，不能作为复杂 prompt injection 的充分防御。
 
   - id: P0-D06
     name: yara_injection_signatures
@@ -104,7 +104,7 @@ other_current_capabilities:
     status: baseline
     threat_paths: [T03, T04]
     implementation: prompt_injection
-    note: 确定性高信号模式及 Enforcement 路径已实际运行；它是可解释的局部补充，复杂改写由已验证的模型 capability 或可选 is_similar profile 覆盖。
+    note: 确定性高信号模式及 Enforcement 路径已实际运行；它是可解释的局部补充，不覆盖 BIPIA 的间接或语义改写攻击载荷。
   - name: number_in_range
     kind: predicate
     status: verified

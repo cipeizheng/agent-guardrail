@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "benchmarks": [
+    {
+      "id": "notinject",
+      "label": "benign",
+      "repository": "https://github.com/leolee99/PIGuard",
+      "revision": "1b5751e88bf7475acbedfc8eda795ce060307c84",
+      "license": "MIT",
+      "license_url": "https://github.com/leolee99/PIGuard/blob/1b5751e88bf7475acbedfc8eda795ce060307c84/LICENSE",
+      "files": [
+        {
+          "id": "one",
+          "path": "notinject/NotInject_one.json",
+          "url": "https://raw.githubusercontent.com/leolee99/PIGuard/1b5751e88bf7475acbedfc8eda795ce060307c84/datasets/NotInject_one.json",
+          "sha256": "69b535596d95102424e9c5946944feb4f2d596687eb8213f2ecad75478e5ffdd",
+          "size_bytes": 26117,
+          "expected_samples": 113
+        },
+        {
+          "id": "two",
+          "path": "notinject/NotInject_two.json",
+          "url": "https://raw.githubusercontent.com/leolee99/PIGuard/1b5751e88bf7475acbedfc8eda795ce060307c84/datasets/NotInject_two.json",
+          "sha256": "6043d94e75b48d8e7682d25dc79eaf45359e1e561ce520e3b8fd5625a91060c6",
+          "size_bytes": 29902,
+          "expected_samples": 113
+        },
+        {
+          "id": "three",
+          "path": "notinject/NotInject_three.json",
+          "url": "https://raw.githubusercontent.com/leolee99/PIGuard/1b5751e88bf7475acbedfc8eda795ce060307c84/datasets/NotInject_three.json",
+          "sha256": "ef01eff0d761d2e34571b3fdbcec08c30cd93efe8d0e1a2eb5c2baeb1873b070",
+          "size_bytes": 35765,
+          "expected_samples": 113
+        }
+      ]
+    },
+    {
+      "id": "bipia",
+      "label": "attack",
+      "repository": "https://github.com/microsoft/BIPIA",
+      "revision": "a004b69ec0dd446e0afd461d98cb5e96e120a5d0",
+      "license": "MIT (repository attack payload files only; context datasets excluded)",
+      "license_url": "https://github.com/microsoft/BIPIA/blob/a004b69ec0dd446e0afd461d98cb5e96e120a5d0/LICENSE",
+      "files": [
+        {
+          "id": "text",
+          "path": "bipia/text_attack_test.json",
+          "url": "https://raw.githubusercontent.com/microsoft/BIPIA/a004b69ec0dd446e0afd461d98cb5e96e120a5d0/benchmark/text_attack_test.json",
+          "sha256": "75750e7b4e8b34e8f9d88d89b357aeaaf02bd07f9e493ccd37eda74a0cd7c7f8",
+          "size_bytes": 6322,
+          "expected_samples": 75
+        },
+        {
+          "id": "code",
+          "path": "bipia/code_attack_test.json",
+          "url": "https://raw.githubusercontent.com/microsoft/BIPIA/a004b69ec0dd446e0afd461d98cb5e96e120a5d0/benchmark/code_attack_test.json",
+          "sha256": "892545c5aaec0645b1ded65dc7816b3d70e9ef4eadcba2301a7a3db93676b6e0",
+          "size_bytes": 16356,
+          "expected_samples": 50
+        }
+      ]
+    }
+  ]
+}

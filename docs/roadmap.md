@@ -72,8 +72,9 @@ T09 使用跨目的地授权复用/confused-deputy 路径，不使用跨租户�
 ## Capability 维护
 
 Detector 与 Predicate 的稳定 ID/状态继续只由 `capability-status.yaml` 管理。当前唯一明确的验证缺口是
-`P1-D04 is_similar`：接入、预算、timeout、脱敏和 Enforcement 已测试，但真实外部 embedding backend 尚未
-smoke/eval，因此仍为 `adapter_only`。其他 capability 后续按威胁覆盖维护，不创建重复名称。
+`P0-D04 prompt_injection_model` 的公开 benchmark 覆盖不足，以及 `P1-D04 is_similar` 的真实 backend
+尚未 smoke/eval。前者保持 `baseline`，先用锁定的 BIPIA/NotInject 回归集比较候选 Detector；后者保持
+`adapter_only`。不通过重复命名掩盖现有 capability 的质量缺口。
 
 ## 可验证 Transformation（P3 之后）
 
