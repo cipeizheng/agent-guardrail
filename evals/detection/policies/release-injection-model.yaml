@@ -1,0 +1,71 @@
+version: 3
+
+engine:
+  max_violations: 100
+  on_analysis_error: block
+  on_detector_timeout: block
+
+scopes: [pending]
+
+# T03 release gating with the fixed model classifier. Requires the
+# full_local_v1 profile: the heuristic prompt_injection detector stays as a
+# second arm so the rule benefits from both the deterministic patterns and the
+# DeBERTa classifier.
+rules:
+  - id: block-untrusted-injection-release-model
+    action: block
+    events:
+      result:
+        kind: tool_result
+        domain: pending
+    where:
+      all:
+        - compare:
+            left: {field: [result, security_facts, trust_class]}
+            operator: equals
+            right: {literal: external_untrusted}
+        - any:
+            - detector:
+                id: injection_scan
+                capability: prompt_injection
+                inputs:
+                  - value: {field: [result, payload, output]}
+                    encoding: text
+            - detector:
+                id: injection_model_scan
+                capability: prompt_injection_model
+                inputs:
+                  - value: {field: [result, payload, output]}
+                    encoding: text
+    finding:
+      code: untrusted_injection_release
+      message: An untrusted tool result contains injection instructions.
+      subjects: [result]
+      evidence:
+        - {source: detector, id: injection_scan}
+        - {source: detector, id: injection_model_scan}
+
+  - id: block-unicode-smuggling-release
+    action: block
+    events:
+      result:
+        kind: tool_result
+        domain: pending
+    where:
+      all:
+        - compare:
+            left: {field: [result, security_facts, trust_class]}
+            operator: equals
+            right: {literal: external_untrusted}
+        - detector:
+            id: unicode_scan
+            capability: unicode_security
+            inputs:
+              - value: {field: [result, payload, output]}
+                encoding: text
+    finding:
+      code: unicode_smuggling_release
+      message: An untrusted tool result contains Unicode control characters.
+      subjects: [result]
+      evidence:
+        - {source: detector, id: unicode_scan}

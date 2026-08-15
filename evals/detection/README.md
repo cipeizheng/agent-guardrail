@@ -20,7 +20,7 @@ T01–T10 威胁路径锚定：
 | secret/PII 外传 | T01/T02 | 内容事实 + sink 工具 | `secrets`、`pii` | demo |
 | URL egress | T02/T09 | host allowlist | `url_host_allowed` | demo |
 | 数值/资源界 | T04 | 范围约束 | `number_in_range`、`length_in_range` | demo |
-| 注入内容释放 | T03 | 释放点拦截：untrusted tool_result 含注入事实 | `prompt_injection`、`unicode_security` | demo |
+| 注入内容释放 | T03 | 释放点拦截：untrusted tool_result 含注入事实 | `prompt_injection`、`unicode_security`、`prompt_injection_model`（full profile 模型臂） | demo |
 | Unicode 走私 | T07 | 释放点拦截：控制/零宽字符 | `unicode_security` | demo |
 | 代码执行 | T04 | execute_code 参数结构事实 | `python_ast_ipython`（local）、`semgrep`（full profile） | demo |
 | 目的地授权复用 | T09 | `security_destination`/`security_authorization` 参数规则 | 安全参数 + FlowSecurityContext 接入 | 待编（依赖 P3） |
@@ -85,7 +85,15 @@ episode 级效用损失的下界（部署语义为 block 即 abort）；episode 
 ## 运行
 
 ```bash
+# local profile（默认）：不依赖模型凭据与外部 detector 资产
 uv run python evals/detection/run.py
+
+# full_local_v1：启用 DeBERTa PI 模型等资产，release 轴额外跑模型规则臂
+uv run --project evals/agentdojo python evals/detection/run.py --profile full_local_v1
 ```
 
-不依赖模型凭据与外部 detector 资产（使用默认 `local` Registry）。
+release 轴对比结论（语料见 `corpus.py`，样本量小、含作者想象偏差）：启发式
+`release-injection.yaml` 在间接注入样本上 FN=1（fact 层归因：detector gap）；
+`release-injection-model.yaml`（启发式 + DeBERTa 双臂 + Unicode 规则）FN=0 且 benign
+FPR=0.00。模型臂仅由 `prompt_injection_model` capability 是否发布决定是否进入矩阵，
+`local` profile 下不出现，避免平台差异影响可比性。
