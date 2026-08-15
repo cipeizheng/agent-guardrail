@@ -94,8 +94,16 @@ uv run python evals/detection/run.py
 uv run --project evals/agentdojo python evals/detection/run.py --profile full_local_v1
 ```
 
-release 轴对比结论（语料见 `corpus.py`，样本量小、含作者想象偏差）：启发式
-`release-injection.yaml` 在间接注入样本上 FN=1（fact 层归因：detector gap）；
-`release-injection-model.yaml`（启发式 + DeBERTa 双臂 + Unicode 规则）FN=0 且 benign
-FPR=0.00。模型臂仅由 `prompt_injection_model` capability 是否发布决定是否进入矩阵，
-`local` profile 下不出现，避免平台差异影响可比性。
+外部语料（BIPIA 125 攻击 / NotInject 339 良性 / AgentDojo v1.2.2 35 攻击，先运行
+`evals/prompt_injection/fetch.py` 与 `gen_agentdojo.py` 生成）在 `release_external` 轴单独
+报告；`--no-external` 可跳过。
+
+## 已测结果（2026-08-15，gate 判据见 preregistration.md）
+
+脚本化 release 轴（10 样本，作者编写）：启发式漏间接注入 1 例（归因 detector gap）；
+模型臂 FN=0 / benign FPR=0.00。**外部 release 轴（160 攻击 + 339 良性难例）结论相反**：
+启发式 0/160 命中、0 误报；DeBERTa@0.85 模型臂 recall 0.069 / FPR 0.348，gate FAIL
+（判据 recall≥0.90 且 FPR≤0.10）。双通道归因显示模型臂 267 个错判全部是 detector 层问题
+（149 detector gap + 118 detector false alarm，0 rule composition gap）--瓶颈在分类器，
+不在规则编排。处置按预注册走 detector 改进线（阈值/模型替换，在
+`evals/prompt_injection` 层做，调参须预先声明 split），不做规则白名单补丁。
