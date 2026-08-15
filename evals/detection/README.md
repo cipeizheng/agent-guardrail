@@ -79,8 +79,10 @@ episode 级效用损失的下界（部署语义为 block 即 abort）；episode 
 
 ## 预注册
 
-当前为 demo 阶段，不设 gate。唯一预注册的对比是 `flow` 轴消融：字段级规则若不能同时保持 attack FNR
-不升且 benign FPR 下降，则该粒度修正不成立，需回 `docs/proposals/` 讨论。
+判据已随外部语料扩容冻结，见 [preregistration.md](preregistration.md)。要点：`release_external`
+轴上模型臂 gate 为 attack recall ≥ 0.90 且 benign FPR ≤ 0.10（预期失败，先验已在文件中披露）；
+启发式臂为报告型消融；脚本化轴维持 0 mismatch 回归基线；flow 消融判据沿用上一版（字段级须
+FNR 不升且 FPR 降）。冻结后的修改须以 `post_hoc` 披露。
 
 ## 运行
 
