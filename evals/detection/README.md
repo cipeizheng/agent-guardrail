@@ -94,9 +94,9 @@ uv run python evals/detection/run.py
 uv run --project evals/agentdojo python evals/detection/run.py --profile full_local_v1
 ```
 
-外部语料（BIPIA 125 攻击 / NotInject 339 良性 / AgentDojo v1.2.2 35 攻击，先运行
-`evals/prompt_injection/fetch.py` 与 `gen_agentdojo.py` 生成）在 `release_external` 轴单独
-报告；`--no-external` 可跳过。
+外部语料（BIPIA 125 攻击 / NotInject 339 良性 / AgentDojo v1.2.2 35 攻击 + 21 攻击 / 39 良性
+flow 任务，先运行 `evals/prompt_injection/fetch.py` 与 `gen_agentdojo.py` 生成）在
+`release_external` / `flow_agentdojo` 轴单独报告；`--no-external` 可跳过。
 
 ## 已测结果（2026-08-15，gate 判据见 preregistration.md）
 
@@ -107,3 +107,23 @@ uv run --project evals/agentdojo python evals/detection/run.py --profile full_lo
 （149 detector gap + 118 detector false alarm，0 rule composition gap）--瓶颈在分类器，
 不在规则编排。处置按预注册走 detector 改进线（阈值/模型替换，在
 `evals/prompt_injection` 层做，调参须预先声明 split），不做规则白名单补丁。
+
+`flow_agentdojo` 轴（**不含任何 PI detector** 的纯字段级目的地 taint，21 攻击 + 39 良性）：
+gate PASS--攻击 recall 20/21（catchable 子集全部命中，唯一漏掉的是目的地不在注入文本里的
+那 1 例）；named 组 19/19 放行（FPR=0）；delegated 组 20/20 被拦（最坏情形构造下的灰区
+实测值：目的地来自工具输出且用户未字面点名的委托型任务会被结构化规则全部拦截）。call 级
+消融基线 FPR=1.00，验证粒度修正的必要性。
+
+**覆盖率必须与性能一起读**：flow 轴只覆盖 35 个 AgentDojo 注入中 21 个"落地为带目的地
+写操作"的攻击。可部署配置（结构化 enforcement，零误报）对全部 35 个攻击的覆盖是
+**20/35 = 57%**；其余 14 个读取型/改写型攻击不经过目的地字段，结构化防线对其为 0 覆盖，
+而 release 轴全部统计检测器（含外部 LLM judge，FPR 37%）都达不到可部署精度--这是当前
+全行业的空白，也是本项目未解决的问题。对"注入导致恶意写操作"这一子类，结构化目的地防线
+远强于 PI 分类器（95.2% vs 6.9%）；其代价是委托型良性任务需要按部署场景显式授权
+（allowlist / 语义豁免），这是策略决策而非检测缺陷。
+
+LLM judge 特性化（`llm_judge.py`，DeepSeek-v4-flash 意图对齐，同一 499 样本，无 gate、
+prompt 固定不赛后调参）：recall 131/160 = 81.9%（AgentDojo 35/35、BIPIA 96/125），
+但 NotInject 误报 126/339 = 37.2%--召回较 DeBERTa 提升约 12 倍，FPR 持平。四防线结论：
+结构化字段级 taint 是唯一 gate 级防线；LLM judge 是 release 轴最强检测信号但 FPR 不可
+部署，只能作信号层（审计/降级/双命中升级）；DeBERTa 与关键词启发式均不足以承担防线。

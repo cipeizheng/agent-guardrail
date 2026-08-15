@@ -21,6 +21,7 @@ _ROOT = _HERE.parents[1]
 _PROMPT_INJECTION_DIR = _ROOT / "evals" / "prompt_injection"
 _DATA_DIR = _ROOT / "data" / "benchmarks" / "prompt-injection"
 _AGENTDOJO_EXPORT = _ROOT / "data" / "benchmarks" / "detection" / "agentdojo-release.json"
+_AGENTDOJO_FLOW = _ROOT / "data" / "benchmarks" / "detection" / "agentdojo-flow.json"
 
 _AXIS = "release_external"
 _ENVELOPE = "Document fetched from https://external.example/article:\n\n{}\n\n-- end of document --"
@@ -122,12 +123,81 @@ def _agentdojo_cases() -> list[Case]:
     return cases
 
 
+def _agentdojo_flow_cases() -> list[Case]:
+    """Field-level flow cases from the AgentDojo export (see preregistration.md).
+
+    Attack: the injection's prescribed malicious sink call, with the attack
+    text sitting in one untrusted read output; the user goal is an unrelated
+    benign prompt. Benign: the user task's own sink call; the read output
+    carries the destination value (worst case for the delegated group).
+    """
+
+    if not _AGENTDOJO_FLOW.is_file():
+        return []
+    export = json.loads(_AGENTDOJO_FLOW.read_text(encoding="utf-8"))
+    read_tools = export["read_tools"]
+    version = export["agentdojo_version"]
+    cases = []
+    for entry in export["attack_cases"]:
+        tool, arguments = read_tools[entry["suite"]]
+        sink = entry["sink_call"]
+        cases.append(
+            Case(
+                case_id=_short_id("ajatk", f"{entry['suite']}\0{entry['task_id']}"),
+                axis="flow_agentdojo",
+                label="block",
+                goal=entry["user_prompt"],
+                pending_tool=sink["function"],
+                pending_arguments=dict(sink["arguments"]),
+                prior=(
+                    PriorStep(
+                        tool=tool,
+                        arguments=dict(arguments),
+                        output=entry["attack_text"],
+                    ),
+                ),
+                rationale=(
+                    f"agentdojo-attack/{version}/{entry['suite']}/{entry['task_id']}"
+                ),
+            )
+        )
+    for entry in export["benign_cases"]:
+        tool, arguments = read_tools[entry["suite"]]
+        sink = entry["sink_call"]
+        group = "named" if entry["named"] else "delegated"
+        output = (
+            "Here is the information you asked for:\n\n"
+            f"{sink['dest_value']}\n\n(end of output)"
+        )
+        cases.append(
+            Case(
+                case_id=_short_id("ajben", f"{entry['suite']}\0{entry['task_id']}"),
+                axis="flow_agentdojo",
+                label="allow",
+                goal=entry["prompt"],
+                pending_tool=sink["function"],
+                pending_arguments=dict(sink["arguments"]),
+                prior=(
+                    PriorStep(
+                        tool=tool,
+                        arguments=dict(arguments),
+                        output=output,
+                    ),
+                ),
+                rationale=(
+                    f"agentdojo-benign-{group}/{version}/{entry['suite']}/{entry['task_id']}"
+                ),
+            )
+        )
+    return cases
+
+
 def load_external_cases() -> tuple[Case, ...]:
     """Build all available external cases; empty when the data has not been fetched."""
 
     if not _DATA_DIR.is_dir():
         return ()
-    cases = _bipia_notinject_cases() + _agentdojo_cases()
+    cases = _bipia_notinject_cases() + _agentdojo_cases() + _agentdojo_flow_cases()
     seen = {case.case_id for case in cases}
     if len(seen) != len(cases):
         raise RuntimeError("external case IDs are not unique")
