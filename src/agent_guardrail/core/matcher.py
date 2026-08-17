@@ -1502,7 +1502,7 @@ def _evaluate_relation(
                 source_event,
                 target_event,
                 allowed_kinds=frozenset(
-                    {RelationKind.DERIVED_FROM, RelationKind.MAY_INFLUENCE}
+                    {RelationKind.DERIVED_FROM, RelationKind.INFLUENCED_BY}
                 ),
                 rule_id=rule_id,
                 events_by_id=events_by_id,

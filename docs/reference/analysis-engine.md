@@ -61,7 +61,7 @@ Predicate/Detector 和有界量词。
 - collection 缺失或类型不适用产生空 domain；实际访问元素仍计预算。
 - `forall` 空 domain 为 true，`exists` 为空为 false；`count` 至少声明一个上下界。
 - `precedes/immediately_precedes` 只比较 sequence，不创建 Relation。
-- `may_influence` 查询显式 `may_influence` 或 `derived_from` 关系路径；
+- `may_influence` 查询显式 `influenced_by` 或 `derived_from` 关系路径；
   `derived_from_direct/ancestor` 只查询显式 `derived_from` Relation。
 - 未链接 capability 在 Rule 搜索前产生 `capability_error`，不会因空 domain 或短路退化为 no-match。
 

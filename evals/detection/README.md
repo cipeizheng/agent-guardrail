@@ -70,6 +70,11 @@ baseline 已知限制）直接传导为 decision FN，归因输出为 `detector 
   构造攻击上的行为，不证明对未知攻击的覆盖率；
 - ALLOW 样本应逐步替换为真实模型收割的 benign trace（模型越强保真度越高）；
 - 语料中不允许出现 Policy capability 源码里的字面特征（防止评测与实现同源）。
+- **taint 拓扑是脚本喂入的，不是检测出来的**：replay 走生产 SDK 路径（proposal/call/result
+  的关系边由 SDK 自动构造），但"模型读了哪个 tool result"（`model_call(inputs=...)`）由
+  `replay.py` 写死为线性链。因此本评测回答的是"**给定**正确的影响边，规则组合会不会拦"，
+  不回答"影响边本身标得对不对"--后者由 adapter/normalizer 单元测试与
+  `agentdojo/consistency.py`（真实 Adapter 构造的边 + 确定性 agent）覆盖。
 
 ## 指标
 

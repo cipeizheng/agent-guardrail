@@ -165,7 +165,7 @@ class GuardrailRun:
             kind=EventKind.MODEL_CALL,
             payload=call.model_dump(mode="json"),
             origin=EventOrigin.OBSERVED,
-            may_influence=inputs,
+            influenced_by=inputs,
             security_facts=security_facts,
             security_context=security_context,
         )
@@ -205,7 +205,7 @@ class GuardrailRun:
             kind=EventKind.TOOL_CALL,
             payload=call.model_dump(mode="json"),
             origin=EventOrigin.OBSERVED,
-            may_influence=sources,
+            influenced_by=sources,
             security_facts=security_facts,
             security_context=security_context,
         )
@@ -235,7 +235,7 @@ class GuardrailRun:
         payload: dict[str, JsonValue],
         origin: EventOrigin,
         derived_from: Sequence[EventRef] = (),
-        may_influence: Sequence[EventRef] = (),
+        influenced_by: Sequence[EventRef] = (),
         security_facts: EventSecurityFacts | None,
         security_context: FlowSecurityContext | None,
     ) -> SubmissionResult:
@@ -247,7 +247,7 @@ class GuardrailRun:
             security_facts=security_facts or EventSecurityFacts(),
             relations=(
                 *self._relations(derived_from, RelationKind.DERIVED_FROM),
-                *self._relations(may_influence, RelationKind.MAY_INFLUENCE),
+                *self._relations(influenced_by, RelationKind.INFLUENCED_BY),
             ),
         )
         return await self.submit(candidate, security_context=security_context)

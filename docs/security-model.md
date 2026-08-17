@@ -132,7 +132,7 @@ Enforcement 切换 sink 时会清空旧 authorization，避免跨目的地复用
 当前 `EventSecurityFacts` 另外持久保存绑定到一个 Event payload 的 `trust_class` 和 `trust_authority`。
 可信 Session/SDK 接入必须把该事实显式绑定到具体 Candidate；allow/log 后它随 Event 进入 Trace，后续
 pending 分析可读取 `[source, security_facts, trust_class]`，再与 `source → target` 的显式
-`may_influence/derived_from` 组合。默认值为 unknown；非 unknown authority 仍只允许 deployment、
+`influenced_by/derived_from` 组合。默认值为 unknown；非 unknown authority 仍只允许 deployment、
 Enforcement 或 data source。
 
 Event trust 不从 `EventOrigin`、sequence、Tool 名或 Relation 自动推断，也不从一次
@@ -145,7 +145,7 @@ Event fact；可信嵌入式宿主可以通过 `CandidateEvent.security_facts`�
 YAML 获得 I/O 或动态代码权限。principal、tenant、owner identity、跨用户状态和按用户授权明确不属于本
 产品，不能作为 roadmap capability 恢复。
 
-`derived_from` 只用于可信 Adapter 掌握的精确来源；保守的控制影响使用 `may_influence`。两者都不能由
+`derived_from` 只用于可信 Adapter 掌握的精确来源；保守的控制影响使用 `influenced_by`。两者都不能由
 Detector 或 Policy 写回 Trace。内容级外泄判断仍需敏感数据 Detector，不能只凭先后关系证明相同数据被
 复制。
 

@@ -92,7 +92,7 @@ handoff 等任意语义插入位置。`GuardrailRun` 是框架无关 SDK：应�
 显式提供后，该事实随 Event 跨提交保留；默认 unknown，且不从 origin、顺序或关系自动推断。
 
 精确来源只存在于类型化 `Event.relations`。Adapter/Enforcement 只能在掌握对应事实时建立
-`derived_from` 或 `may_influence`；`precedes/immediately_precedes` 只由 sequence 得出，绝不自动生成
+`derived_from` 或 `influenced_by`；`precedes/immediately_precedes` 只由 sequence 得出，绝不自动生成
 Relation。
 
 ## 4. Snapshot 与 pending 分析

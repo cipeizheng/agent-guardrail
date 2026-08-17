@@ -167,7 +167,7 @@ class InputNormalizer:
                 relations=tuple(
                     CandidateRelation(
                         source_candidate_key=candidate.key,
-                        kind=RelationKind.MAY_INFLUENCE,
+                        kind=RelationKind.INFLUENCED_BY,
                     )
                     for candidate in candidates
                 ),
@@ -258,7 +258,7 @@ class InputNormalizer:
                 relations=(
                     CandidateRelation(
                         source_candidate_key=source_candidate_key,
-                        kind=RelationKind.MAY_INFLUENCE,
+                        kind=RelationKind.INFLUENCED_BY,
                     ),
                 ),
             ),

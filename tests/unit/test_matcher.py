@@ -720,7 +720,7 @@ async def test_i08_event_trust_combines_with_explicit_cross_commit_influence() -
         2,
         "send",
         relations=(
-            EventRelation(source_event_id="r1", kind=RelationKind.MAY_INFLUENCE),
+            EventRelation(source_event_id="r1", kind=RelationKind.INFLUENCED_BY),
         ),
     )
     trusted_target = call(
@@ -728,7 +728,7 @@ async def test_i08_event_trust_combines_with_explicit_cross_commit_influence() -
         3,
         "send",
         relations=(
-            EventRelation(source_event_id="r2", kind=RelationKind.MAY_INFLUENCE),
+            EventRelation(source_event_id="r2", kind=RelationKind.INFLUENCED_BY),
         ),
     )
     selected = rule(

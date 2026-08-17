@@ -233,7 +233,7 @@ async def test_session_persists_event_trust_for_later_related_submissions() -> N
                 relations=(
                     CandidateRelation(
                         source_event_id=source.event_id,
-                        kind=RelationKind.MAY_INFLUENCE,
+                        kind=RelationKind.INFLUENCED_BY,
                     ),
                 ),
             ),
@@ -247,7 +247,7 @@ async def test_session_persists_event_trust_for_later_related_submissions() -> N
     assert pending_target.relations == (
         EventRelation(
             source_event_id=historical_source.id,
-            kind=RelationKind.MAY_INFLUENCE,
+            kind=RelationKind.INFLUENCED_BY,
         ),
     )
     assert trace.events[0].security_facts == source_facts

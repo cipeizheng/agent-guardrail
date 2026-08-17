@@ -57,8 +57,8 @@ arguments 校验。Responses 支持 text/instructions、custom function、functi
 | --- | --- | --- |
 | request system/user/assistant 文本 | `message` | `client_asserted` |
 | request assistant tool call | `tool_call_proposal` | `client_asserted` |
-| request tool role message | `tool_result` | `client_asserted`；`may_influence` 对应 proposal |
-| 即将发生的上游模型调用 | `model_call` | `observed`；所有请求历史 `may_influence` 此调用 |
+| request tool role message | `tool_result` | `client_asserted`；`influenced_by` 对应 proposal |
+| 即将发生的上游模型调用 | `model_call` | `observed`；所有请求历史经 `influenced_by` 指向此调用 |
 | response assistant 文本/refusal | `message` | `observed`；`derived_from` model call |
 | response assistant tool call | `tool_call_proposal` | `observed`；`derived_from` model call |
 
