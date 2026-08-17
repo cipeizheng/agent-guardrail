@@ -33,6 +33,7 @@ from agentdojo.types import (
     ChatMessage,
     text_content_block_from_string,
 )
+from evals.lib import preflight, reporting
 from pydantic import BaseModel
 
 from adapter import (
@@ -167,6 +168,14 @@ def _parse_args() -> argparse.Namespace:
         help=(
             "Validate pinned dependencies, task selection, Detector assets, and Policy "
             "without a model call."
+        ),
+    )
+    parser.add_argument(
+        "--allow-floor",
+        action="store_true",
+        help=(
+            "Record a zero-ASR (floor-effect) baseline run instead of aborting the "
+            "guarded arm for lack of measurement power."
         ),
     )
     return parser.parse_args()
@@ -515,6 +524,7 @@ def main() -> None:
         return
 
     groups: dict[str, dict[str, Any]] = {}
+    measurement_power: dict[str, Any] | None = None
     if args.mode in {"baseline", "both"}:
         baseline = build_baseline_pipeline(
             args.model,
@@ -531,6 +541,21 @@ def main() -> None:
                 stats=None,
             )
         )
+        attacked = groups["baseline"]["attacked"]["outcomes"]
+        measurement_power = preflight.measurement_power(
+            sum(1 for outcome in attacked if outcome["security"]), len(attacked)
+        )
+        if args.mode == "both":
+            preflight.require_measurement_power(
+                measurement_power,
+                arm="baseline (control)",
+                remedy=(
+                    "Raise the attack success rate first: a stronger attack tool, "
+                    "injection tasks whose goal is verifiable, or a model that "
+                    "follows injected instructions."
+                ),
+                allow_none=args.allow_floor,
+            )
     if args.mode in {"guarded", "both"}:
         if analyzer is None:
             raise AssertionError("guarded mode requires a guardrail analyzer")
@@ -575,6 +600,7 @@ def main() -> None:
             "device": args.device,
         },
         "groups": groups,
+        "measurement_power": measurement_power,
         "comparison": _comparison(groups),
         "limitations": [
             "This pilot uses one run per task pair and is not a confidence interval.",
@@ -592,12 +618,20 @@ def main() -> None:
             ),
         ],
     }
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(
-        json.dumps(report, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
+    run_dir = reporting.write_run_report(
+        eval_name="agentdojo",
+        report=report,
+        results_root=_ROOT / "data" / "benchmarks" / "agentdojo",
+        repo_root=_ROOT,
+        latest_path=args.output.resolve(),
+        summary={
+            "mode": args.mode,
+            "measurement_power": measurement_power,
+            "comparison": report["comparison"],
+        },
     )
     print(json.dumps(report, indent=2, sort_keys=True))
+    print(f"report: {run_dir}")
 
 
 if __name__ == "__main__":

@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from importlib.metadata import version
@@ -40,6 +39,7 @@ from agent_guardrail.config import (
     load_policy_file,
 )
 from agent_guardrail.core import MatchPolicyAnalyzer
+from evals.lib import reporting
 
 _HERE = Path(__file__).resolve().parent
 _ROOT = _HERE.parents[1]
@@ -498,11 +498,19 @@ def main() -> None:
     report["gates"] = gates
     report["external_cases"] = len(external_cases)
 
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(
-        json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    run_dir = reporting.write_run_report(
+        eval_name="detection",
+        report=report,
+        results_root=_ROOT / "data" / "benchmarks" / "detection",
+        repo_root=_ROOT,
+        latest_path=args.output.resolve(),
+        summary={
+            "axes": sorted(report["axes"]),  # type: ignore[arg-type]
+            "gates": gates,
+            "mismatched_decisions": failures,
+        },
     )
-    print(f"report written to {args.output}")
+    print(f"report written to {run_dir}")
     print(f"mismatched decisions: {failures}")
 
 

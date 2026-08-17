@@ -14,6 +14,10 @@ from agent_guardrail.detectors.hidden_content import (
     HIDDEN_CONTENT_TYPES,
     HiddenContentDetector,
 )
+from agent_guardrail.detectors.llm_judge import (
+    LLM_JUDGE_DETECTION_TYPE,
+    LLMJudgeDetector,
+)
 from agent_guardrail.detectors.model_prompt_injection import (
     ModelPromptInjectionDetector,
     PromptInjectionClassifier,
@@ -58,6 +62,7 @@ def create_detector_registry(
     semgrep_detector: SemgrepDetector | None = None,
     yara_detector: YaraInjectionDetector | None = None,
     similarity_detector: IsSimilarDetector | None = None,
+    llm_judge_detector: LLMJudgeDetector | None = None,
 ) -> DetectorRegistry:
     """Create local capabilities plus explicitly injected deployment adapters.
 
@@ -170,6 +175,20 @@ def create_detector_registry(
                 max_detections=yara_detector.profile.max_matches,
             ),
         )
+    if llm_judge_detector is not None:
+        registry.register(
+            llm_judge_detector,
+            policy_descriptor=DetectorPolicyDescriptor(
+                name=llm_judge_detector.name,
+                allowed_encodings=frozenset({"text", "canonical_json"}),
+                detection_types=frozenset({LLM_JUDGE_DETECTION_TYPE}),
+                max_input_bytes=16_384,
+                # External LLM latency is seconds, not milliseconds; the
+                # deployment profile is the release-point capability.
+                timeout_ms=10_000,
+                max_detections=1,
+            ),
+        )
     if similarity_detector is not None:
         registry.register_similarity(
             similarity_detector,
@@ -207,6 +226,12 @@ def create_similarity_detector_registry(detector: IsSimilarDetector) -> Detector
     """Create the default registry plus one deployment-profiled text encoder."""
 
     return create_detector_registry(similarity_detector=detector)
+
+
+def create_llm_judge_detector_registry(detector: LLMJudgeDetector) -> DetectorRegistry:
+    """Create the default registry plus one deployment-profiled LLM judge."""
+
+    return create_detector_registry(llm_judge_detector=detector)
 
 
 def create_default_predicate_registry() -> PredicateRegistry:

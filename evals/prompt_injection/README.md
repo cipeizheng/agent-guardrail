@@ -31,10 +31,38 @@ uv run python evals/prompt_injection/run.py \
   --detectors prompt_injection prompt_injection_model
 ```
 
-默认报告写入已忽略的 `data/benchmarks/prompt-injection/results/latest.json`。报告包含 confusion matrix、
-recall、false-positive rate、precision/F1、balanced accuracy、延迟和分类别 detection rate；不保存原始
-prompt 或 Detector evidence。`full_local_v1` 当前固定使用 0.85 判定阈值；Detector version 将模型、运行库和
+报告经由共享的 `evals/lib/reporting.py` 写入不可变 run 目录
+`data/benchmarks/prompt-injection/results/<UTC时间戳>-prompt-injection/report.json`，并 append
+`results/index.jsonl`、原子更新 `results/latest.json`（布局与约定见 [evals/README.md](../README.md)）。
+报告包含 confusion matrix、recall、false-positive rate、precision/F1、balanced accuracy、延迟、
+分类别 detection rate，以及按可检测性类别（`benign`/`style_detectable`/`content_undetectable`，
+定义见 `evals/lib/detectability.py`）分组的指标——BIPIA text 攻击在
+`content_undetectable` 上的内容分类 recall 是标签噪声，不读作 Detector 缺口。报告不保存原始
+prompt 或 Detector evidence。`full_local_v1` 的部署默认阈值是 0.85；Detector version 将模型、运行库和
 阈值身份绑定进报告。`misclassified_sample_ids` 可通过固定数据文件和 manifest 复核。
+
+### 操作点标定（threshold sweep）
+
+`--prompt-model-threshold` 是部署级参数（传给 `create_deployment_detector_registry`；Policy 不能选择）。
+传入一个足够低的值（≤ 0.01，例如 `1e-6`）时，每个样本的原始分类分数通过 Detection confidence 完整暴露
+（无 Detection 记为 0.0），报告额外输出 `prompt_injection_model` 的 `operating_points`：
+
+- `roc_auc`：含并列分数处理的 rank-based AUC；
+- `precision_at_recall`（0.80/0.90/0.95）与 `recall_at_fpr`（0.01）；
+- `threshold_grid`：0.30–0.95 固定网格的混淆矩阵（含 0.85 行，可直接与历史报告对照），
+  判定语义与 Detector 一致（`score > threshold`）。
+
+```bash
+uv run python evals/prompt_injection/run.py \
+  --profile full_local_v1 \
+  --device cpu \
+  --detector-assets-dir data/detector-assets \
+  --detectors prompt_injection_model \
+  --prompt-model-threshold 1e-6
+```
+
+一次低阈值运行即可得到全部分数分布；`overall` 混淆矩阵对应低阈值操作点本身，历史 0.85 结果看
+`threshold_grid["0.85"]`。
 
 若只评测不需要外部资产的规则 Detector：
 

@@ -26,6 +26,9 @@ from agent_guardrail.detectors import (
     EmbeddingBackend,
     EmbeddingProfile,
     IsSimilarDetector,
+    LLMJudgeBackend,
+    LLMJudgeDetector,
+    LLMJudgeProfile,
     PresidioAnalyzerBackend,
     SemgrepCLIBackend,
     SemgrepDetector,
@@ -129,6 +132,10 @@ def create_deployment_detector_registry(
     detector_assets_dir: Path | None = None,
     embedding_backend: EmbeddingBackend | None = None,
     embedding_profile: EmbeddingProfile | None = None,
+    prompt_model_threshold: float = 0.85,
+    llm_judge_backend: LLMJudgeBackend | None = None,
+    llm_judge_profile: LLMJudgeProfile | None = None,
+    llm_judge_threshold: float = 0.5,
 ) -> DetectorRegistry:
     """Construct one deployment profile without allowing Policy-driven choices."""
 
@@ -137,6 +144,18 @@ def create_deployment_detector_registry(
         selected_device = PromptModelDevice(prompt_model_device)
     except ValueError as exc:
         raise DetectorProfileError("unknown Detector deployment profile setting") from exc
+    if (
+        not isinstance(prompt_model_threshold, float)
+        or not 0.0 < prompt_model_threshold <= 1.0
+    ):
+        raise DetectorProfileError("prompt model threshold must be a float in (0, 1]")
+    if selected_profile is DetectorDeploymentProfile.LOCAL:
+        if selected_device is not PromptModelDevice.CPU:
+            raise DetectorProfileError("prompt model device requires the full_local_v1 profile")
+        if prompt_model_threshold != 0.85:
+            raise DetectorProfileError(
+                "prompt model threshold requires the full_local_v1 profile"
+            )
     if (embedding_backend is None) != (embedding_profile is None):
         raise DetectorProfileError(
             "embedding backend and embedding profile must be configured together"
@@ -146,29 +165,48 @@ def create_deployment_detector_registry(
         if embedding_backend is not None and embedding_profile is not None
         else None
     )
+    if (llm_judge_backend is None) != (llm_judge_profile is None):
+        raise DetectorProfileError(
+            "LLM judge backend and LLM judge profile must be configured together"
+        )
+    if not isinstance(llm_judge_threshold, float) or not 0.0 < llm_judge_threshold <= 1.0:
+        raise DetectorProfileError("LLM judge threshold must be a float in (0, 1]")
+    if llm_judge_backend is None and llm_judge_threshold != 0.5:
+        raise DetectorProfileError("LLM judge threshold requires an LLM judge backend")
+    llm_judge_detector = (
+        LLMJudgeDetector(
+            llm_judge_backend,
+            profile=llm_judge_profile,
+            threshold=llm_judge_threshold,
+        )
+        if llm_judge_backend is not None and llm_judge_profile is not None
+        else None
+    )
     if selected_profile is DetectorDeploymentProfile.LOCAL:
-        if selected_device is not PromptModelDevice.CPU:
-            raise DetectorProfileError("prompt model device requires the full_local_v1 profile")
-        if similarity_detector is None:
+        if similarity_detector is None and llm_judge_detector is None:
             return create_default_detector_registry()
-        return create_detector_registry(similarity_detector=similarity_detector)
+        return create_detector_registry(
+            similarity_detector=similarity_detector,
+            llm_judge_detector=llm_judge_detector,
+        )
     if detector_assets_dir is None:
         raise DetectorProfileError("full_local_v1 requires a Detector assets directory")
 
     semgrep_detector = _create_semgrep_detector()
     yara_detector = _create_yara_detector()
     pii_backend = _create_presidio_backend()
-    prompt_classifier = _create_prompt_classifier(
+    prompt_classifier = create_prompt_classifier(
         device=selected_device,
         assets_dir=detector_assets_dir,
     )
     return create_detector_registry(
         pii_backend=pii_backend,
         prompt_classifier=prompt_classifier,
-        prompt_threshold=0.85,
+        prompt_threshold=prompt_model_threshold,
         semgrep_detector=semgrep_detector,
         yara_detector=yara_detector,
         similarity_detector=similarity_detector,
+        llm_judge_detector=llm_judge_detector,
     )
 
 
@@ -236,11 +274,12 @@ def _create_presidio_backend() -> PresidioAnalyzerBackend:
     )
 
 
-def _create_prompt_classifier(
+def create_prompt_classifier(
     *,
     device: PromptModelDevice,
     assets_dir: Path,
 ) -> TransformersPipelineClassifier:
+    """Build the verified DeBERTa prompt-injection classifier for full_local_v1."""
     torch_version = _required_package_version("torch")
     transformers_version = _required_package_version("transformers")
     _required_package_version("sentencepiece")

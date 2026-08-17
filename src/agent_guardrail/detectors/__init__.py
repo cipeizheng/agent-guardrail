@@ -1,6 +1,12 @@
 """Built-in deterministic detectors."""
 
 from agent_guardrail.detectors.hidden_content import HiddenContentDetector
+from agent_guardrail.detectors.llm_judge import (
+    JudgeVerdict,
+    LLMJudgeBackend,
+    LLMJudgeDetector,
+    LLMJudgeProfile,
+)
 from agent_guardrail.detectors.model_prompt_injection import (
     ModelPromptInjectionDetector,
     PromptInjectionClassifier,
@@ -47,6 +53,10 @@ __all__ = [
     "EmbeddingProfile",
     "HiddenContentDetector",
     "IsSimilarDetector",
+    "JudgeVerdict",
+    "LLMJudgeBackend",
+    "LLMJudgeDetector",
+    "LLMJudgeProfile",
     "ModelPromptInjectionDetector",
     "OpenAIEmbeddingBackend",
     "PIIBackend",

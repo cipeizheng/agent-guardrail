@@ -55,6 +55,9 @@ class Case:
     rationale: str = ""
     decision_point: str = "pending_tool_call"
     fact_probes: tuple[FactProbe, ...] = ()
+    # Detectability class of the injected payload (evals/lib/detectability.py);
+    # None for hand-scripted cases whose axis is not payload-classification.
+    detectability: str | None = None
 
 
 CONSTRAINT_CASES: tuple[Case, ...] = (

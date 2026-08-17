@@ -143,7 +143,8 @@ Event/Tool/来源语境。
 
 - Presidio 2.2.363、spaCy 3.8 和 `en_core_web_sm` 3.8.0，用于英文 person/location 等 NER；
 - `protectai/deberta-v3-base-prompt-injection-v2` 的提交
-  `90c9989b1a342275dd0d1a95aad283c04e075671`，本地 PyTorch 推理，阈值 0.85；
+  `90c9989b1a342275dd0d1a95aad283c04e075671`，本地 PyTorch 推理，部署默认阈值 0.85；
+  部署代码可在构造 Registry 时用部署级参数覆盖该操作点（例如低阈值暴露原始分数做标定），Policy 不能选择；
 - 外部隔离安装且版本严格为 1.170.0 的 Semgrep CLI，以及包内固定 Python ruleset；
 - yara-python 4.5.4，以及包内固定 injection ruleset。
 
@@ -186,6 +187,12 @@ detectors = create_detector_registry(
   数量、index、维度、有限值和非零向量。异常与非法返回为 `capability_error`，deadline 为
   `detector_timeout`，Finding
   只包含 `semantic_similarity`、置信度和上下文指纹，不包含 data、target、model 或异常原文。
+- `prompt_injection_judge` 是部署注入的 LLM judge 通道（`create_deployment_detector_registry` 的
+  `llm_judge_backend`+`llm_judge_profile` 成对注入，或 `create_llm_judge_detector_registry`）。部署代码
+  固定 judge client、模型、prompt（其 SHA-256 进入 `LLMJudgeProfile` 的版本身份）、endpoint、凭据和部署
+  阈值；Policy 只见 capability 名。backend 只能返回有界 `JudgeVerdict`（[0,1] 分数），Detection 只含
+  `llm_judge_prompt_injection`、置信度与上下文指纹，judge 生成的文本不进入 evidence。外部 LLM 延迟为秒
+  级，descriptor deadline 10 秒，面向释放点检查。
 
 Policy 使用方式：
 

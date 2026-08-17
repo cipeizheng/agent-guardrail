@@ -9,9 +9,7 @@ import hashlib
 import importlib.metadata
 import json
 import math
-import os
 import platform
-import subprocess
 import sys
 import time
 from collections import Counter, defaultdict
@@ -21,7 +19,9 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from agent_guardrail import DetectorRunner
+from agent_guardrail.config.deployment import create_deployment_detector_registry
 from agent_guardrail.models import DetectionContext
+from evals.lib import detectability, metrics, reporting
 
 _ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_MANIFEST = Path(__file__).with_name("manifest.json")
@@ -51,6 +51,7 @@ class Sample:
     category: str
     attack: bool
     text: str
+    detectability: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +60,14 @@ class Observation:
     detected: bool
     detection_types: tuple[str, ...]
     elapsed_ms: float
+    score: float | None = None
+
+
+_SWEEP_THRESHOLD_LIMIT = 0.01
+_SWEEP_GRID = (0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 0.85, 0.90, 0.95)
+_PRECISION_AT_RECALL = (0.80, 0.90, 0.95)
+_RECALL_AT_FPR = (0.01,)
+_SCORED_CAPABILITY = "prompt_injection_model"
 
 
 def _parse_args() -> argparse.Namespace:
@@ -80,6 +89,16 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--detector-assets-dir", type=Path)
     parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
+    parser.add_argument(
+        "--prompt-model-threshold",
+        type=float,
+        default=None,
+        help=(
+            "deployment threshold for prompt_injection_model (default: profile 0.85). "
+            "Pass a value <= 0.01 to surface raw scores and enable operating-point "
+            "metrics; Detector version identity records the value."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -191,6 +210,9 @@ def _load_samples(files: list[DatasetFile]) -> list[Sample]:
                         category=category,
                         attack=source.attack,
                         text=text,
+                        detectability=detectability.classify_corpus(
+                            source.benchmark_id, source.dataset_id
+                        ),
                     )
                 )
         elif source.benchmark_id == "bipia":
@@ -210,6 +232,9 @@ def _load_samples(files: list[DatasetFile]) -> list[Sample]:
                             category=category,
                             attack=source.attack,
                             text=text,
+                            detectability=detectability.classify_corpus(
+                                source.benchmark_id, source.dataset_id
+                            ),
                         )
                     )
         else:
@@ -316,20 +341,73 @@ def _group_metrics(observations: list[Observation]) -> dict[str, Any]:
     return result
 
 
-def _git_revision() -> str | None:
-    try:
-        result = subprocess.run(
-            ("git", "rev-parse", "HEAD"),
-            cwd=_ROOT,
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=5,
+def _detectability_metrics(observations: list[Observation]) -> dict[str, Any]:
+    """Full metrics per detectability class (evals/lib/detectability.py)."""
+
+    grouped: dict[str, list[Observation]] = defaultdict(list)
+    for item in observations:
+        grouped[item.sample.detectability].append(item)
+    if "unclassified" in grouped:
+        raise SystemExit(
+            "unclassified corpus in detectability map; classify it in "
+            "evals/lib/detectability.py before reporting"
         )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    revision = result.stdout.strip()
-    return revision if len(revision) == 40 else None
+    return {name: _metrics(items) for name, items in sorted(grouped.items())}
+
+
+def _cut_outcome(
+    observations: list[Observation],
+    cut: float,
+    *,
+    inclusive: bool,
+) -> dict[str, Any]:
+    """Confusion counts at one score cut; inclusive matches `score >= cut`."""
+
+    return metrics.confusion_at(
+        [item.score or 0.0 for item in observations],
+        [item.sample.attack for item in observations],
+        cut,
+        inclusive=inclusive,
+    )
+
+
+def _roc_auc(observations: list[Observation]) -> float | None:
+    """Rank-based AUC (Mann-Whitney) with tie handling; None without both classes."""
+
+    return metrics.roc_auc(
+        [item.score or 0.0 for item in observations if item.sample.attack],
+        [item.score or 0.0 for item in observations if not item.sample.attack],
+    )
+
+
+def _operating_points(
+    observations: list[Observation],
+    *,
+    deployment_threshold: float,
+) -> dict[str, Any]:
+    """Operating-point metrics over the full score distribution of one Detector."""
+
+    scores = [item.score or 0.0 for item in observations]
+    labels = [item.sample.attack for item in observations]
+    return {
+        "deployment_threshold": deployment_threshold,
+        "score_semantics": (
+            "Detection confidence captured at the deployment threshold above; "
+            "samples without a Detection count as score 0.0; threshold_grid rows "
+            "use the Detector semantics `detected iff score > threshold`"
+        ),
+        "roc_auc": _roc_auc(observations),
+        "precision_at_recall": metrics.precision_at_recall(scores, labels, _PRECISION_AT_RECALL),
+        "recall_at_fpr": metrics.recall_at_fpr(scores, labels, _RECALL_AT_FPR),
+        "threshold_grid": {
+            str(threshold): _cut_outcome(observations, threshold, inclusive=False)
+            for threshold in _SWEEP_GRID
+        },
+    }
+
+
+def _git_revision() -> str | None:
+    return reporting.git_revision(_ROOT)["revision"]
 
 
 def _package_versions() -> dict[str, str]:
@@ -343,21 +421,6 @@ def _package_versions() -> dict[str, str]:
     return versions
 
 
-def _write_report(path: Path, report: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if path.is_symlink():
-        raise SystemExit("refusing to replace a symlinked report")
-    temporary = path.with_name(f".{path.name}.partial-{os.getpid()}")
-    try:
-        temporary.write_text(
-            json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-        os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
-
-
 async def _run(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
     manifest_path = args.manifest.resolve()
     data_dir = args.data_dir.resolve()
@@ -365,12 +428,28 @@ async def _run(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
     samples = _load_samples(files)
     if args.profile == "full_local_v1" and args.detector_assets_dir is None:
         raise SystemExit("--detector-assets-dir is required for full_local_v1")
-    runner = DetectorRunner.from_profile(
-        args.profile,
-        prompt_model_device=args.device,
-        detector_assets_dir=(
-            args.detector_assets_dir.resolve() if args.detector_assets_dir is not None else None
-        ),
+    if args.prompt_model_threshold is not None and not (
+        0.0 < args.prompt_model_threshold <= 1.0
+    ):
+        raise SystemExit("--prompt-model-threshold must be a float in (0, 1]")
+    sweep_enabled = (
+        args.prompt_model_threshold is not None
+        and args.prompt_model_threshold <= _SWEEP_THRESHOLD_LIMIT
+        and _SCORED_CAPABILITY in args.detectors
+    )
+    runner = DetectorRunner.from_registry(
+        create_deployment_detector_registry(
+            args.profile,
+            prompt_model_device=args.device,
+            detector_assets_dir=(
+                args.detector_assets_dir.resolve() if args.detector_assets_dir is not None else None
+            ),
+            **(
+                {"prompt_model_threshold": args.prompt_model_threshold}
+                if args.prompt_model_threshold is not None
+                else {}
+            ),
+        )
     )
     capabilities = {capability.name: capability for capability in runner.capabilities}
     selected = tuple(args.detectors)
@@ -407,12 +486,20 @@ async def _run(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
             )
             elapsed_ms = (time.perf_counter() - before) * 1000
             detection_types = tuple(sorted({item.type for item in result.detections}))
+            score: float | None = None
+            if sweep_enabled and name == _SCORED_CAPABILITY:
+                score = (
+                    max(item.confidence for item in result.detections)
+                    if result.detections
+                    else 0.0
+                )
             detector_observations[name].append(
                 Observation(
                     sample=sample,
                     detected=result.detected,
                     detection_types=detection_types,
                     elapsed_ms=elapsed_ms,
+                    score=score,
                 )
             )
             sample_elapsed += elapsed_ms
@@ -439,12 +526,20 @@ async def _run(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
             },
             "overall": _metrics(observations),
             "categories": _group_metrics(observations),
+            "detectability": _detectability_metrics(observations),
         }
+        if sweep_enabled and name == _SCORED_CAPABILITY:
+            assert args.prompt_model_threshold is not None
+            results[name]["operating_points"] = _operating_points(
+                observations,
+                deployment_threshold=args.prompt_model_threshold,
+            )
     if len(selected) > 1:
         results["ensemble_any"] = {
             "members": list(selected),
             "overall": _metrics(ensemble_observations),
             "categories": _group_metrics(ensemble_observations),
+            "detectability": _detectability_metrics(ensemble_observations),
         }
 
     manifest_digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
@@ -456,6 +551,8 @@ async def _run(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
             "profile": args.profile,
             "device": args.device,
             "detectors": list(selected),
+            "prompt_model_threshold": args.prompt_model_threshold,
+            "operating_points_enabled": sweep_enabled,
             "manifest_sha256": manifest_digest,
         },
         "environment": {
@@ -482,9 +579,23 @@ async def _run(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
         "elapsed_seconds": round(time.perf_counter() - started, 3),
         "results": results,
     }
-    output = args.output.resolve()
-    _write_report(output, report)
-    return report, output
+    summary = {
+        name: {
+            "recall": result["overall"]["recall"],
+            "false_positive_rate": result["overall"]["false_positive_rate"],
+            "balanced_accuracy": result["overall"]["balanced_accuracy"],
+        }
+        for name, result in results.items()
+    }
+    run_dir = reporting.write_run_report(
+        eval_name="prompt-injection",
+        report=report,
+        results_root=data_dir,
+        repo_root=_ROOT,
+        latest_path=args.output.resolve(),
+        summary=summary,
+    )
+    return report, run_dir
 
 
 def main() -> None:
@@ -498,6 +609,23 @@ def main() -> None:
             f"false_positive_rate={metrics['false_positive_rate']} "
             f"balanced_accuracy={metrics['balanced_accuracy']}"
         )
+        points = result.get("operating_points")
+        if points is not None:
+            grid = points["threshold_grid"]
+            print(
+                f"{name} operating points: roc_auc={points['roc_auc']} "
+                f"prec@recall0.95={points['precision_at_recall'].get('0.95')} "
+                f"recall@fpr0.01={points['recall_at_fpr'].get('0.01')}"
+            )
+            print(
+                f"{name} threshold grid: "
+                + " | ".join(
+                    f"{threshold}: R={row['recall']} FPR={row['false_positive_rate']}"
+                    for threshold, row in sorted(
+                        grid.items(), key=lambda item: float(item[0])
+                    )
+                )
+            )
 
 
 if __name__ == "__main__":

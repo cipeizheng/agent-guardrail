@@ -73,8 +73,12 @@ uv run --project evals/agentdojo python evals/agentdojo/run.py \
   --mode both
 ```
 
-默认报告写到已忽略的 `data/benchmarks/agentdojo/results/latest.json`。不要提交 `.env`、模型凭据、AgentDojo
-原始 trace 或报告数据。
+报告经由共享的 `evals/lib/reporting.py` 写入不可变 run 目录
+`data/benchmarks/agentdojo/results/<UTC时间戳>-agentdojo/report.json`，并 append
+`results/index.jsonl`、原子更新 `results/latest.json`（布局见 [evals/README.md](../README.md)）。
+`--mode both` 下 baseline 组完成后执行测量力预检（`evals/lib/preflight.py`）：baseline ASR 为 0
+即中止 guarded 臂并给出补救建议；`--allow-floor` 显式记录一次 floor-effect 运行（报告内含
+`measurement_power` 块）。不要提交 `.env`、模型凭据、AgentDojo 原始 trace 或报告数据。
 
 ## 指标与停止条件
 

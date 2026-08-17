@@ -48,7 +48,7 @@ priority_capabilities:
     status: baseline
     threat_paths: [T03, T04]
     implementation: prompt_injection_model
-    note: full_local_v1 锁定 Protect AI DeBERTa v2 提交，真实 backend、预算、脱敏和 Enforcement 路径均已运行；但固定 0.85 阈值在锁定的 BIPIA 125 条攻击载荷与 NotInject 339 条良性难例上只有 8% recall、39.82% false-positive rate，因此仅为已接入基线，不能作为复杂 prompt injection 的充分防御。
+    note: full_local_v1 锁定 Protect AI DeBERTa v2 提交，真实 backend、预算、脱敏和 Enforcement 路径均已运行；但固定 0.85 阈值在锁定的 BIPIA 125 条攻击载荷与 NotInject 339 条良性难例上只有 8% recall、39.82% false-positive rate。2026-08 全量分数标定进一步显示 ROC AUC 仅 0.365（低于随机）且不存在 FPR≤1% 的可达操作点，即差距在分数排序本身而非阈值选择；同月输入构造实验（长 tool result 分段聚合）进一步排除了截断/稀释机制--判别器对"嵌入此代码"类目标劫持载荷裸文本即打 ~0.0002 分，其"注入"概念仅覆盖祈使元指令风格，因此仅为已接入基线，不能作为复杂 prompt injection 的充分防御。
 
   - id: P0-D06
     name: yara_injection_signatures
@@ -97,6 +97,18 @@ priority_capabilities:
     threat_paths: [T03, T04, T07]
     implementation: hidden_content
     note: 隐藏 HTML、不可见 CSS、注释及有界 Base64/百分号/HTML 实体检测和 Enforcement 已实际运行。
+
+  - id: P1-D05
+    name: prompt_injection_judge
+    kind: detector
+    status: adapter_only
+    threat_paths: [T03, T04]
+    implementation: prompt_injection_judge
+    note: 2026-08-16 新增的部署注入 LLM judge 通道（类比 is_similar 的 EmbeddingProfile 模式）。adapter、
+      Schema、descriptor 预算（16 KiB、10 秒）、阈值/版本身份绑定、脱敏和 fail-closed 路径已由单元测试覆盖；
+      真实外部 backend（DeepSeek judge 经 DetectorRunner 全链路）已在 release_external 语料上跑通一次模型臂
+      （recall 0.82、NotInject FPR 0.37，judge 意图判别覆盖了 prompt_injection_model 概念外的载荷），但尚未
+      达到完成定义的边界/超时用例与 Enforcement 断言，且 FPR 未达可用操作点，状态保持 adapter_only。
 
 other_current_capabilities:
   - name: prompt_injection

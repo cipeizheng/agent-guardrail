@@ -152,6 +152,19 @@ def test_local_profile_does_not_import_or_require_optional_backends() -> None:
         create_deployment_detector_registry("local", prompt_model_device="cuda")
 
 
+def test_local_profile_rejects_a_non_default_prompt_model_threshold() -> None:
+    with pytest.raises(DetectorProfileError, match="prompt model threshold"):
+        create_deployment_detector_registry("local", prompt_model_threshold=0.5)
+
+
+@pytest.mark.parametrize("threshold", [0.0, -0.1, 1.5, 1])
+def test_prompt_model_threshold_must_be_a_bounded_float(threshold: float) -> None:
+    with pytest.raises(DetectorProfileError, match="float in \\(0, 1\\]"):
+        create_deployment_detector_registry(
+            "full_local_v1", prompt_model_threshold=threshold
+        )
+
+
 def test_full_profile_requires_explicit_deployment_assets_directory() -> None:
     with pytest.raises(DetectorProfileError, match="assets directory"):
         create_deployment_detector_registry("full_local_v1")

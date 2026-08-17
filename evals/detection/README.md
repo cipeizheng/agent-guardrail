@@ -96,7 +96,13 @@ uv run --project evals/agentdojo python evals/detection/run.py --profile full_lo
 
 外部语料（BIPIA 125 攻击 / NotInject 339 良性 / AgentDojo v1.2.2 35 攻击 + 21 攻击 / 39 良性
 flow 任务，先运行 `evals/prompt_injection/fetch.py` 与 `gen_agentdojo.py` 生成）在
-`release_external` / `flow_agentdojo` 轴单独报告；`--no-external` 可跳过。
+`release_external` / `flow_agentdojo` 轴单独报告；`--no-external` 可跳过。外部 case 自带可检测性
+类别（`evals/lib/detectability.py`，未归类直接报错），`judge_arm.py` 额外输出
+`per_detectability` 混淆计数。
+
+报告与 `judge_arm.py` 的输出都经由 `evals/lib/reporting.py` 写入不可变 run 目录
+`data/benchmarks/detection/results/<UTC时间戳>-<eval>/report.json`，并 append
+`results/index.jsonl`、原子更新各自的 latest 指针（布局见 [evals/README.md](../README.md)）。
 
 ## 已测结果（2026-08-15，gate 判据见 preregistration.md）
 

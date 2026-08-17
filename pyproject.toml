@@ -76,6 +76,11 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agent_guardrail"]
+# Editable installs additionally expose the repository root (for
+# `import evals.lib` in eval entry points) and src/ (for `import
+# agent_guardrail`) in both the repo venv and the isolated
+# evals/agentdojo environment. Published wheels stay unaffected.
+dev-mode-dirs = [".", "src"]
 
 [tool.hatch.metadata]
 allow-direct-references = true

@@ -16,6 +16,8 @@ from pathlib import Path
 
 from corpus import Case, FactProbe, PriorStep
 
+from evals.lib import detectability as _detectability
+
 _HERE = Path(__file__).resolve().parent
 _ROOT = _HERE.parents[1]
 _PROMPT_INJECTION_DIR = _ROOT / "evals" / "prompt_injection"
@@ -32,7 +34,14 @@ def _short_id(source: str, material: str) -> str:
     return f"ext-{source}-{digest}"
 
 
-def _case(source: str, case_id: str, payload: str, attack: bool, note: str) -> Case:
+def _case(
+    source: str,
+    case_id: str,
+    payload: str,
+    attack: bool,
+    note: str,
+    detectability_class: str,
+) -> Case:
     output = _ENVELOPE.format(payload)
     return Case(
         case_id=case_id,
@@ -51,6 +60,7 @@ def _case(source: str, case_id: str, payload: str, attack: bool, note: str) -> C
         rationale=note,
         decision_point="tool_result_release",
         fact_probes=(FactProbe(capability="prompt_injection", text=output, expect_fact=attack),),
+        detectability=detectability_class,
     )
 
 
@@ -89,6 +99,7 @@ def _bipia_notinject_cases() -> list[Case]:
             continue
         for category, text in samples:
             case_id = _short_id(benchmark_id, f"{path.name}\0{category}\0{text}")
+            dataset_id = "text" if "text" in path.name else "code" if "code" in path.name else ""
             cases.append(
                 _case(
                     benchmark_id,
@@ -96,6 +107,7 @@ def _bipia_notinject_cases() -> list[Case]:
                     text,
                     attack,
                     f"{benchmark_id}/{path.name}/{category}",
+                    _detectability.classify_corpus(benchmark_id, dataset_id),
                 )
             )
     return cases
@@ -118,6 +130,7 @@ def _agentdojo_cases() -> list[Case]:
                     f"agentdojo/{export['agentdojo_version']}/"
                     f"{entry['suite']}/{entry['task_id']}"
                 ),
+                detectability_class=_detectability.classify_corpus("agentdojo", ""),
             )
         )
     return cases
@@ -159,6 +172,7 @@ def _agentdojo_flow_cases() -> list[Case]:
                 rationale=(
                     f"agentdojo-attack/{version}/{entry['suite']}/{entry['task_id']}"
                 ),
+                detectability=_detectability.classify_corpus("ajatk", ""),
             )
         )
     for entry in export["benign_cases"]:
@@ -187,6 +201,7 @@ def _agentdojo_flow_cases() -> list[Case]:
                 rationale=(
                     f"agentdojo-benign-{group}/{version}/{entry['suite']}/{entry['task_id']}"
                 ),
+                detectability=_detectability.classify_corpus("ajben", ""),
             )
         )
     return cases
@@ -201,4 +216,13 @@ def load_external_cases() -> tuple[Case, ...]:
     seen = {case.case_id for case in cases}
     if len(seen) != len(cases):
         raise RuntimeError("external case IDs are not unique")
+    unclassified = [
+        case.case_id for case in cases
+        if case.detectability == "unclassified"
+    ]
+    if unclassified:
+        raise RuntimeError(
+            "external cases without a detectability class; update "
+            f"evals/lib/detectability.py: {unclassified[:3]}"
+        )
     return tuple(cases)
