@@ -145,7 +145,9 @@ curl --fail http://127.0.0.1:8080/health/ready
 Core 构建会安装 `full_deberta` 的 Presidio/spaCy、固定 DeBERTa checkpoint、Semgrep 和 YARA，并在构建期
 下载后校验约 750 MB 的模型资产，因此首次构建较慢且镜像较大。运行时为离线模式。Compose 只发布 Gateway
 的 8080；Core 8090 只连接内部网络。Policy 只读挂载到 Core，Audit volume 只挂载到 Gateway，两个容器均
-non-root、只读 root filesystem、drop capabilities 并使用 `/tmp` tmpfs。
+non-root、只读 root filesystem、drop capabilities 并使用 `/tmp` tmpfs。Core 镜像把 `HOME` 与 `XDG_*`
+缓存重定向到 `/tmp`：只读 rootfs 下若沿用默认 `$HOME`，`semgrep --version` 等 Tool 在 `$HOME/.semgrep`
+建日志目录会直接失败并使 `full_deberta` 无法启动——preset 换装时不得移除这两个 ENV 的重定向。
 
 Compose 私网内使用 HTTP。若 Core 与 Gateway 跨主机或跨非受控网络部署，必须在其间增加 TLS/mTLS 或等价
 的可信传输层；Bearer Key 不能替代链路机密性。

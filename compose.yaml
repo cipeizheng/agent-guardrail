@@ -5,6 +5,10 @@ services:
     build:
       context: .
       dockerfile: docker/core.Dockerfile
+      args:
+        # full_deberta default = production image; set DETECTOR_PROFILE=local for
+        # a lightweight build that validates the compose architecture only.
+        DETECTOR_PROFILE: ${DETECTOR_PROFILE:-full_deberta}
     image: agent-guardrail-core:0.1.0
     environment:
       AGENT_GUARDRAIL_CORE_POLICY_FILE: /config/policy.yaml

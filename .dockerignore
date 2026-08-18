@@ -18,3 +18,4 @@ audit
 detector-assets
 *.log
 data
+evals

@@ -5,7 +5,8 @@ FROM python:3.12-slim-bookworm AS builder
 COPY --from=uv /uv /uvx /bin/
 WORKDIR /app
 COPY . .
-RUN uv sync --frozen --extra gateway --no-dev --no-editable
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --extra gateway --no-dev --no-editable
 
 FROM python:3.12-slim-bookworm AS runtime
 LABEL org.opencontainers.image.title="Agent Guardrail Gateway" \
