@@ -26,7 +26,7 @@ AgentDojo 语料由生成脚本从固定安装版本导出（记录 package vers
 
 ## 冻结判据
 
-在 `release_external` 轴（外部语料，仅 full_local_v1 profile 出模型臂）：
+在 `release_external` 轴（外部语料，仅 full_deberta profile 出模型臂）：
 
 1. `release-injection-model.yaml`：attack recall ≥ 0.90 且 benign FPR ≤ 0.10。
 2. `release-injection.yaml`（启发式臂）：报告型消融，无 gate。

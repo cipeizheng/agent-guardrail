@@ -87,9 +87,9 @@
    分类器上依然成立。可执行结论：PromptGuard 2 是 `prompt_injection_model` 槽位的有力
    替换候选（Llama 4 Community License，非 MIT，商用需过条款 + 700M MAU 条款）。
    结果：`promptguard2-latest.json` 与 `agentdojo-payloads-latest.json`（均不进 git）。
-   **已正式接入（2026-08-18）**：新增候选部署 profile `full_local_promptguard2` /
-   `promptguard2_only`（自描述封闭预设，非组合语法；默认阈值 0.9；镜像 commit + size +
-   SHA-256 pin；评分路径对齐 LlamaFirewall）。`full_local_v1` 保持默认与 verified；
+   **已正式接入（2026-08-18）**：新增候选部署 profile `full_promptguard2` /
+   `promptguard2`（自描述封闭预设，非组合语法；默认阈值 0.9；镜像 commit + size +
+   SHA-256 pin；评分路径对齐 LlamaFirewall）。`full_deberta` 保持默认与 verified；
    capability 记为 `prompt_injection_model_promptguard2`（baseline）。
 ## P2（新 capability，走 adapter_only 起步）
 

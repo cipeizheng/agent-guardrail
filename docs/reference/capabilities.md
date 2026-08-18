@@ -139,7 +139,7 @@ Event/Tool/来源语境。
 模型输出文本写入 Detection。同步推理在线程中执行；Matcher timeout 可以停止等待，但不能强制终止底层
 线程，所以需要强隔离时应由部署层提供可取消进程/服务 backend。
 
-`full_local_v1` 使用同一 adapter 合同，固定加载：
+`full_deberta` 使用同一 adapter 合同，固定加载：
 
 - Presidio 2.2.363、spaCy 3.8 和 `en_core_web_sm` 3.8.0，用于英文 person/location 等 NER；
 - `protectai/deberta-v3-base-prompt-injection-v2` 的提交
@@ -154,7 +154,7 @@ Event/Tool/来源语境。
 部署侧配置是逐组件的（`create_deployment_detector_registry` 的组件参数或对应环境变量），
 preset 是组件组合的命名快捷方式；自由组合的组件各自验证，组合本身不构成新的完成定义声明。
 
-PromptGuard 2 候选 profile（`full_local_promptguard2` / `promptguard2_only`，2026-08-18）复用同一
+PromptGuard 2 候选 profile（`full_promptguard2` / `promptguard2`，2026-08-18）复用同一
 adapter 合同，把 DeBERTa 换成 Meta PromptGuard 2 86M（经未 gate 镜像 pin 到 commit + SHA-256；评分
 对齐 LlamaFirewall：全空白剥离重分词、截断 512、MALICIOUS 类概率），部署默认阈值 0.9。权重为
 Llama 4 Community License（非 MIT），因此是显式 opt-in 候选，绝不作为默认部署。固定 checkpoint 不表示模型对所有语言和改写攻击都无漏报，Detector fact 仍须与可信 source/sink

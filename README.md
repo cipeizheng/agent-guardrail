@@ -203,11 +203,11 @@ Deployment-fixed optional capabilities are deliberately separate:
 
 | Availability | Capability | Backend boundary |
 | --- | --- | --- |
-| `full_local_v1` | `prompt_injection_model` | Pinned Protect AI DeBERTa checkpoint, local CPU/CUDA inference |
-| `full_local_promptguard2` / `promptguard2_only` | `prompt_injection_model` | Pinned Meta PromptGuard 2 86M (Llama 4 Community License, opt-in candidate) |
-| `full_local_v1` / `full_local_promptguard2` | enhanced `pii` | Pinned Presidio/spaCy English NER plus local validators |
-| `full_local_v1` / `full_local_promptguard2` | `semgrep` | Isolated, version-pinned CLI and bundled Python ruleset |
-| `full_local_v1` / `full_local_promptguard2` | `yara_injection_signatures` | Pinned yara-python, bundled ruleset, and fixed rule-to-type mapping |
+| `full_deberta` | `prompt_injection_model` | Pinned Protect AI DeBERTa checkpoint, local CPU/CUDA inference |
+| `full_promptguard2` / `promptguard2` | `prompt_injection_model` | Pinned Meta PromptGuard 2 86M (Llama 4 Community License, opt-in candidate) |
+| `full_deberta` / `full_promptguard2` | enhanced `pii` | Pinned Presidio/spaCy English NER plus local validators |
+| `full_deberta` / `full_promptguard2` | `semgrep` | Isolated, version-pinned CLI and bundled Python ruleset |
+| `full_deberta` / `full_promptguard2` | `yara_injection_signatures` | Pinned yara-python, bundled ruleset, and fixed rule-to-type mapping |
 | Explicit injection | `is_similar` | Deployment-selected `EmbeddingProfile` and async embedding backend |
 | Explicit injection | `prompt_injection_judge` | Deployment-selected `LLMJudgeBackend`/`LLMJudgeProfile` verdict channel |
 
@@ -229,14 +229,14 @@ Semgrep, YARA, or a remote embedding client.
 
 ### Full local profile
 
-`full_local_v1` pins and verifies its detector dependencies and model assets before startup:
+`full_deberta` pins and verifies its detector dependencies and model assets before startup:
 
 ```bash
 uv sync --frozen --extra gateway --extra detectors --no-dev
 uv tool install semgrep==1.170.0
 export AGENT_GUARDRAIL_DETECTOR_ASSETS_DIR=/var/lib/agent-guardrail/detectors
 uv run agent-guardrail-prefetch-detectors
-export AGENT_GUARDRAIL_DETECTOR_PROFILE=full_local_v1
+export AGENT_GUARDRAIL_DETECTOR_PROFILE=full_deberta
 ```
 
 Runtime startup fails if required assets, versions, checksums, or the selected CUDA device do not
@@ -244,8 +244,8 @@ match the profile. Policy YAML still cannot replace those choices.
 
 ### PromptGuard 2 candidate profiles
 
-`full_local_promptguard2` swaps the prompt-injection classifier for Meta PromptGuard 2 86M
-(same full stack otherwise); `promptguard2_only` loads the local heuristic stack plus only
+`full_promptguard2` swaps the prompt-injection classifier for Meta PromptGuard 2 86M
+(same full stack otherwise); `promptguard2` loads the local heuristic stack plus only
 PromptGuard 2. Both are opt-in candidates under the Llama 4 Community License and never the
 default deployment; their default threshold is 0.9 and their assets are fetched with
 `uv run agent-guardrail-prefetch-promptguard2`. See the

@@ -61,7 +61,7 @@ _HERE = Path(__file__).resolve().parent
 _ROOT = _HERE.parents[1]
 _ASSETS = _ROOT / "data" / "detector-assets"
 _ATTACK_PIPELINE_NAME = "scripted-gpt-4o-2024-05-13"  # readable model name for the attack prompt
-_PROFILE = DetectorDeploymentProfile.FULL_LOCAL_V1
+_PROFILE = DetectorDeploymentProfile.FULL_DEBERTA
 
 
 @dataclass

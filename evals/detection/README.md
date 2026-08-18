@@ -95,12 +95,12 @@ FNR 不升且 FPR 降）。冻结后的修改须以 `post_hoc` 披露。
 # local profile（默认）：不依赖模型凭据与外部 detector 资产
 uv run python evals/detection/run.py
 
-# full_local_v1：启用 DeBERTa PI 模型等资产，release 轴额外跑模型规则臂
-uv run --project evals/agentdojo python evals/detection/run.py --profile full_local_v1
+# full_deberta：启用 DeBERTa PI 模型等资产，release 轴额外跑模型规则臂
+uv run --project evals/agentdojo python evals/detection/run.py --profile full_deberta
 
-# 候选 profile：full_local_promptguard2（全栈换 PromptGuard 2）与 promptguard2_only（仅 PromptGuard 2）；
+# 候选 profile：full_promptguard2（全栈换 PromptGuard 2）与 promptguard2（仅 PromptGuard 2）；
 # PromptGuard 2 配套 Llama 4 Community License（非 MIT），为 opt-in 候选而非默认
-uv run python evals/detection/run.py --profile promptguard2_only
+uv run python evals/detection/run.py --profile promptguard2
 ```
 
 外部语料（BIPIA 125 攻击 / NotInject 339 良性 / AgentDojo v1.2.2 35 攻击 + 21 攻击 / 39 良性

@@ -3,7 +3,7 @@
 Usage:
   uv run python evals/detection/run.py                          # local profile
   uv run --project evals/agentdojo python evals/detection/run.py \\
-      --profile full_local_v1                                   # model PI detector
+      --profile full_deberta                                   # model PI detector
 
 Two channels over the same corpus: the GuardrailRun decision layer (policy
 ALLOW/BLOCK per decision point) and the DetectorRunner fact layer (detector
@@ -11,7 +11,7 @@ facts per probed text), so decision-layer mismatches can be attributed to
 either a detector gap or a rule composition gap.
 
 The default `local` profile needs no model credentials or external assets.
-`full_local_v1` additionally publishes the fixed DeBERTa prompt-injection
+`full_deberta` additionally publishes the fixed DeBERTa prompt-injection
 classifier (plus semgrep/yara/presidio backends) and runs the model-based
 release policy as a second ablation arm.
 """
@@ -328,7 +328,7 @@ def main() -> None:
         default=DetectorDeploymentProfile.LOCAL.value,
         help=(
             "detector deployment profile (model profiles add the PI model; "
-            "full_local_promptguard2/promptguard2_only use PromptGuard 2)"
+            "full_promptguard2/promptguard2 use PromptGuard 2)"
         ),
     )
     parser.add_argument(

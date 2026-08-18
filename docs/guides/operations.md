@@ -17,14 +17,14 @@ AuditSink。
 
 ### 完整本地 Detector profile
 
-默认 `local` profile 不加载可选模型。启用已真实验证的 `full_local_v1`：
+默认 `local` profile 不加载可选模型。启用已真实验证的 `full_deberta`：
 
 ```bash
 uv sync --frozen --extra gateway --extra detectors --no-dev
 uv tool install semgrep==1.170.0
 export AGENT_GUARDRAIL_DETECTOR_ASSETS_DIR=/var/lib/agent-guardrail/detectors
 uv run agent-guardrail-prefetch-detectors
-export AGENT_GUARDRAIL_DETECTOR_PROFILE=full_local_v1
+export AGENT_GUARDRAIL_DETECTOR_PROFILE=full_deberta
 export AGENT_GUARDRAIL_PROMPT_MODEL_DEVICE=cpu
 uv run python -m agent_guardrail.gateway
 ```
@@ -39,23 +39,23 @@ Policy 接受模型、规则、路径、命令或 device。缺失或不匹配会
 
 ### PromptGuard 2 候选 profile（可选，非默认）
 
-`full_local_promptguard2` 与 `full_local_v1` 栈相同（Presidio/spaCy、Semgrep、YARA），仅把 DeBERTa
+`full_promptguard2` 与 `full_deberta` 栈相同（Presidio/spaCy、Semgrep、YARA），仅把 DeBERTa
 PI 分类器换成 Meta PromptGuard 2 86M（评分路径对齐 LlamaFirewall：全空白剥离后重分词、截断 512、
-MALICIOUS 类概率）；`promptguard2_only` 只装载本地启发式栈 + PromptGuard 2，不加载 Presidio/Semgrep/YARA，
+MALICIOUS 类概率）；`promptguard2` 只装载本地启发式栈 + PromptGuard 2，不加载 Presidio/Semgrep/YARA，
 适合隔离评估分类器贡献。两者部署默认阈值 0.9（LlamaFirewall 拦截阈值，实测 operating point）。
 
 ```bash
 export AGENT_GUARDRAIL_DETECTOR_ASSETS_DIR=/var/lib/agent-guardrail/detectors
 uv run agent-guardrail-prefetch-promptguard2
-export AGENT_GUARDRAIL_DETECTOR_PROFILE=full_local_promptguard2
+export AGENT_GUARDRAIL_DETECTOR_PROFILE=full_promptguard2
 ```
 
 **License 注意**：PromptGuard 2 权重采用 Llama 4 Community License（非 MIT；含月活 7 亿上限条款，
 再分发需遵守协议并附 "Built with Llama" 署名）。因此这两个 profile 是显式 opt-in 的候选 profile，
-绝不作为默认部署；`full_local_v1`（MIT 栈 + Apache-2.0/Protect AI DeBERTa）保持默认。原始权重位于
+绝不作为默认部署；`full_deberta`（MIT 栈 + Apache-2.0/Protect AI DeBERTa）保持默认。原始权重位于
 人工审批 gate 的 `meta-llama/Llama-Prompt-Guard-2-86M`，本项目 pin 未 gate 的 `gravitee-io` 镜像中
 字节一致的 `model.safetensors`（镜像声明 base_model 与 llama4 license），provenance 记录在
-`config/deployment.py` 的 pin 常量注释中。资产校验与 `full_local_v1` 相同（逐文件 size + SHA-256）。
+`config/deployment.py` 的 pin 常量注释中。资产校验与 `full_deberta` 相同（逐文件 size + SHA-256）。
 
 ### 逐组件 Detector 配置（自由组合）
 
@@ -79,7 +79,7 @@ export AGENT_GUARDRAIL_DETECTOR_PROMPT_MODEL=promptguard2
 **自由组合的边界**：每个组件各自通过单元与集成验证，校验规则（模型组件要求 assets_dir、
 Semgrep 要求 CLI 严格 1.170.0、CUDA 可用性、资产哈希）逐项 fail-closed；但组件**组合本身**
 可能未经端到端一致性验证，风险由部署方评估。已验证姿态仍以 preset 名字标注
-（`full_local_v1` 为 verified 全栈）；组件组合是它的子集/超集自由拼写，不是新的保证。
+（`full_deberta` 为 verified 全栈）；组件组合是它的子集/超集自由拼写，不是新的保证。
 Core 侧使用 `AGENT_GUARDRAIL_CORE_` 前缀的同名变量。
 
 真实 profile 评估命令：
@@ -142,7 +142,7 @@ docker compose up -d
 curl --fail http://127.0.0.1:8080/health/ready
 ```
 
-Core 构建会安装 `full_local_v1` 的 Presidio/spaCy、固定 DeBERTa checkpoint、Semgrep 和 YARA，并在构建期
+Core 构建会安装 `full_deberta` 的 Presidio/spaCy、固定 DeBERTa checkpoint、Semgrep 和 YARA，并在构建期
 下载后校验约 750 MB 的模型资产，因此首次构建较慢且镜像较大。运行时为离线模式。Compose 只发布 Gateway
 的 8080；Core 8090 只连接内部网络。Policy 只读挂载到 Core，Audit volume 只挂载到 Gateway，两个容器均
 non-root、只读 root filesystem、drop capabilities 并使用 `/tmp` tmpfs。
@@ -215,7 +215,7 @@ Broker 和凭据留在 Sandbox 外。最低部署合同是：
 | `AGENT_GUARDRAIL_MAX_UPSTREAM_RESPONSE_BYTES` | `4194304` | 非流式响应或完整 SSE 流字节上限 |
 | `AGENT_GUARDRAIL_MAX_TRACE_EVENTS` | `16` | 请求级 Trace Event 上限 |
 | `AGENT_GUARDRAIL_UPSTREAM_TIMEOUT_SECONDS` | `60` | 非流式网络 timeout；完整 SSE 流 wall-clock 上限 |
-| `AGENT_GUARDRAIL_DETECTOR_PROFILE` | `local` | `local/full_local_v1/full_local_promptguard2/promptguard2_only` 部署 preset（与组件变量互斥） |
+| `AGENT_GUARDRAIL_DETECTOR_PROFILE` | `local` | `local/full_deberta/full_promptguard2/promptguard2` 部署 preset（与组件变量互斥） |
 | `AGENT_GUARDRAIL_DETECTOR_PII` | 空 | 逐组件配置：`none/presidio`（见"逐组件 Detector 配置"） |
 | `AGENT_GUARDRAIL_DETECTOR_SEMGREP` | 空 | 逐组件配置：`none/python_rules` |
 | `AGENT_GUARDRAIL_DETECTOR_YARA` | 空 | 逐组件配置：`none/injection_rules` |
@@ -236,7 +236,7 @@ hostname 必须匹配。
 
 Core 使用独立前缀：`AGENT_GUARDRAIL_CORE_POLICY_FILE` 与
 `AGENT_GUARDRAIL_CORE_API_KEY` 必填；`AGENT_GUARDRAIL_CORE_DETECTOR_PROFILE` 默认 `local`，双容器镜像
-默认覆盖为 `full_local_v1`；另有 `..._DETECTOR_ASSETS_DIR`、`..._PROMPT_MODEL_DEVICE`、
+默认覆盖为 `full_deberta`；另有 `..._DETECTOR_ASSETS_DIR`、`..._PROMPT_MODEL_DEVICE`、
 `..._MAX_REQUEST_BYTES`、`..._HOST`、`..._PORT` 和 `..._LOG_LEVEL`。事实来源是 `CoreSettings`。
 
 ## 5. Secret
@@ -262,7 +262,7 @@ Core 使用独立前缀：`AGENT_GUARDRAIL_CORE_POLICY_FILE` 与
 - Core `GET /health/ready`：报告固定 Policy、Registry、模型 warm-up 和 Runtime ready。
 
 Policy 编译、capability linking、Settings 和可选 Detector profile 在应用构造阶段失败会阻止启动。
-`full_local_v1` 构造会验证固定资产与 Semgrep 版本，并对模型做一次本地 warm-up。Readiness 不探测
+`full_deberta` 构造会验证固定资产与 Semgrep 版本，并对模型做一次本地 warm-up。Readiness 不探测
 Provider/MCP 上游网络，也不验证 Audit 路径可写性。
 
 当前只有 Uvicorn 日志级别和可选 JSONL Audit，没有结构化应用日志、Metrics、OpenTelemetry、SBOM、镜像

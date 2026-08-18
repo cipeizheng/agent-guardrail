@@ -120,7 +120,7 @@ YAML 只能引用部署方注册并发布 descriptor 的 Predicate/Detector。Pr
 
 默认 Registry 只包含本地确定性算法。`prompt_injection_model`、`prompt_injection_judge`、带外部 backend
 的 `pii`、`semgrep` 和 `yara_injection_signatures` 必须由部署启动代码绑定固定 backend/profile 后显式
-发布；Policy 只能看到稳定 capability 名称和有限类型，不能看到或更换 profile。内置 `full_local_v1` 是已真实
+发布；Policy 只能看到稳定 capability 名称和有限类型，不能看到或更换 profile。内置 `full_deberta` 是已真实
 运行的固定部署 preset（默认仍为 `local`），组件变量可自由组合出等价的逐组件部署；`is_similar` 和
 `prompt_injection_judge` 只在部署注入 `EmbeddingProfile`/LLM judge backend 后发布，Policy 提供比较文本和
 阈值，但不能选择 model、endpoint 或凭据。

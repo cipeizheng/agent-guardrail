@@ -21,7 +21,7 @@ class CoreSettings(BaseSettings):
     policy_file: Path
     api_key: SecretStr
     detector_profile: (
-        Literal["local", "full_local_v1", "full_local_promptguard2", "promptguard2_only"]
+        Literal["local", "full_deberta", "full_promptguard2", "promptguard2"]
     ) = "local"
     prompt_model_device: Literal["cpu", "cuda"] = "cpu"
     detector_pii: Literal["none", "presidio"] | None = None

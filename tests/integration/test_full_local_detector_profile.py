@@ -35,7 +35,7 @@ def full_registry():
     if assets_dir is None:
         pytest.fail("real Detector eval requires AGENT_GUARDRAIL_DETECTOR_ASSETS_DIR")
     return create_deployment_detector_registry(
-        "full_local_v1",
+        "full_deberta",
         prompt_model_device=os.environ.get("AGENT_GUARDRAIL_PROMPT_MODEL_DEVICE", "cpu"),
         detector_assets_dir=Path(assets_dir),
     )
@@ -183,7 +183,7 @@ def promptguard2_registry():
     if assets_dir is None:
         pytest.fail("real Detector eval requires AGENT_GUARDRAIL_DETECTOR_ASSETS_DIR")
     return create_deployment_detector_registry(
-        "promptguard2_only",
+        "promptguard2",
         prompt_model_device=os.environ.get("AGENT_GUARDRAIL_PROMPT_MODEL_DEVICE", "cpu"),
         detector_assets_dir=Path(assets_dir),
     )
@@ -228,7 +228,7 @@ async def test_real_promptguard2_scoring_strips_all_whitespace_first(
     assert plain[0].confidence == pytest.approx(padded_detection[0].confidence, abs=1e-9)
 
 
-def test_promptguard2_only_skips_the_external_static_backends(promptguard2_registry) -> None:
+def test_promptguard2_skips_the_external_static_backends(promptguard2_registry) -> None:
     published = {
         descriptor.name
         for descriptor in promptguard2_registry.published_detector_descriptors()
@@ -240,12 +240,12 @@ def test_promptguard2_only_skips_the_external_static_backends(promptguard2_regis
     assert not {"semgrep", "yara_injection_signatures"}.intersection(published)
 
 
-def test_full_local_promptguard2_keeps_the_full_stack_with_promptguard2() -> None:
+def test_full_promptguard2_keeps_the_full_stack_with_promptguard2() -> None:
     assets_dir = os.environ.get("AGENT_GUARDRAIL_DETECTOR_ASSETS_DIR")
     if assets_dir is None:
         pytest.fail("real Detector eval requires AGENT_GUARDRAIL_DETECTOR_ASSETS_DIR")
     registry = create_deployment_detector_registry(
-        "full_local_promptguard2",
+        "full_promptguard2",
         prompt_model_device=os.environ.get("AGENT_GUARDRAIL_PROMPT_MODEL_DEVICE", "cpu"),
         detector_assets_dir=Path(assets_dir),
     )

@@ -29,7 +29,7 @@ AGENT_GUARDRAIL_DETECTOR_ASSETS_DIR=data/detector-assets \
   uv run agent-guardrail-prefetch-promptguard2
 
 uv run python evals/prompt_injection/run.py \
-  --profile full_local_v1 \
+  --profile full_deberta \
   --device cpu \
   --detector-assets-dir data/detector-assets \
   --detectors prompt_injection prompt_injection_model
@@ -42,8 +42,8 @@ uv run python evals/prompt_injection/run.py \
 分类别 detection rate，以及按可检测性类别（`benign`/`style_detectable`/`content_undetectable`，
 定义见 `evals/lib/detectability.py`）分组的指标——BIPIA text 攻击在
 `content_undetectable` 上的内容分类 recall 是标签噪声，不读作 Detector 缺口。报告不保存原始
-prompt 或 Detector evidence。`full_local_v1` 的部署默认阈值是 0.85,PromptGuard 2 候选 profile
-(`full_local_promptguard2`/`promptguard2_only`,Llama 4 Community License,非默认)为 0.9；Detector version 将模型、运行库和
+prompt 或 Detector evidence。`full_deberta` 的部署默认阈值是 0.85,PromptGuard 2 候选 profile
+(`full_promptguard2`/`promptguard2`,Llama 4 Community License,非默认)为 0.9；Detector version 将模型、运行库和
 阈值身份绑定进报告。`misclassified_sample_ids` 可通过固定数据文件和 manifest 复核。
 
 ### 操作点标定（threshold sweep）
@@ -59,7 +59,7 @@ prompt 或 Detector evidence。`full_local_v1` 的部署默认阈值是 0.85,Pro
 
 ```bash
 uv run python evals/prompt_injection/run.py \
-  --profile full_local_v1 \
+  --profile full_deberta \
   --device cpu \
   --detector-assets-dir data/detector-assets \
   --detectors prompt_injection_model \

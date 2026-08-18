@@ -25,7 +25,7 @@ def test_core_settings_require_assets_for_full_profile(tmp_path: Path) -> None:
         CoreSettings(
             policy_file=tmp_path / "policy.yaml",
             api_key=SecretStr("core-test-key"),
-            detector_profile="full_local_v1",
+            detector_profile="full_deberta",
         )
 
 

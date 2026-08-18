@@ -79,8 +79,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, default=_DEFAULT_OUTPUT)
     parser.add_argument(
         "--profile",
-        choices=("local", "full_local_v1", "full_local_promptguard2", "promptguard2_only"),
-        default="full_local_v1",
+        choices=("local", "full_deberta", "full_promptguard2", "promptguard2"),
+        default="full_deberta",
     )
     parser.add_argument(
         "--detectors",

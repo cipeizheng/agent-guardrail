@@ -180,7 +180,7 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
         if not group:
             raise SystemExit(f"no {name} payload samples loaded")
 
-    # Same pinned model the full_local_v1 deployment registry constructs.
+    # Same pinned model the full_deberta deployment registry constructs.
     classifier = create_prompt_classifier(
         device=PromptModelDevice.CPU,
         assets_dir=args.detector_assets_dir.resolve(),

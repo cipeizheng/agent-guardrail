@@ -36,7 +36,7 @@ uv run --project evals/agentdojo python evals/agentdojo/run.py --validate-only
 ToolResult 与一条攻击 ToolResult，验证安全结果可释放、攻击结果被 block 且不进入消息历史。这个 smoke 只证明
 Adapter 合同，并校验聚合报告 Schema；不计入真实 Agent 的 utility 或 ASR。报告记录实际 Python 和依赖版本。
 
-`full_local_v1` 默认从已忽略的 `data/detector-assets` 离线加载固定 DeBERTa、YARA 和其他 profile 资产；
+`full_deberta` 默认从已忽略的 `data/detector-assets` 离线加载固定 DeBERTa、YARA 和其他 profile 资产；
 该 profile 启动时也验证固定 Semgrep CLI，因此独立环境使用同一个 `1.170.0` 版本。
 若资产尚不存在：
 

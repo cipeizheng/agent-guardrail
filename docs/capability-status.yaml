@@ -40,7 +40,7 @@ priority_capabilities:
     status: verified
     threat_paths: [T01, T02, T05, T09]
     implementation: pii
-    note: 校验型本地规则及 full_local_v1 的 Presidio 2.2.363/spaCy 英文 person/location NER 已真实运行；中文身份证/手机号是额外本地校验能力，通用多语言 NER 不属于完成定义。与固定 Invariant 基线的对比数据见对应评测报告，本矩阵只记录验证状态。
+    note: 校验型本地规则及 full_deberta 的 Presidio 2.2.363/spaCy 英文 person/location NER 已真实运行；中文身份证/手机号是额外本地校验能力，通用多语言 NER 不属于完成定义。与固定 Invariant 基线的对比数据见对应评测报告，本矩阵只记录验证状态。
 
   - id: P0-D04
     name: prompt_injection_model
@@ -48,7 +48,7 @@ priority_capabilities:
     status: baseline
     threat_paths: [T03, T04]
     implementation: prompt_injection_model
-    note: full_local_v1 锁定 Protect AI DeBERTa v2 提交，真实 backend、预算、脱敏和 Enforcement 路径均已运行；但固定 0.85 阈值在锁定的 BIPIA 125 条攻击载荷与 NotInject 339 条良性难例上只有 8% recall、39.82% false-positive rate。2026-08 全量分数标定进一步显示 ROC AUC 仅 0.365（低于随机）且不存在 FPR≤1% 的可达操作点，即差距在分数排序本身而非阈值选择；同月输入构造实验（长 tool result 分段聚合）进一步排除了截断/稀释机制--判别器对"嵌入此代码"类目标劫持载荷裸文本即打 ~0.0002 分，其"注入"概念仅覆盖祈使元指令风格，因此仅为已接入基线，不能作为复杂 prompt injection 的充分防御。
+    note: full_deberta 锁定 Protect AI DeBERTa v2 提交，真实 backend、预算、脱敏和 Enforcement 路径均已运行；但固定 0.85 阈值在锁定的 BIPIA 125 条攻击载荷与 NotInject 339 条良性难例上只有 8% recall、39.82% false-positive rate。2026-08 全量分数标定进一步显示 ROC AUC 仅 0.365（低于随机）且不存在 FPR≤1% 的可达操作点，即差距在分数排序本身而非阈值选择；同月输入构造实验（长 tool result 分段聚合）进一步排除了截断/稀释机制--判别器对"嵌入此代码"类目标劫持载荷裸文本即打 ~0.0002 分，其"注入"概念仅覆盖祈使元指令风格，因此仅为已接入基线，不能作为复杂 prompt injection 的充分防御。
 
   - id: P0-D05
     name: prompt_injection_model_promptguard2
@@ -56,7 +56,7 @@ priority_capabilities:
     status: baseline
     threat_paths: [T03, T04]
     implementation: prompt_injection_model
-    note: 2026-08-18 新增的候选部署 profile（full_local_promptguard2/promptguard2_only），把 full_local_v1
+    note: 2026-08-18 新增的候选部署 profile（full_promptguard2/promptguard2），把 full_deberta
       的 DeBERTa 换成 Meta PromptGuard 2 86M，评分路径对齐 LlamaFirewall（全空白剥离重分词、截断 512、
       MALICIOUS 类概率），资产按镜像 commit + size + SHA-256 pin，构造期逐项校验并 smoke-test。在锁定的
       AgentDojo 35 条攻击 + NotInject 339 条良性难例上 AUC 0.972、0.9 阈值 recall 0.971、FPR 4.1%
@@ -70,7 +70,7 @@ priority_capabilities:
     status: verified
     threat_paths: [T03, T04]
     implementation: yara_injection_signatures
-    note: full_local_v1 包内固定 ruleset 已由 yara-python 4.5.4 真实编译和运行，覆盖安全/攻击、UTF-8 span、原生 timeout、结果上限、脱敏和 Enforcement 路径。
+    note: full_deberta 包内固定 ruleset 已由 yara-python 4.5.4 真实编译和运行，覆盖安全/攻击、UTF-8 span、原生 timeout、结果上限、脱敏和 Enforcement 路径。
 
   - id: P1-P01
     name: fuzzy_contains

@@ -148,7 +148,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--profile",
         choices=[profile.value for profile in DetectorDeploymentProfile],
-        default=DetectorDeploymentProfile.FULL_LOCAL_V1.value,
+        default=DetectorDeploymentProfile.FULL_DEBERTA.value,
     )
     parser.add_argument(
         "--device",

@@ -144,10 +144,10 @@ class DetectorDeploymentProfile(StrEnum):
     """Named shortcuts over component settings; structured Policy cannot select these."""
 
     LOCAL = "local"
-    FULL_LOCAL_V1 = "full_local_v1"
+    FULL_DEBERTA = "full_deberta"
     # Candidate PromptGuard 2 profiles (Llama 4 Community License, opt-in).
-    FULL_LOCAL_PROMPTGUARD2 = "full_local_promptguard2"
-    PROMPTGUARD2_ONLY = "promptguard2_only"
+    FULL_PROMPTGUARD2 = "full_promptguard2"
+    PROMPTGUARD2 = "promptguard2"
 
 
 class PromptModelDevice(StrEnum):
@@ -198,19 +198,19 @@ class DetectorStackComponents:
 
 DETECTOR_PROFILE_PRESETS: Mapping[DetectorDeploymentProfile, DetectorStackComponents] = {
     DetectorDeploymentProfile.LOCAL: DetectorStackComponents(),
-    DetectorDeploymentProfile.FULL_LOCAL_V1: DetectorStackComponents(
+    DetectorDeploymentProfile.FULL_DEBERTA: DetectorStackComponents(
         pii=PIIComponent.PRESIDIO,
         semgrep=SemgrepComponent.PYTHON_RULES,
         yara=YaraComponent.INJECTION_RULES,
         prompt_model=PromptModelComponent.DEBERTA_V2,
     ),
-    DetectorDeploymentProfile.FULL_LOCAL_PROMPTGUARD2: DetectorStackComponents(
+    DetectorDeploymentProfile.FULL_PROMPTGUARD2: DetectorStackComponents(
         pii=PIIComponent.PRESIDIO,
         semgrep=SemgrepComponent.PYTHON_RULES,
         yara=YaraComponent.INJECTION_RULES,
         prompt_model=PromptModelComponent.PROMPTGUARD2,
     ),
-    DetectorDeploymentProfile.PROMPTGUARD2_ONLY: DetectorStackComponents(
+    DetectorDeploymentProfile.PROMPTGUARD2: DetectorStackComponents(
         prompt_model=PromptModelComponent.PROMPTGUARD2,
     ),
 }
@@ -472,7 +472,7 @@ def create_prompt_classifier(
     device: PromptModelDevice,
     assets_dir: Path,
 ) -> TransformersPipelineClassifier:
-    """Build the verified DeBERTa prompt-injection classifier for full_local_v1."""
+    """Build the verified DeBERTa prompt-injection classifier for full_deberta."""
     torch_version = _required_package_version("torch")
     transformers_version = _required_package_version("transformers")
     _required_package_version("sentencepiece")
@@ -672,7 +672,7 @@ class _PinnedPromptGuardCallable(_PinnedTransformersCallable):
 def _create_semgrep_detector() -> SemgrepDetector:
     executable = shutil.which("semgrep")
     if executable is None:
-        raise DetectorProfileError("the full_local_v1 profile requires the Semgrep executable")
+        raise DetectorProfileError("a full stack profile requires the Semgrep executable")
     rules_source = _profile_resource("semgrep-python.yaml")
     rules_digest = sha256(rules_source.encode("utf-8")).hexdigest()
     backend = SemgrepCLIBackend(
@@ -727,7 +727,7 @@ def _profile_resource(name: str) -> str:
     try:
         return (
             resources.files("agent_guardrail.detector_profiles")
-            .joinpath("full_local_v1", name)
+            .joinpath("full_deberta", name)
             .read_text(encoding="utf-8")
         )
     except (FileNotFoundError, ModuleNotFoundError) as exc:
@@ -735,13 +735,13 @@ def _profile_resource(name: str) -> str:
 
 
 def _prompt_model_directory(assets_dir: Path) -> Path:
-    return assets_dir / "full_local_v1" / f"prompt-model-{PROMPT_MODEL_REVISION}"
+    return assets_dir / "full_deberta" / f"prompt-model-{PROMPT_MODEL_REVISION}"
 
 
 def _promptguard_model_directory(assets_dir: Path) -> Path:
     return (
         assets_dir
-        / "full_local_promptguard2"
+        / "full_promptguard2"
         / f"prompt-model-{PROMPTGUARD_MODEL_REVISION}"
     )
 
@@ -845,7 +845,7 @@ def _required_package_version(name: str) -> str:
     expected = FULL_LOCAL_PACKAGE_VERSIONS[name]
     actual = _package_version(name)
     if actual != expected:
-        raise DetectorProfileError(f"full_local_v1 requires {name} {expected}")
+        raise DetectorProfileError(f"full_deberta requires {name} {expected}")
     return actual
 
 
@@ -870,6 +870,6 @@ def _verified_semgrep_version(executable: Path) -> str:
         raise DetectorProfileError("the Semgrep executable version could not be verified") from exc
     if result.returncode != 0 or result.stdout.strip() != FULL_LOCAL_SEMGREP_VERSION:
         raise DetectorProfileError(
-            f"full_local_v1 requires Semgrep {FULL_LOCAL_SEMGREP_VERSION}"
+            f"a full stack profile requires Semgrep {FULL_LOCAL_SEMGREP_VERSION}"
         )
     return FULL_LOCAL_SEMGREP_VERSION

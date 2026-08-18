@@ -43,6 +43,6 @@ Core 首版不保存 Trace。Gateway 每次发送 `past_events + pending_events`
 ## 4. 容器拓扑
 
 Compose 私有网络只连接 Core 与 Gateway。Core 不发布宿主端口；Gateway 同时连接私有网络和上游网络，只发布
-8080。Policy 只读挂载到 Core；Audit volume 只挂载到 Gateway。Core 镜像包含固定 `full_local_v1` 资产，
+8080。Policy 只读挂载到 Core；Audit volume 只挂载到 Gateway。Core 镜像包含固定 `full_deberta` 资产，
 Gateway 镜像不包含模型或扫描工具。两个镜像均使用非 root 用户、只读根文件系统、`/tmp` tmpfs 和 HTTP
 healthcheck。

@@ -193,12 +193,12 @@ async with Client("http://127.0.0.1:8080/v1/mcp", cache=None) as client:
 
 | 可用方式 | Capability | Backend 边界 |
 | --- | --- | --- |
-| `full_local_v1` | `prompt_injection_model` | 锁定 Protect AI DeBERTa checkpoint，本地 CPU/CUDA 推理 |
-| `full_local_v1` | 增强 `pii` | 锁定 Presidio/spaCy 英文 NER，加本地 validator |
-| `full_local_v1` | `semgrep` | 隔离且锁定版本的 CLI 与包内 Python ruleset |
-| `full_local_v1` | `yara_injection_signatures` | 锁定 yara-python、包内 ruleset 与固定 rule-to-type 映射 |
-| `full_local_promptguard2` | `prompt_injection_model` | 全栈同 v1，仅 DeBERTa 换成 PromptGuard 2 86M（候选 profile，Llama 4 license） |
-| `promptguard2_only` | `prompt_injection_model` | 仅 PromptGuard 2（无 presidio/semgrep/yara），用于 eval 隔离与轻量部署 |
+| `full_deberta` | `prompt_injection_model` | 锁定 Protect AI DeBERTa checkpoint，本地 CPU/CUDA 推理 |
+| `full_deberta` | 增强 `pii` | 锁定 Presidio/spaCy 英文 NER，加本地 validator |
+| `full_deberta` | `semgrep` | 隔离且锁定版本的 CLI 与包内 Python ruleset |
+| `full_deberta` | `yara_injection_signatures` | 锁定 yara-python、包内 ruleset 与固定 rule-to-type 映射 |
+| `full_promptguard2` | `prompt_injection_model` | 全栈同 `full_deberta`，仅 DeBERTa 换成 PromptGuard 2 86M（候选 profile，Llama 4 license） |
+| `promptguard2` | `prompt_injection_model` | 仅 PromptGuard 2（无 presidio/semgrep/yara），用于 eval 隔离与轻量部署 |
 | 显式注入 | `is_similar` 与 `prompt_injection_judge` | 部署选择的 embedding / LLM judge backend（均为 `adapter_only`） |
 
 真实 `prompt_injection_model` backend 当前只是 `baseline`，不是完整防御：锁定的 BIPIA/NotInject 公开
@@ -216,14 +216,14 @@ smoke 不算已完成的真实模型结果。
 
 ### 完整本地 Profile
 
-`full_local_v1` 在启动前固定并校验 Detector 依赖和模型资产：
+`full_deberta` 在启动前固定并校验 Detector 依赖和模型资产：
 
 ```bash
 uv sync --frozen --extra gateway --extra detectors --no-dev
 uv tool install semgrep==1.170.0
 export AGENT_GUARDRAIL_DETECTOR_ASSETS_DIR=/var/lib/agent-guardrail/detectors
 uv run agent-guardrail-prefetch-detectors
-export AGENT_GUARDRAIL_DETECTOR_PROFILE=full_local_v1
+export AGENT_GUARDRAIL_DETECTOR_PROFILE=full_deberta
 ```
 
 依赖、版本、checksum 或所选 CUDA 设备不符合 profile 时，Runtime 会拒绝启动。Policy YAML 仍不能替换
@@ -236,10 +236,10 @@ export AGENT_GUARDRAIL_DETECTOR_PROFILE=full_local_v1
 semgrep/yara=none`）。组件与 preset 互斥：设了非 `local` 的 preset 就不能再设组件变量；组件变量的合法
 组合全部放行，但组合本身可能未经端到端一致性验证，风险由部署方评估。
 
-`full_local_promptguard2` 与 `promptguard2_only` 使用 Meta Llama-Prompt-Guard-2-86M 的 ONNX 镜像
+`full_promptguard2` 与 `promptguard2` 使用 Meta Llama-Prompt-Guard-2-86M 的 ONNX 镜像
 （gated 原仓库经未 gate 的 `gravitee-io` 镜像分发，权重哈希一致），默认阈值 0.9。它们**不是默认
 profile**：配套 Llama 4 Community License（非 MIT，含 700M MAU 条款，需 "Built with Llama" 署名），
-`full_local_v1` 仍为 verified 默认。启动前用 `agent-guardrail-prefetch-promptguard2` 预取资产。
+`full_deberta` 仍为 verified 默认。启动前用 `agent-guardrail-prefetch-promptguard2` 预取资产。
 
 ### Docker Compose
 

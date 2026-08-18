@@ -8,7 +8,7 @@ engine:
 scopes: [pending]
 
 # T03 release gating with the fixed model classifier. Requires the
-# full_local_v1 profile: the heuristic prompt_injection detector stays as a
+# full_deberta profile: the heuristic prompt_injection detector stays as a
 # second arm so the rule benefits from both the deterministic patterns and the
 # DeBERTa classifier.
 rules:
