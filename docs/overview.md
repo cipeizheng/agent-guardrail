@@ -118,11 +118,12 @@ YAML 只能引用部署方注册并发布 descriptor 的 Predicate/Detector。Pr
 输入编码、字节、deadline、结果类型、数量和 evidence 均受 descriptor 与 MatchPlan 预算约束。Policy
 不能指定 module、模型地址、文件、进程、网络 endpoint 或实现参数。
 
-默认 Registry 只包含本地确定性算法。`prompt_injection_model`、带外部 backend 的 `pii`、`semgrep` 和
-`yara_injection_signatures` 必须由部署启动代码绑定固定 backend/profile 后显式发布；Policy 只能看到稳定
-capability 名称和有限类型，不能看到或更换 profile。内置 `full_local_v1` 是一个已真实运行的固定部署
-profile；默认仍为 `local`。文本 `is_similar` 只在部署注入 `EmbeddingProfile` 和 backend 后发布；Policy
-提供比较文本和阈值，但不能选择 model、endpoint 或凭据。
+默认 Registry 只包含本地确定性算法。`prompt_injection_model`、`prompt_injection_judge`、带外部 backend
+的 `pii`、`semgrep` 和 `yara_injection_signatures` 必须由部署启动代码绑定固定 backend/profile 后显式
+发布；Policy 只能看到稳定 capability 名称和有限类型，不能看到或更换 profile。内置 `full_local_v1` 是已真实
+运行的固定部署 preset（默认仍为 `local`），组件变量可自由组合出等价的逐组件部署；`is_similar` 和
+`prompt_injection_judge` 只在部署注入 `EmbeddingProfile`/LLM judge backend 后发布，Policy 提供比较文本和
+阈值，但不能选择 model、endpoint 或凭据。
 
 ## 6. Enforcement 保证
 

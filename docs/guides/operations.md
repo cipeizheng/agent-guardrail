@@ -37,6 +37,51 @@ uv run python -m agent_guardrail.gateway
 Runtime 构造 profile 时再次逐项校验，且强制 Transformers 离线读取该目录。运行时不下载模型，也不从
 Policy 接受模型、规则、路径、命令或 device。缺失或不匹配会阻止启动。
 
+### PromptGuard 2 候选 profile（可选，非默认）
+
+`full_local_promptguard2` 与 `full_local_v1` 栈相同（Presidio/spaCy、Semgrep、YARA），仅把 DeBERTa
+PI 分类器换成 Meta PromptGuard 2 86M（评分路径对齐 LlamaFirewall：全空白剥离后重分词、截断 512、
+MALICIOUS 类概率）；`promptguard2_only` 只装载本地启发式栈 + PromptGuard 2，不加载 Presidio/Semgrep/YARA，
+适合隔离评估分类器贡献。两者部署默认阈值 0.9（LlamaFirewall 拦截阈值，实测 operating point）。
+
+```bash
+export AGENT_GUARDRAIL_DETECTOR_ASSETS_DIR=/var/lib/agent-guardrail/detectors
+uv run agent-guardrail-prefetch-promptguard2
+export AGENT_GUARDRAIL_DETECTOR_PROFILE=full_local_promptguard2
+```
+
+**License 注意**：PromptGuard 2 权重采用 Llama 4 Community License（非 MIT；含月活 7 亿上限条款，
+再分发需遵守协议并附 "Built with Llama" 署名）。因此这两个 profile 是显式 opt-in 的候选 profile，
+绝不作为默认部署；`full_local_v1`（MIT 栈 + Apache-2.0/Protect AI DeBERTa）保持默认。原始权重位于
+人工审批 gate 的 `meta-llama/Llama-Prompt-Guard-2-86M`，本项目 pin 未 gate 的 `gravitee-io` 镜像中
+字节一致的 `model.safetensors`（镜像声明 base_model 与 llama4 license），provenance 记录在
+`config/deployment.py` 的 pin 常量注释中。资产校验与 `full_local_v1` 相同（逐文件 size + SHA-256）。
+
+### 逐组件 Detector 配置（自由组合）
+
+preset 之外，可以按组件逐个开关（与 `AGENT_GUARDRAIL_DETECTOR_PROFILE` 互斥，非 `local`
+preset 与任一组件变量同时设置会拒绝启动）：
+
+| 环境变量 | 取值 | 说明 |
+|---|---|---|
+| `AGENT_GUARDRAIL_DETECTOR_PII` | `none`/`presidio` | Presidio/spaCy NER backend |
+| `AGENT_GUARDRAIL_DETECTOR_SEMGREP` | `none`/`python_rules` | 外部 Semgrep CLI + 包内 ruleset |
+| `AGENT_GUARDRAIL_DETECTOR_YARA` | `none`/`injection_rules` | yara-python + 包内 ruleset |
+| `AGENT_GUARDRAIL_DETECTOR_PROMPT_MODEL` | `none`/`deberta_v2`/`promptguard2` | PI 分类器（单槽位，二选一） |
+| `AGENT_GUARDRAIL_PROMPT_MODEL_THRESHOLD` | `(0, 1]` | 缺省：deberta_v2 0.85 / promptguard2 0.9 |
+
+```bash
+export AGENT_GUARDRAIL_DETECTOR_ASSETS_DIR=/var/lib/agent-guardrail/detectors
+export AGENT_GUARDRAIL_DETECTOR_PII=presidio
+export AGENT_GUARDRAIL_DETECTOR_PROMPT_MODEL=promptguard2
+```
+
+**自由组合的边界**：每个组件各自通过单元与集成验证，校验规则（模型组件要求 assets_dir、
+Semgrep 要求 CLI 严格 1.170.0、CUDA 可用性、资产哈希）逐项 fail-closed；但组件**组合本身**
+可能未经端到端一致性验证，风险由部署方评估。已验证姿态仍以 preset 名字标注
+（`full_local_v1` 为 verified 全栈）；组件组合是它的子集/超集自由拼写，不是新的保证。
+Core 侧使用 `AGENT_GUARDRAIL_CORE_` 前缀的同名变量。
+
 真实 profile 评估命令：
 
 ```bash
@@ -170,9 +215,14 @@ Broker 和凭据留在 Sandbox 外。最低部署合同是：
 | `AGENT_GUARDRAIL_MAX_UPSTREAM_RESPONSE_BYTES` | `4194304` | 非流式响应或完整 SSE 流字节上限 |
 | `AGENT_GUARDRAIL_MAX_TRACE_EVENTS` | `16` | 请求级 Trace Event 上限 |
 | `AGENT_GUARDRAIL_UPSTREAM_TIMEOUT_SECONDS` | `60` | 非流式网络 timeout；完整 SSE 流 wall-clock 上限 |
-| `AGENT_GUARDRAIL_DETECTOR_PROFILE` | `local` | `local/full_local_v1` 固定部署 profile |
-| `AGENT_GUARDRAIL_DETECTOR_ASSETS_DIR` | 空 | `full_local_v1` 必填的已校验模型资产根目录 |
-| `AGENT_GUARDRAIL_PROMPT_MODEL_DEVICE` | `cpu` | `full_local_v1` 的 `cpu/cuda` 推理设备 |
+| `AGENT_GUARDRAIL_DETECTOR_PROFILE` | `local` | `local/full_local_v1/full_local_promptguard2/promptguard2_only` 部署 preset（与组件变量互斥） |
+| `AGENT_GUARDRAIL_DETECTOR_PII` | 空 | 逐组件配置：`none/presidio`（见"逐组件 Detector 配置"） |
+| `AGENT_GUARDRAIL_DETECTOR_SEMGREP` | 空 | 逐组件配置：`none/python_rules` |
+| `AGENT_GUARDRAIL_DETECTOR_YARA` | 空 | 逐组件配置：`none/injection_rules` |
+| `AGENT_GUARDRAIL_DETECTOR_PROMPT_MODEL` | 空 | 逐组件配置：`none/deberta_v2/promptguard2` |
+| `AGENT_GUARDRAIL_PROMPT_MODEL_THRESHOLD` | 空 | PI 分类器操作点；缺省 deberta_v2 0.85 / promptguard2 0.9 |
+| `AGENT_GUARDRAIL_DETECTOR_ASSETS_DIR` | 空 | 模型组件/preset 必填的已校验模型资产根目录 |
+| `AGENT_GUARDRAIL_PROMPT_MODEL_DEVICE` | `cpu` | 模型组件/preset 的 `cpu/cuda` 推理设备 |
 | `AGENT_GUARDRAIL_MCP_UPSTREAM_URL` | MCP 模式必填 | 固定 MCP endpoint |
 | `AGENT_GUARDRAIL_MCP_UPSTREAM_ALLOWED_HOSTS` | 空 | JSON MCP host allowlist |
 | `AGENT_GUARDRAIL_MCP_UPSTREAM_AUTH_MODE` | `none` | `none/server_managed/pass_through` |

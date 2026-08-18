@@ -53,6 +53,7 @@ detectors = [
 
 [project.scripts]
 agent-guardrail-prefetch-detectors = "agent_guardrail.config.deployment:prefetch_full_local_assets"
+agent-guardrail-prefetch-promptguard2 = "agent_guardrail.config.deployment:prefetch_promptguard2_assets"
 
 [dependency-groups]
 dev = [

@@ -90,6 +90,11 @@ def create_app(
                 settings.detector_profile,
                 prompt_model_device=settings.prompt_model_device,
                 detector_assets_dir=settings.detector_assets_dir,
+                pii=settings.detector_pii,
+                semgrep=settings.detector_semgrep,
+                yara=settings.detector_yara,
+                prompt_model=settings.detector_prompt_model,
+                prompt_model_threshold=settings.prompt_model_threshold,
             )
             if settings.policy_file is None:  # Settings validation makes this unreachable.
                 raise ValueError("embedded Gateway requires a policy file")

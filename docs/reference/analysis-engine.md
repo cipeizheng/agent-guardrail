@@ -39,7 +39,9 @@ event binding domains / named cartesian product
 ```
 
 Event binding 只允许独立 `message/model_call/tool_call_proposal/tool_call/tool_result`，字段首段限定为
-`id/sequence/kind/origin/payload`，不能读取 metadata 或任意 Python 属性。
+`id/sequence/kind/origin/payload/security_facts`，不能读取 metadata 或任意 Python 属性；`security_facts`
+首段投影为 Detector fact 的 JSON 字典（`EventSecurityFacts.model_dump(mode="json")`），后续路径段可继续
+访问其结构化内容。
 
 pending 分析中的 domain：
 

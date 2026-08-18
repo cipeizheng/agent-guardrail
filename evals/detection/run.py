@@ -326,13 +326,16 @@ def main() -> None:
         "--profile",
         choices=[profile.value for profile in DetectorDeploymentProfile],
         default=DetectorDeploymentProfile.LOCAL.value,
-        help="detector deployment profile (full_local_v1 adds the PI model)",
+        help=(
+            "detector deployment profile (model profiles add the PI model; "
+            "full_local_promptguard2/promptguard2_only use PromptGuard 2)"
+        ),
     )
     parser.add_argument(
         "--detector-assets-dir",
         type=Path,
         default=_DEFAULT_ASSETS,
-        help="model/runtime assets root for full_local_v1",
+        help="model/runtime assets root for model deployment profiles",
     )
     parser.add_argument(
         "--device",

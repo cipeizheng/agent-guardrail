@@ -76,10 +76,11 @@ T09 使用跨目的地授权复用/confused-deputy 路径，不使用跨租户�
 
 ## Capability 维护
 
-Detector 与 Predicate 的稳定 ID/状态继续只由 `capability-status.yaml` 管理。当前唯一明确的验证缺口是
-`P0-D04 prompt_injection_model` 的公开 benchmark 覆盖不足，以及 `P1-D04 is_similar` 的真实 backend
-尚未 smoke/eval。前者保持 `baseline`，先用锁定的 BIPIA/NotInject 回归集比较候选 Detector；后者保持
-`adapter_only`。不通过重复命名掩盖现有 capability 的质量缺口。
+Detector 与 Predicate 的稳定 ID/状态继续只由 `capability-status.yaml` 管理。明确的验证缺口是锁定的
+BIPIA/NotInject 公开评测已暴露 `P0-D04 prompt_injection_model`（DeBERTa）攻击召回过低、过度防御，以及
+`P0-D05 prompt_injection_model_promptguard2` 对 BIPIA content_undetectable 载荷低于随机，两者保持
+`baseline`；`P1-D04 is_similar` 与 `P1-D05 prompt_injection_judge` 的真实 backend 尚未 smoke/eval，
+保持 `adapter_only`。不通过重复命名掩盖现有 capability 的质量缺口。
 
 ## 可验证 Transformation（P3 之后）
 

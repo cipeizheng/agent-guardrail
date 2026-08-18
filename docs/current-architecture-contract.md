@@ -96,9 +96,11 @@ strict version: 3 YAML → AuthorPolicy → immutable MatchPlan
 - 默认 Detector：`secrets`、`pii`、`prompt_injection`、`unicode_security`、`python_ast_ipython`、
   `hidden_content`。
 - 默认 Predicate：`number_in_range`、`length_in_range`、`url_host_allowed`、`fuzzy_contains`。
-- `prompt_injection_model`、带外部 backend 的 `pii`、`semgrep`、`yara_injection_signatures` 和
-  `is_similar` 只有部署代码显式注入后才发布。内置部署 profile `full_local_v1` 固定并离线加载
-  Presidio/spaCy、锁定提交的 DeBERTa、Semgrep 1.170.0 与包内 YARA ruleset。`is_similar` 的
+- `prompt_injection_model`、`prompt_injection_judge`、带外部 backend 的 `pii`、`semgrep`、
+  `yara_injection_signatures` 和 `is_similar` 只有部署代码显式注入后才发布。部署侧配置是逐组件的（环境变量
+  `..._DETECTOR_PII/_SEMGREP/_YARA/_PROMPT_MODEL` 自由组合）；内置 preset（如 `full_local_v1`
+  = presidio + semgrep + yara + 锁定提交的 DeBERTa，固定并离线加载）是组件组合的命名快捷
+  方式，preset 与组件变量互斥。`is_similar` 的
   `EmbeddingProfile` 由部署方选择 encoder model、identity 和资源上限，Policy 只能提供 data、target 和
   threshold，不能选择 model、endpoint 或凭据。
 - 运行时实际发布名称以默认 Registry 为事实来源；交付验证状态、稳定 roadmap ID 和完成定义以

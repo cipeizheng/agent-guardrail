@@ -197,11 +197,13 @@ async with Client("http://127.0.0.1:8080/v1/mcp", cache=None) as client:
 | `full_local_v1` | 增强 `pii` | 锁定 Presidio/spaCy 英文 NER，加本地 validator |
 | `full_local_v1` | `semgrep` | 隔离且锁定版本的 CLI 与包内 Python ruleset |
 | `full_local_v1` | `yara_injection_signatures` | 锁定 yara-python、包内 ruleset 与固定 rule-to-type 映射 |
-| 显式注入 | `is_similar` | 部署选择的 `EmbeddingProfile` 和异步 embedding backend |
+| `full_local_promptguard2` | `prompt_injection_model` | 全栈同 v1，仅 DeBERTa 换成 PromptGuard 2 86M（候选 profile，Llama 4 license） |
+| `promptguard2_only` | `prompt_injection_model` | 仅 PromptGuard 2（无 presidio/semgrep/yara），用于 eval 隔离与轻量部署 |
+| 显式注入 | `is_similar` 与 `prompt_injection_judge` | 部署选择的 embedding / LLM judge backend（均为 `adapter_only`） |
 
 真实 `prompt_injection_model` backend 当前只是 `baseline`，不是完整防御：锁定的 BIPIA/NotInject 公开
-评测暴露出攻击召回低和明显过度防御。`is_similar` 仍为 `adapter_only`，因为真实外部 embedding 服务尚未
-达到 verified。所有 capability 的准确、非营销状态只以[Capability 状态矩阵](docs/capability-status.yaml)
+评测暴露出攻击召回低和明显过度防御。`is_similar` 与 `prompt_injection_judge` 仍为 `adapter_only`，因为
+真实外部 embedding / LLM judge 服务尚未达到 verified。所有 capability 的准确、非营销状态只以[Capability 状态矩阵](docs/capability-status.yaml)
 为准；可复现 Detector 评测位于 [`evals/prompt_injection`](evals/prompt_injection/README.md)。独立的
 [`evals/agentdojo`](evals/agentdojo/README.md) pilot 另行测量真实 Agent 的任务效用和 targeted ASR；Adapter
 smoke 不算已完成的真实模型结果。
@@ -226,6 +228,18 @@ export AGENT_GUARDRAIL_DETECTOR_PROFILE=full_local_v1
 
 依赖、版本、checksum 或所选 CUDA 设备不符合 profile 时，Runtime 会拒绝启动。Policy YAML 仍不能替换
 这些选择。
+
+### PromptGuard 2 候选 Profile（逐组件可自由组合）
+
+除闭式 preset 外，Detector 组件可逐项独立开关（`detector_pii` / `detector_semgrep` /
+`detector_yara` / `detector_prompt_model`，如 `pii=presidio, prompt_model=promptguard2,
+semgrep/yara=none`）。组件与 preset 互斥：设了非 `local` 的 preset 就不能再设组件变量；组件变量的合法
+组合全部放行，但组合本身可能未经端到端一致性验证，风险由部署方评估。
+
+`full_local_promptguard2` 与 `promptguard2_only` 使用 Meta Llama-Prompt-Guard-2-86M 的 ONNX 镜像
+（gated 原仓库经未 gate 的 `gravitee-io` 镜像分发，权重哈希一致），默认阈值 0.9。它们**不是默认
+profile**：配套 Llama 4 Community License（非 MIT，含 700M MAU 条款，需 "Built with Llama" 署名），
+`full_local_v1` 仍为 verified 默认。启动前用 `agent-guardrail-prefetch-promptguard2` 预取资产。
 
 ### Docker Compose
 
@@ -289,4 +303,5 @@ git diff --check
 
 ## License
 
-Agent Guardrail 使用 [MIT License](LICENSE)。
+Agent Guardrail 源码使用 [MIT License](LICENSE)。提示注入 Model Detector（PromptGuard 2 profiles）附带
+Llama 4 Community License（非 MIT），因此这些 profile 是 opt-in 候选而非默认。

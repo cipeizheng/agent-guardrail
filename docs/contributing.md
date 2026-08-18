@@ -92,6 +92,9 @@ flowchart TD
 - `test_secret_detector_parity.py` / `test_pii_detector.py` / `test_prompt_detector_parity.py`：
   Secret、PII、Prompt/模型适配边界；
 - `test_code_detector_parity.py`：Python/IPython、hidden content、Semgrep 和 YARA 边界；
+- `test_real_detector_backends.py`：本地真实 backend（Presidio、Semgrep、YARA、Prompt 模型）与
+  部署 profile/组件组合的装配边界；
+- `test_llm_judge_detector.py`：`prompt_injection_judge` 的 judge profile、threshold、descriptor 与脱敏；
 - `test_builtin_predicates.py` / `test_similarity_predicates.py`：基础与 fuzzy Predicate 边界；
 - `test_similarity_detector.py`：Invariant `is_similar`、profile model、backend、timeout、脱敏和 Enforcement；
 - `test_alignment_registries.py` / `test_invariant_detector_alignment.py`：默认/可选 Registry、

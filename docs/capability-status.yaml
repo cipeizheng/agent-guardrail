@@ -1,5 +1,5 @@
 schema_version: 1
-last_verified: "2026-08-14"
+last_verified: "2026-08-18"
 
 status_vocabulary:
   verified: 实际算法或声明的真实后端已运行，并满足完整行为完成定义。
@@ -49,6 +49,20 @@ priority_capabilities:
     threat_paths: [T03, T04]
     implementation: prompt_injection_model
     note: full_local_v1 锁定 Protect AI DeBERTa v2 提交，真实 backend、预算、脱敏和 Enforcement 路径均已运行；但固定 0.85 阈值在锁定的 BIPIA 125 条攻击载荷与 NotInject 339 条良性难例上只有 8% recall、39.82% false-positive rate。2026-08 全量分数标定进一步显示 ROC AUC 仅 0.365（低于随机）且不存在 FPR≤1% 的可达操作点，即差距在分数排序本身而非阈值选择；同月输入构造实验（长 tool result 分段聚合）进一步排除了截断/稀释机制--判别器对"嵌入此代码"类目标劫持载荷裸文本即打 ~0.0002 分，其"注入"概念仅覆盖祈使元指令风格，因此仅为已接入基线，不能作为复杂 prompt injection 的充分防御。
+
+  - id: P0-D05
+    name: prompt_injection_model_promptguard2
+    kind: detector
+    status: baseline
+    threat_paths: [T03, T04]
+    implementation: prompt_injection_model
+    note: 2026-08-18 新增的候选部署 profile（full_local_promptguard2/promptguard2_only），把 full_local_v1
+      的 DeBERTa 换成 Meta PromptGuard 2 86M，评分路径对齐 LlamaFirewall（全空白剥离重分词、截断 512、
+      MALICIOUS 类概率），资产按镜像 commit + size + SHA-256 pin，构造期逐项校验并 smoke-test。在锁定的
+      AgentDojo 35 条攻击 + NotInject 339 条良性难例上 AUC 0.972、0.9 阈值 recall 0.971、FPR 4.1%
+      （同条件下 DeBERTa AUC 0.590、recall 0.257、FPR 39.8%）；但 BIPIA 125 条 content_undetectable
+      载荷 AUC 0.436 仍低于随机，即语义目标劫持的概念性上限没有被更强分类器消除。权重为 Llama 4
+      Community License（非 MIT），因此 profile 为显式 opt-in 候选，绝不设为默认部署；仅视为基线接入。
 
   - id: P0-D06
     name: yara_injection_signatures

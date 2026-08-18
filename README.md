@@ -204,15 +204,17 @@ Deployment-fixed optional capabilities are deliberately separate:
 | Availability | Capability | Backend boundary |
 | --- | --- | --- |
 | `full_local_v1` | `prompt_injection_model` | Pinned Protect AI DeBERTa checkpoint, local CPU/CUDA inference |
-| `full_local_v1` | enhanced `pii` | Pinned Presidio/spaCy English NER plus local validators |
-| `full_local_v1` | `semgrep` | Isolated, version-pinned CLI and bundled Python ruleset |
-| `full_local_v1` | `yara_injection_signatures` | Pinned yara-python, bundled ruleset, and fixed rule-to-type mapping |
+| `full_local_promptguard2` / `promptguard2_only` | `prompt_injection_model` | Pinned Meta PromptGuard 2 86M (Llama 4 Community License, opt-in candidate) |
+| `full_local_v1` / `full_local_promptguard2` | enhanced `pii` | Pinned Presidio/spaCy English NER plus local validators |
+| `full_local_v1` / `full_local_promptguard2` | `semgrep` | Isolated, version-pinned CLI and bundled Python ruleset |
+| `full_local_v1` / `full_local_promptguard2` | `yara_injection_signatures` | Pinned yara-python, bundled ruleset, and fixed rule-to-type mapping |
 | Explicit injection | `is_similar` | Deployment-selected `EmbeddingProfile` and async embedding backend |
+| Explicit injection | `prompt_injection_judge` | Deployment-selected `LLMJudgeBackend`/`LLMJudgeProfile` verdict channel |
 
 The real `prompt_injection_model` backend is currently a `baseline`, not a complete defense: the
 locked public BIPIA/NotInject evaluation exposes low attack recall and substantial over-defense.
-`is_similar` remains `adapter_only` because no real external embedding service has been accepted
-as verified. The exact, non-marketing status of every capability lives in the
+`is_similar` and `prompt_injection_judge` remain `adapter_only` because no external
+embedding or judge service has been accepted as verified. The exact, non-marketing status of every capability lives in the
 [capability matrix](docs/capability-status.yaml); the reproducible Detector evaluation lives under
 [`evals/prompt_injection`](evals/prompt_injection/README.md). The isolated
 [`evals/agentdojo`](evals/agentdojo/README.md) pilot separately measures real-Agent utility and
@@ -239,6 +241,20 @@ export AGENT_GUARDRAIL_DETECTOR_PROFILE=full_local_v1
 
 Runtime startup fails if required assets, versions, checksums, or the selected CUDA device do not
 match the profile. Policy YAML still cannot replace those choices.
+
+### PromptGuard 2 candidate profiles
+
+`full_local_promptguard2` swaps the prompt-injection classifier for Meta PromptGuard 2 86M
+(same full stack otherwise); `promptguard2_only` loads the local heuristic stack plus only
+PromptGuard 2. Both are opt-in candidates under the Llama 4 Community License and never the
+default deployment; their default threshold is 0.9 and their assets are fetched with
+`uv run agent-guardrail-prefetch-promptguard2`. See the
+[operations guide](docs/guides/operations.md) for details and license notes.
+
+Beyond presets, detector stacks can be composed per component
+(`AGENT_GUARDRAIL_DETECTOR_PII/_SEMGREP/_YARA/_PROMPT_MODEL`); presets and component variables
+are mutually exclusive. Each component is individually validated; untested combinations are the
+deployer's responsibility.
 
 ### Docker Compose
 
@@ -308,4 +324,7 @@ changes must preserve the contracts documented in the repository.
 
 ## License
 
-Agent Guardrail is available under the [MIT License](LICENSE).
+Agent Guardrail is available under the [MIT License](LICENSE). Optional detector components
+pulled in by the model profiles keep their own upstream licenses -- notably PromptGuard 2
+weights (Llama 4 Community License, requires "Built with Llama" attribution when
+redistributed) -- and are never bundled in this repository.

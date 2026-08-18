@@ -13,7 +13,10 @@ from agent_guardrail.config import (
     DetectorProfileError,
     create_deployment_detector_registry,
 )
-from agent_guardrail.config.deployment import prefetch_full_local_assets
+from agent_guardrail.config.deployment import (
+    prefetch_full_local_assets,
+    prefetch_promptguard2_assets,
+)
 from agent_guardrail.detectors import SemgrepCLIBackend, YaraPythonBackend
 from agent_guardrail.detectors.semgrep import SemgrepSeverity
 
@@ -177,6 +180,67 @@ def test_asset_prefetch_requires_explicit_deployment_directory(
 
     with pytest.raises(DetectorProfileError, match="ASSETS_DIR"):
         prefetch_full_local_assets()
+
+
+def test_promptguard2_prefetch_requires_explicit_deployment_directory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("AGENT_GUARDRAIL_DETECTOR_ASSETS_DIR", raising=False)
+
+    with pytest.raises(DetectorProfileError, match="ASSETS_DIR"):
+        prefetch_promptguard2_assets()
+
+
+@pytest.mark.parametrize(
+    "profile", ["full_local_v1", "full_local_promptguard2", "promptguard2_only"]
+)
+def test_model_profiles_fail_closed_without_pinned_assets(
+    tmp_path: Path, profile: str
+) -> None:
+    with pytest.raises(DetectorProfileError):
+        create_deployment_detector_registry(profile, detector_assets_dir=tmp_path)
+
+
+def test_component_settings_cannot_be_combined_with_a_preset_profile() -> None:
+    with pytest.raises(DetectorProfileError, match="cannot be combined with a preset"):
+        create_deployment_detector_registry(
+            "full_local_v1", detector_assets_dir=Path("/tmp/assets"), pii="presidio"
+        )
+
+
+def test_unknown_component_setting_fails_closed() -> None:
+    with pytest.raises(DetectorProfileError, match="unknown Detector component"):
+        create_deployment_detector_registry("local", pii="some_other_pii_backend")
+
+
+def test_local_preset_with_no_components_keeps_the_default_stack() -> None:
+    registry = create_deployment_detector_registry("local")
+
+    published = {
+        descriptor.name
+        for descriptor in registry.published_detector_descriptors()
+    }
+    assert not {"prompt_injection_model", "semgrep", "yara_injection_signatures"}.intersection(
+        published
+    )
+
+
+def test_prompt_model_component_requires_explicit_assets_directory() -> None:
+    with pytest.raises(DetectorProfileError, match="assets directory"):
+        create_deployment_detector_registry("local", prompt_model="promptguard2")
+
+
+def test_promptguard2_only_profile_requires_explicit_assets_directory() -> None:
+    with pytest.raises(DetectorProfileError, match="assets directory"):
+        create_deployment_detector_registry("promptguard2_only")
+
+
+@pytest.mark.parametrize("threshold", [0.0, -0.1, 1.5, 1])
+def test_promptguard2_threshold_must_be_a_bounded_float(threshold: float) -> None:
+    with pytest.raises(DetectorProfileError, match=r"float in \(0, 1\]"):
+        create_deployment_detector_registry(
+            "promptguard2_only", prompt_model_threshold=threshold
+        )
 
 
 def test_semgrep_backend_requires_an_absolute_resolved_executable(tmp_path: Path) -> None:

@@ -40,8 +40,17 @@ class GatewaySettings(BaseSettings):
     )
     max_trace_events: int = Field(default=16, ge=2, le=1_000)
     upstream_timeout_seconds: float = Field(default=60.0, gt=0, le=600)
-    detector_profile: Literal["local", "full_local_v1"] = "local"
+    detector_profile: (
+        Literal["local", "full_local_v1", "full_local_promptguard2", "promptguard2_only"]
+    ) = "local"
     prompt_model_device: Literal["cpu", "cuda"] = "cpu"
+    detector_pii: Literal["none", "presidio"] | None = None
+    detector_semgrep: Literal["none", "python_rules"] | None = None
+    detector_yara: Literal["none", "injection_rules"] | None = None
+    detector_prompt_model: (
+        Literal["none", "deberta_v2", "promptguard2"] | None
+    ) = None
+    prompt_model_threshold: float | None = Field(default=None, gt=0, le=1)
     detector_assets_dir: Path | None = None
     mcp_upstream_url: str | None = None
     mcp_upstream_auth_mode: Literal["none", "server_managed", "pass_through"] = "none"
@@ -122,10 +131,7 @@ class GatewaySettings(BaseSettings):
                 raise ValueError("policy_file is required for the embedded decision backend")
             if self.core_url is not None or self.core_api_key is not None:
                 raise ValueError("Core settings require decision_backend=remote")
-            if self.detector_profile == "local" and self.prompt_model_device != "cpu":
-                raise ValueError("prompt_model_device requires detector_profile=full_local_v1")
-            if self.detector_profile == "full_local_v1" and self.detector_assets_dir is None:
-                raise ValueError("detector_assets_dir is required for full_local_v1")
+            self._validate_detector_component_settings()
         else:
             if self.core_url is None or self.core_api_key is None:
                 raise ValueError("core_url and core_api_key are required for remote decisions")
@@ -135,6 +141,16 @@ class GatewaySettings(BaseSettings):
                 self.detector_profile != "local"
                 or self.prompt_model_device != "cpu"
                 or self.detector_assets_dir is not None
+                or self.prompt_model_threshold is not None
+                or any(
+                    value is not None
+                    for value in (
+                        self.detector_pii,
+                        self.detector_semgrep,
+                        self.detector_yara,
+                        self.detector_prompt_model,
+                    )
+                )
             ):
                 raise ValueError("remote Gateway must not configure detector assets")
             core_credential = self.core_api_key.get_secret_value()
@@ -178,6 +194,32 @@ class GatewaySettings(BaseSettings):
             ):
                 raise ValueError("mcp_upstream_api_key is required in MCP server_managed mode")
         return self
+
+    def _validate_detector_component_settings(self) -> None:
+        components = (
+            self.detector_pii,
+            self.detector_semgrep,
+            self.detector_yara,
+            self.detector_prompt_model,
+        )
+        if self.detector_profile != "local":
+            if any(value is not None for value in components):
+                raise ValueError(
+                    "detector component settings cannot be combined with a preset profile"
+                )
+            if self.detector_assets_dir is None:
+                raise ValueError(
+                    "detector_assets_dir is required for model deployment profiles"
+                )
+        elif any(value is not None for value in components):
+            if self.detector_prompt_model is not None and self.detector_assets_dir is None:
+                raise ValueError(
+                    "detector_assets_dir is required for a model deployment component"
+                )
+        elif self.prompt_model_device != "cpu":
+            raise ValueError(
+                "prompt_model_device requires a model deployment profile or component"
+            )
 
     @property
     def upstream_chat_completions_url(self) -> str:

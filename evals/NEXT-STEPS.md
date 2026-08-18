@@ -40,7 +40,7 @@
    全量打分（464 样本）显示 `prompt_injection_model` 在 BIPIA(攻击)/NotInject(良性难例) 上
    **ROC AUC = 0.365（低于随机）**，Recall@FPR≤1% 不可达，FPR 36% 时 recall 仍仅 8%--
    分数排序本身与标签反相关：模型学到的是注入“触发词风格”（NotInject 全是含触发词的正常文本），
-   不是注入“意图”。阈值调优路线就此关闭；改进必须换输入构造（P1-3）或换判别器（P2-6）。
+   不是注入“意图”。阈值调优路线就此关闭；改进必须换输入构造（P1-3）或换判别器（P2-7）。
    结果：`data/benchmarks/prompt-injection/results/sweep-latest.json`（不进 git）。
 2. **E2E↔决策层一致性归因**：~~已完成（2026-08-17，`agentdojo/consistency.py`）~~。三个发现：
    - **地板效应**：AgentDojo pilot 的 0% ASR 相对下降不是防御失效--baseline ASR 本身就是
@@ -65,7 +65,7 @@
    **两条条件 recall 均为 0.0**，攻击样本分数中位数 ~1e-4（full）/ ~5e-4（segment_max），
    远低于 0.85 操作点；分段只把分数抬了约 4 倍，量级上仍不可用。结论：DeBERTa 分类器的
    失分不是 512-token 截断机制造成的，**该模型对间接注入载荷本身无判别力，输入构造路线
-   与阈值调优路线（P0-1）一并关闭**。改进只剩换判别器（P2-6 LLM judge）。结果：
+   与阈值调优路线（P0-1）一并关闭**。改进只剩换判别器（P2-7 LLM judge）。结果：
    `data/benchmarks/prompt-injection/results/segments-latest.json`（不进 git）。
 4. **离线延迟基准**：NeMo benchmark 模式——mock OpenAI-compatible 上游压测 Gateway，无 API key
    量化"安全 vs 延迟"（含 streaming 每前缀重分析的成本基线），作为 P4 增量优化的前置数据。
@@ -74,13 +74,32 @@
    脚注。需要扩展 scripted benign flows 到决策层 39 个 benign case 的 E2E 镜像（named 组应
    放行、delegated 组应拦截），让"E2E 上的合法任务损失"有可与决策层对读的数字。
 
+6. **分类器差距探针（LlamaFirewall 对照，2026-08-17）**：DeBERTa 在缺失的语料格上补测完成--
+   AgentDojo 载荷 vs NotInject 难例，**ROC AUC 仅 0.590**（PromptGuard 2 论文同基准 0.942；
+   threshold 0.85 时 recall 0.257 / FPR 0.398）。结论：PI 差距的主因是**分类器本身**，
+   其次才是语料选择（BIPIA/NotInject 0.365 vs AgentDojo/NotInject 0.590）。
+   ~~等待 HF 授权~~ **已完成（2026-08-17，`prompt_injection/promptguard2.py`）**：官方仓库
+   manual gating 被拒后改用 gravitee-io 镜像同版权重（报告记录 model_source）。三向对比：
+   PromptGuard 2 在 AgentDojo/NotInject 上 **AUC 0.972、recall@0.9 = 0.971、FPR 4.1%**
+   （DeBERTa：AUC 0.590、recall@0.85 = 0.257、FPR 39.8%）--style_detectable 类上分类器
+   差距是真实的、换模型收益巨大；但在 BIPIA/NotInject 上 PromptGuard 2 **AUC 0.436，
+   同样低于随机**（recall@0.9 = 0.008）--content_undetectable 的原理性上限结论在强得多的
+   分类器上依然成立。可执行结论：PromptGuard 2 是 `prompt_injection_model` 槽位的有力
+   替换候选（Llama 4 Community License，非 MIT，商用需过条款 + 700M MAU 条款）。
+   结果：`promptguard2-latest.json` 与 `agentdojo-payloads-latest.json`（均不进 git）。
+   **已正式接入（2026-08-18）**：新增候选部署 profile `full_local_promptguard2` /
+   `promptguard2_only`（自描述封闭预设，非组合语法；默认阈值 0.9；镜像 commit + size +
+   SHA-256 pin；评分路径对齐 LlamaFirewall）。`full_local_v1` 保持默认与 verified；
+   capability 记为 `prompt_injection_model_promptguard2`（baseline）。
 ## P2（新 capability，走 adapter_only 起步）
 
-6. **`LLMJudgeProfile` 部署注入 Detector**：类比 `EmbeddingProfile`——部署方固定 judge 模型、
-   endpoint、prompt 与超时，Policy 只见 capability 名与有界参数；输出走现有 descriptor 校验与
-   脱敏。仅用于释放点检查（外部数据显示延迟 P50 秒级）。验证路径：`evals/detection` 加模型臂，
-   未达完成定义前状态保持 `adapter_only`。
-7. **第三方攻击语料管道**：把 Garak 类扫描器生成的攻击语料接入 `release` 轴，对冲自编剧本的
+7. **LLM judge 部署注入 Detector**：~~实现已完成（2026-08-18）~~。`LLMJudgeBackend`/
+   `LLMJudgeProfile`/`LLMJudgeDetector` 与 `create_llm_judge_detector_registry` 已随
+   `prompt_injection_judge` capability（`P1-D05`）落地：部署方固定 judge 模型、endpoint、prompt 与
+   超时，Policy 只见 capability 名与有界参数，输出走现有 descriptor 校验与脱敏。剩余缺口是真实
+   judge backend 的 smoke/eval（`evals/detection` 加模型臂）与延迟实测（外部数据显示 P50 秒级，
+   仅建议释放点检查），完成前状态保持 `adapter_only`。
+8. **第三方攻击语料管道**：把 Garak 类扫描器生成的攻击语料接入 `release` 轴，对冲自编剧本的
    author-imagination bias（detection 评测 limitations 第 1 条）。
 
 ## 明确不做（对照调研后的取舍）

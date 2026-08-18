@@ -79,7 +79,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, default=_DEFAULT_OUTPUT)
     parser.add_argument(
         "--profile",
-        choices=("local", "full_local_v1"),
+        choices=("local", "full_local_v1", "full_local_promptguard2", "promptguard2_only"),
         default="full_local_v1",
     )
     parser.add_argument(
@@ -426,8 +426,10 @@ async def _run(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
     data_dir = args.data_dir.resolve()
     manifest, files = _load_manifest(manifest_path, data_dir)
     samples = _load_samples(files)
-    if args.profile == "full_local_v1" and args.detector_assets_dir is None:
-        raise SystemExit("--detector-assets-dir is required for full_local_v1")
+    if args.profile != "local" and args.detector_assets_dir is None:
+        raise SystemExit(
+            f"--detector-assets-dir is required for {args.profile}"
+        )
     if args.prompt_model_threshold is not None and not (
         0.0 < args.prompt_model_threshold <= 1.0
     ):

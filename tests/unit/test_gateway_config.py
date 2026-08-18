@@ -56,6 +56,73 @@ def test_gateway_settings_load_fixed_detector_profile(monkeypatch: pytest.Monkey
     assert settings.detector_assets_dir == Path("/opt/detector-assets")
 
 
+def test_gateway_accepts_promptguard2_candidate_profiles(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AGENT_GUARDRAIL_POLICY_FILE", "policy.yaml")
+    monkeypatch.setenv("AGENT_GUARDRAIL_UPSTREAM_BASE_URL", "https://provider.example/v1")
+    monkeypatch.setenv("AGENT_GUARDRAIL_UPSTREAM_API_KEY", "upstream-key")
+    monkeypatch.setenv("AGENT_GUARDRAIL_DETECTOR_PROFILE", "promptguard2_only")
+    monkeypatch.setenv("AGENT_GUARDRAIL_DETECTOR_ASSETS_DIR", "/opt/detector-assets")
+
+    settings = GatewaySettings()  # pyright: ignore[reportCallIssue]
+
+    assert settings.detector_profile == "promptguard2_only"
+
+    monkeypatch.delenv("AGENT_GUARDRAIL_DETECTOR_ASSETS_DIR")
+    with pytest.raises(ValidationError, match="detector_assets_dir"):
+        GatewaySettings(
+            policy_file=Path("policy.yaml"),
+            upstream_base_url="https://provider.example/v1",
+            upstream_api_key=SecretStr("upstream-key"),
+            detector_profile="full_local_promptguard2",
+        )
+
+
+def test_gateway_composes_components_from_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AGENT_GUARDRAIL_POLICY_FILE", "policy.yaml")
+    monkeypatch.setenv("AGENT_GUARDRAIL_UPSTREAM_BASE_URL", "https://provider.example/v1")
+    monkeypatch.setenv("AGENT_GUARDRAIL_UPSTREAM_API_KEY", "upstream-key")
+    monkeypatch.setenv("AGENT_GUARDRAIL_DETECTOR_PII", "presidio")
+    monkeypatch.setenv("AGENT_GUARDRAIL_DETECTOR_PROMPT_MODEL", "promptguard2")
+    monkeypatch.setenv("AGENT_GUARDRAIL_PROMPT_MODEL_THRESHOLD", "0.9")
+    monkeypatch.setenv("AGENT_GUARDRAIL_DETECTOR_ASSETS_DIR", "/opt/detector-assets")
+
+    settings = GatewaySettings()  # pyright: ignore[reportCallIssue]
+
+    assert settings.detector_pii == "presidio"
+    assert settings.detector_prompt_model == "promptguard2"
+    assert settings.prompt_model_threshold == 0.9
+
+
+def test_gateway_rejects_preset_combined_with_component_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AGENT_GUARDRAIL_POLICY_FILE", "policy.yaml")
+    monkeypatch.setenv("AGENT_GUARDRAIL_UPSTREAM_BASE_URL", "https://provider.example/v1")
+    monkeypatch.setenv("AGENT_GUARDRAIL_UPSTREAM_API_KEY", "upstream-key")
+    monkeypatch.setenv("AGENT_GUARDRAIL_DETECTOR_PROFILE", "full_local_v1")
+    monkeypatch.setenv("AGENT_GUARDRAIL_DETECTOR_SEMGREP", "none")
+
+    with pytest.raises(ValidationError, match="cannot be combined with a preset"):
+        GatewaySettings()  # pyright: ignore[reportCallIssue]
+
+
+def test_gateway_rejects_model_component_without_assets_dir(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AGENT_GUARDRAIL_POLICY_FILE", "policy.yaml")
+    monkeypatch.setenv("AGENT_GUARDRAIL_UPSTREAM_BASE_URL", "https://provider.example/v1")
+    monkeypatch.setenv("AGENT_GUARDRAIL_UPSTREAM_API_KEY", "upstream-key")
+    monkeypatch.setenv("AGENT_GUARDRAIL_DETECTOR_PROMPT_MODEL", "promptguard2")
+    monkeypatch.delenv("AGENT_GUARDRAIL_DETECTOR_ASSETS_DIR", raising=False)
+
+    with pytest.raises(ValidationError, match="detector_assets_dir"):
+        GatewaySettings()  # pyright: ignore[reportCallIssue]
+
+
 def test_gateway_rejects_cuda_setting_without_model_profile() -> None:
     with pytest.raises(ValidationError, match="prompt_model_device"):
         GatewaySettings(
