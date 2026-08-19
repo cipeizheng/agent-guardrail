@@ -1496,7 +1496,7 @@ def _evaluate_relation(
         if operator is RelationOperator.IMMEDIATELY_PRECEDES:
             return _ConditionResult(source_event.sequence + 1 == target_event.sequence)
         return _ConditionResult(source_event.sequence < target_event.sequence)
-    if operator is RelationOperator.MAY_INFLUENCE:
+    if operator is RelationOperator.LINKED_BY:
         return _ConditionResult(
             _has_relation_path(
                 source_event,

@@ -22,7 +22,7 @@ rules:
         - relation:
             source: message
             target: call
-            operator: may_influence
+            operator: linked_by
         - compare:
             left: {field: [message, payload, role]}
             operator: equals

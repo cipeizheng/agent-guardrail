@@ -23,7 +23,7 @@ Presidio/Transformers detector。
 | typed/collection binding | typed Event / 有界 collection binding |
 | predicate / derived variable | 声明式条件或可信 Predicate / derive |
 | `raise PolicyViolation` | 静态脱敏 Finding |
-| `->` | `precedes` 或 `may_influence`，不是来源 |
+| `->` | `precedes` 或 `linked_by`，不是来源 |
 | `~>` | `immediately_precedes` |
 | ToolOutput | Canonical `tool_result` |
 | Python detector/import | 部署方 Registry descriptor |

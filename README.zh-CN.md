@@ -204,9 +204,8 @@ async with Client("http://127.0.0.1:8080/v1/mcp", cache=None) as client:
 真实 `prompt_injection_model` backend 当前只是 `baseline`，不是完整防御：锁定的 BIPIA/NotInject 公开
 评测暴露出攻击召回低和明显过度防御。`is_similar` 与 `prompt_injection_judge` 仍为 `adapter_only`，因为
 真实外部 embedding / LLM judge 服务尚未达到 verified。所有 capability 的准确、非营销状态只以[Capability 状态矩阵](docs/capability-status.yaml)
-为准；可复现 Detector 评测位于 [`evals/prompt_injection`](evals/prompt_injection/README.md)。独立的
-[`evals/agentdojo`](evals/agentdojo/README.md) pilot 另行测量真实 Agent 的任务效用和 targeted ASR；Adapter
-smoke 不算已完成的真实模型结果。
+为准；可复现 Detector 评测位于 [`evals/prompt_injection`](evals/prompt_injection/README.md)。分策略决策点
+评测位于 [`evals/detection`](evals/detection/README.md)，给出诚实的分轴混淆矩阵，含预注册的 release 轴 gate。
 
 ## 部署 Profile
 

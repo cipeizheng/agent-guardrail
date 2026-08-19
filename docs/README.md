@@ -38,7 +38,8 @@ Policy 作者指南 → Capability 参考
 - [Remote Core 双容器设计](design/remote-core-deployment.md)：Core/Gateway 责任、协议与失败边界。
 - [Prompt injection Detector 评测](../evals/prompt_injection/README.md)：不调用 Agent/LLM 的锁定公开数据回归。
 - [策略决策点 detection 评测](../evals/detection/README.md)：按能力轴 replay trace，对 Policy 输出分轴混淆矩阵。
-- [AgentDojo 端到端评测](../evals/agentdojo/README.md)：真实 Agent 的正常效用、targeted ASR 与 ToolResult release block 对照。
+- [第三方语料生成环境](../evals/corpus/README.md)：固定 agentdojo 版本，再生成 release 轴的外部注入语料与
+  full_deberta 剖面运行环境。
 
 ## 修改 Core
 

@@ -216,9 +216,9 @@ locked public BIPIA/NotInject evaluation exposes low attack recall and substanti
 `is_similar` and `prompt_injection_judge` remain `adapter_only` because no external
 embedding or judge service has been accepted as verified. The exact, non-marketing status of every capability lives in the
 [capability matrix](docs/capability-status.yaml); the reproducible Detector evaluation lives under
-[`evals/prompt_injection`](evals/prompt_injection/README.md). The isolated
-[`evals/agentdojo`](evals/agentdojo/README.md) pilot separately measures real-Agent utility and
-targeted ASR; an Adapter smoke does not count as a completed real-model result.
+[`evals/prompt_injection`](evals/prompt_injection/README.md). The per-policy decision-point eval
+under [`evals/detection`](evals/detection/README.md) reports honest per-axis confusion matrices,
+including the preregistered release-axis gate.
 
 ## Deployment profiles
 

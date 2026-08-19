@@ -227,7 +227,7 @@ rules:
         - relation:
             source: result
             target: destination
-            operator: may_influence
+            operator: linked_by
     finding:
       code: tool_result_flow_denied
       message: The requested tool flow is not allowed by policy.

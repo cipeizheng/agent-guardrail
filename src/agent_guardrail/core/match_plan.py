@@ -109,7 +109,7 @@ class RelationOperator(StrEnum):
 
     PRECEDES = "precedes"
     IMMEDIATELY_PRECEDES = "immediately_precedes"
-    MAY_INFLUENCE = "may_influence"
+    LINKED_BY = "linked_by"
     DERIVED_FROM_DIRECT = "derived_from_direct"
     DERIVED_FROM_ANCESTOR = "derived_from_ancestor"
 

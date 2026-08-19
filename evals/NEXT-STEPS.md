@@ -6,15 +6,17 @@
 
 ## 已确认的根因
 
-三层评测指向同一缺口——prompt injection **fact 层检测有效性**：
+两层评测指向同一缺口——prompt injection **fact 层检测有效性**：
 
 - 规则 `prompt_injection` 在外部语料 fact recall ≈ 0；`prompt_injection_model` recall ≈ 8%、FP 135；
-- `release_external` 轴 FNR = 1.0（归因 `detector gap`）；
-- AgentDojo E2E targeted ASR 相对下降 0%（guardrail 几乎未产生 block）。
+- `release_external` 轴 FNR = 1.0（归因 `detector gap`）。
 
-原有一个评测体系缺口已闭合（2026-08-17，P0-2）：`flow_agentdojo` 决策层 gate 通过
-（recall 0.952）而 E2E 无拦截，scripted-agent 一致性测试证实不是 Adapter 构造 bug，
-而是地板效应（baseline 模型未中招，攻击目标调用从未出现）。
+原端到端层（`evals/agentdojo`）已整体删除（2026-08-19）：它既是被删 `flow_agentdojo` 决策轴
+（BLOCK 标签复刻规则谓词、影响边脚本手喂，自证循环）的端到端对应物，又因 baseline ASR = 0/8 而
+**measurement power 为零**——baseline 从未被攻击，0→0 的 ASR 相对下降无法测量任何防御价值。
+保留下来且站得住的两条结论：防御产生 0 block **不是** Adapter/Policy 构造 bug（确定性攻击路径在
+`blocked_before_tool_call` 被正确拦截）；以及端到端层若重新引入，必须先让 baseline ASR 非零
+（更强的攻击面或更弱的模型），否则按 README 预检约定视为无测量力。
 
 ## 评测基础设施规整（2026-08-17 完成）
 
@@ -24,8 +26,8 @@
 1. **不可变 run 目录**：所有入口经 `evals/lib/reporting.py` 写
    `results/<UTC时间戳>-<eval>/report.json` + append-only `index.jsonl` + `latest` 指针，
    历史结果不可覆盖；
-2. **测量力预检**：`agentdojo/run.py --mode both` 在 baseline ASR=0 时中止 guarded 臂
-   （`--allow-floor` 可显式记录 floor-effect 运行）；
+2. **测量力预检**：比较型评测先跑 baseline 组，ASR=0 即中止 guarded 臂并给出补救建议
+   （`evals/lib/preflight.py`，原由被删 `agentdojo/run.py --mode both` 承担，见 README 预检约定）；
 3. **可检测性类别**：语料按 `style_detectable` / `intent_only` / `content_undetectable` /
    `benign` 声明（`evals/lib/detectability.py`，未归类报错）；BIPIA text 攻击归
    `content_undetectable`，其内容分类 recall 不再读作 Detector 缺口；
@@ -42,20 +44,11 @@
    分数排序本身与标签反相关：模型学到的是注入“触发词风格”（NotInject 全是含触发词的正常文本），
    不是注入“意图”。阈值调优路线就此关闭；改进必须换输入构造（P1-3）或换判别器（P2-7）。
    结果：`data/benchmarks/prompt-injection/results/sweep-latest.json`（不进 git）。
-2. **E2E↔决策层一致性归因**：~~已完成（2026-08-17，`agentdojo/consistency.py`）~~。三个发现：
-   - **地板效应**：AgentDojo pilot 的 0% ASR 相对下降不是防御失效--baseline ASR 本身就是
-     0/8（deepseek-v4-flash 自行扛住 11 个攻击模板中的 10 个，仅 system_message 1/8），
-     0->0 无法测量任何防御价值。E2E 想有测量力必须先让 baseline ASR 非零（更强攻击面或
-     更弱模型）。
-   - **规则从未触发异常--已排除 Adapter bug**：scripted-agent 一致性测试（确定性执行攻击
-     路径，经真实 suite / 工具 / Adapter / Policy）中，email-exfiltration 与 file-destruction
-     均在 `blocked_before_tool_call` 拦截，violation code 正确--**E2E 的 0 block 不是
-     Adapter 的 may_influence/trust 构造 bug，纯粹是地板效应（模型没中招，pending 调用从未
-     出现攻击目标）**。该异常闭合。结果：
-     `data/benchmarks/agentdojo/results/20260817T034153Z-agentdojo-consistency/`（不进 git）。
-   - **E2E 假阳性遗留**：同测试中 benign flow（用户自己要求发邮件）也被 taint 规则拦截
-     （`clean_utility` = 0）--与决策层 delegated 灰区同一根源，但 E2E 侧目前只有 3 个
-     case 的脚注。见下方新增条目 7。
+2. **端到端层删除（2026-08-19）**：`evals/agentdojo`（run.py/adapter/consistency.py/一致性测试/两条
+   flow 策略）随 E2E 层整体移除。删除前的历史归因保留了三条可复用教训：地板效应（baseline ASR
+   = 0/8，0→0 无测量力）、0 block 非 Adapter bug（确定性攻击路径在 `blocked_before_tool_call`
+   被正确拦截）、E2E 层若重引入必须先让 baseline ASR 非零。原 `may_influence` 流程规则
+   （block-email/file-destruction-flow）与 flow 概念一并删除。
 
 ## P1（检测有效性实验）
 
@@ -69,10 +62,9 @@
    `data/benchmarks/prompt-injection/results/segments-latest.json`（不进 git）。
 4. **离线延迟基准**：NeMo benchmark 模式——mock OpenAI-compatible 上游压测 Gateway，无 API key
    量化"安全 vs 延迟"（含 streaming 每前缀重分析的成本基线），作为 P4 增量优化的前置数据。
-5. **E2E 假阳性的系统度量**：决策层已有 named/delegated 分组的 gate 语义，E2E 侧没有对应
-   物--consistency 测试里 benign flow 全被 taint 拦截（`clean_utility` = 0）目前只是 3-case
-   脚注。需要扩展 scripted benign flows 到决策层 39 个 benign case 的 E2E 镜像（named 组应
-   放行、delegated 组应拦截），让"E2E 上的合法任务损失"有可与决策层对读的数字。
+5. ~~**E2E 假阳性的系统度量**~~（作废，2026-08-19）：对象是被删 agentdojo E2E 策略的 flow taint
+   规则（benign flow 全被拦截、`clean_utility`=0）。规则与 E2E 层已随端到端层删除一并移除，
+   该度量不再有主体。
 
 6. **分类器差距探针（LlamaFirewall 对照，2026-08-17）**：DeBERTa 在缺失的语料格上补测完成--
    AgentDojo 载荷 vs NotInject 难例，**ROC AUC 仅 0.590**（PromptGuard 2 论文同基准 0.942；

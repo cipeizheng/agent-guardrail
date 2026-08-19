@@ -1,0 +1,16 @@
+[project]
+name = "agent-guardrail-corpus"
+version = "0.1.0"
+description = "Environment for regenerating the third-party AgentDojo release corpus and running model-profile detection"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "agentdojo==0.1.35",
+    "agent-guardrail[detectors]",
+    "openai>=2,<4",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+agent-guardrail = { path = "../..", editable = true }

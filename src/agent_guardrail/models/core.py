@@ -271,8 +271,9 @@ class RelationKind(StrEnum):
     ``source_event_id``; both kinds therefore read in passive voice from the
     target: ``derived_from`` (exact provenance) and ``influenced_by``
     (conservative influence, e.g. an untrusted tool result that entered a
-    model call's context). The policy condition operator ``may_influence``
-    is a different namespace and reads forward: source may influence target.
+    model call's context). The policy condition operator ``linked_by``
+    is a different namespace and reads forward: source is connected to
+    target by any explicit provenance or influence edge (either kind).
     """
 
     DERIVED_FROM = "derived_from"

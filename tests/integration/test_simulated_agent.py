@@ -133,7 +133,7 @@ rules:
         - relation:
             source: source
             target: destination
-            operator: may_influence
+            operator: linked_by
         - tool: {binding: destination, name: send_email}
     finding:
       code: untrusted_source_flow_denied

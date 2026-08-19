@@ -39,7 +39,7 @@
 参考 Invariant 时只吸收 typed/multi Event binding、派生值、量词、snapshot Policy、
 `past_events + pending_events` Monitor、增量 Finding 和算法覆盖面；不复制 Python import/link、handler、
 远程服务耦合、输入检查与上游请求并发或自动 provenance。Invariant `->` 只能对应
-`precedes/may_influence`，不能生成 `derived_from`。
+`precedes/linked_by`，不能生成 `derived_from`。
 
 参考 NeMo Guardrails 时不复制 Colang、动态 `actions.py` 加载或完整对话编排。Detector hit 只是 fact；
 必须映射到安全模型的资产和 T01–T10 路径，并与可信 source/sink、destination 或 authorization 语境组合。

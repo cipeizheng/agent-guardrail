@@ -41,7 +41,7 @@ strict version: 3 YAML → AuthorPolicy → immutable MatchPlan
   不是完整请求快照；`TOOL_CALL_PROPOSAL` 是模型建议，`TOOL_CALL` 才表示即将发生真实副作用的调用。
 - 数据来源和可能影响只存在于类型化 `Event.relations`（边挂在后发生事件上、指回 source，读作被动语态）：
   `derived_from` 表示派生，`influenced_by` 表示可能受其影响；时间顺序不得冒充任一种 Relation。
-  策略条件算子 `may_influence` 读作主动语态（source 可能影响 target），查询的是这两类边。
+  策略条件算子 `linked_by` 读作主动语态（source 经任意来源/影响关系边连到 target），查询的是这两类边。
 - `EventSecurityFacts` 只持久保存绑定到具体 Event payload 的 `trust_class + trust_authority`；它由可信
   Session/SDK 接入显式提供，不能由普通 HTTP/Provider payload、metadata 或 EventOrigin 自我声明。
 - 外部 Event 默认 `client_asserted`；只有 Enforcement 可建立 `observed/derived`。

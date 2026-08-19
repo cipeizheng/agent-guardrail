@@ -100,7 +100,7 @@ SDK 调用方或 Gateway Adapter 决定。
 - `all/any/not`；
 - `compare`：`equals/not_equals/in/not_in/contains/not_contains`；
 - `present`：区分字段缺失和存在但为 null；
-- `relation`：sequence 顺序，以及显式 `may_influence` 或 direct/ancestor `derived_from`；
+- `relation`：sequence 顺序，以及显式 `linked_by` 或 direct/ancestor `derived_from`；
 - `tool`：工具名比较语法糖；
 - `predicate/detector`：可信 Registry capability；
 - `use`：只在编译期存在的声明式 predicate 调用；
@@ -115,7 +115,7 @@ Event safe envelope 只开放 `id/sequence/kind/origin/payload/security_facts`�
 {field: [source, security_facts, trust_class]}
 ```
 
-它必须与显式 `may_influence/derived_from` 关系组合，才能说明该 source 影响了某个 sink；sequence 先后不能
+它必须与显式 `linked_by/derived_from` 关系组合，才能说明该 source 影响了某个 sink；sequence 先后不能
 替代 Relation。`trust_authority` 可查询，但 Schema 已先校验非 unknown trust 的 authority，Policy 不应把
 authority 名称当作身份或授权凭证。
 

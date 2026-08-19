@@ -80,7 +80,7 @@ packages = ["src/agent_guardrail"]
 # Editable installs additionally expose the repository root (for
 # `import evals.lib` in eval entry points) and src/ (for `import
 # agent_guardrail`) in both the repo venv and the isolated
-# evals/agentdojo environment. Published wheels stay unaffected.
+# evals/corpus environment. Published wheels stay unaffected.
 dev-mode-dirs = [".", "src"]
 
 [tool.hatch.metadata]
@@ -110,4 +110,4 @@ show_missing = true
 fail_under = 80
 
 [tool.pyright]
-exclude = ["evals/agentdojo"]
+exclude = ["evals/corpus"]

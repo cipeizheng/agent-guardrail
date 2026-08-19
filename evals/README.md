@@ -1,19 +1,18 @@
 # 评测体系总览
 
-本目录是仓库的全部评测入口。三层各回答一个问题，下层不能替代上层：
+本目录是仓库的全部评测入口。两层各回答一个问题，下层不能替代上层：
 
 | 层 | 目录 | 回答的问题 | 是否需要真实模型 |
 | --- | --- | --- | --- |
 | 事实层 | [prompt_injection/](prompt_injection/) | Detector 对固定攻击/难例语料的分类效果（含阈值标定） | 否 |
 | 决策层 | [detection/](detection/) | Policy 在单个决策点（pending call / tool_result 释放）上的 ALLOW/BLOCK | 否 |
-| 端到端层 | [agentdojo/](agentdojo/) | 完整链路的 ASR/效用与 adapter/Policy 一致性 | 是（consistency.py 除外） |
 
 路线图与各项结论见 [NEXT-STEPS.md](NEXT-STEPS.md)；决策层 gate 判据见
 [detection/preregistration.md](detection/preregistration.md)（预注册，跑轴之前冻结）。
 
 ## 共享基础设施：`evals/lib/`
 
-Stdlib-only（同时被仓库 venv 与 `evals/agentdojo` 的独立环境导入；两处的 agent-guardrail
+Stdlib-only（同时被仓库 venv 与 `evals/corpus` 的独立环境导入；两处的 agent-guardrail
 editable 安装都通过 pyproject 的 `dev-mode-dirs` 把仓库根目录放上 `sys.path`，入口直接
 `from evals.lib import ...`，不再各自做 `sys.path.insert`）：
 
@@ -33,7 +32,7 @@ editable 安装都通过 pyproject 的 `dev-mode-dirs` 把仓库根目录放上 
 ```
 data/benchmarks/<eval>/
   results/
-    20260817T032219Z-agentdojo-consistency/report.json   # 本次运行的完整报告
+    20260819T121539Z-detection/report.json          # 本次运行的完整报告
     20260817T024958Z-prompt-injection/report.json
     ...
     index.jsonl   # append-only：每行一次运行的 id、git revision、摘要指标
@@ -49,9 +48,9 @@ data/benchmarks/<eval>/
 ## 预检约定（测量力）
 
 比较型评测（baseline vs guarded）在跑处理臂之前必须确认对照臂有信号：baseline ASR 为 0 时，
-guarded 的所有数字都与「攻击从未发生」不可区分（AgentDojo floor-effect 教训，见 NEXT-STEPS）。
-`agentdojo/run.py` 在 `--mode both` 下于 baseline 组完成后检查，ASR 为 0 即中止并给出补救建议；
-`--allow-floor` 可显式记录一次 floor-effect 运行（报告内标注 `measurement_power`）。
+guarded 的所有数字都与「攻击从未发生」不可区分，测量无功率（原 AgentDojo E2E 的 floor-effect
+教训）。曾用 `evals/lib/preflight.py` 在 baseline 组完成后检查，ASR 为 0 即中止并给出补救建议；
+重引入端到端/对照评测时必须复用该约定，否则结果读不出统计意义。
 
 ## 可检测性类别
 
@@ -72,5 +71,6 @@ guarded 的所有数字都与「攻击从未发生」不可区分（AgentDojo fl
 ## 环境
 
 - 事实层/决策层：仓库 venv（`uv sync --frozen --extra detectors --dev` 后 `uv run python evals/...`）。
-- 端到端层：`evals/agentdojo` 有独立 `pyproject.toml`（固定 agentdojo 版本），进入该目录
-  `uv run`；也被 ruff/pyright 排除在外。模型凭据只放 `.env`，不进 git。
+- 语料生成与模型剖面：`evals/corpus` 有独立 `pyproject.toml`（固定 agentdojo 版本，用于再生成
+  `agentdojo-release.json`，也被 `--project evals/corpus` 用来跑 detection 的 `full_deberta` 模型
+  臂）；被 ruff/pyright 排除在外。模型凭据只放 `.env`，不进 git。

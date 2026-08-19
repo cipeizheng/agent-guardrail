@@ -644,7 +644,7 @@ async def test_i07_order_never_becomes_provenance() -> None:
         plan(
             relation_rule(RelationOperator.PRECEDES),
             relation_rule(RelationOperator.IMMEDIATELY_PRECEDES),
-            relation_rule(RelationOperator.MAY_INFLUENCE),
+            relation_rule(RelationOperator.LINKED_BY),
             relation_rule(RelationOperator.DERIVED_FROM_DIRECT),
         )
     ).analyze(snapshot)
@@ -752,7 +752,7 @@ async def test_i08_event_trust_combines_with_explicit_cross_commit_influence() -
                     ComparisonOperator.EQUALS,
                     LiteralValue(value="external_untrusted"),
                 ),
-                relation("source", "target", RelationOperator.MAY_INFLUENCE),
+                relation("source", "target", RelationOperator.LINKED_BY),
             )
         ),
         subjects=("target",),
