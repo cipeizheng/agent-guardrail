@@ -25,7 +25,7 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
-    restart: unless-stopped
+    restart: "no"
 
   gateway:
     build:
@@ -58,7 +58,7 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
-    restart: unless-stopped
+    restart: "no"
 
 networks:
   guardrail_internal:
