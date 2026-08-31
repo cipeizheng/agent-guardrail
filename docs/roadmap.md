@@ -1,79 +1,72 @@
 # 开发路线图
 
-> 当前实现边界见[当前架构合同](current-architecture-contract.md)。Capability 范围、稳定 ID 和状态只以
-> [`capability-status.yaml`](capability-status.yaml) 为准。本文件只安排工作顺序，不重复声明完成状态。
+> 当前实现边界见[当前架构合同](current-architecture-contract.md)。检测和条件判断组件的范围、固定名称与状态以
+> [`capability-status.yaml`](capability-status.yaml) 为准。本文件记录产品阶段和未来工作顺序。
 
 ## 产品阶段
 
 | 阶段 | 目标 | 当前状态 |
 | --- | --- | --- |
-| P0 | 直接 Detector SDK：不写 YAML，在任意代码位置调用 Detector | 已交付 |
-| P1 | Provider Adapter 标准化：Responses API，并证明不依赖 OpenAI wire format | 已交付 |
-| P2 | Streaming：定义并实现已释放内容不可撤回的保证 | 已交付 |
-| P3 | 跨事件安全语境：可信来源、Tool risk 与有用的 source→sink Rule | 进行中 |
-| P4 | 长 Session 与性能：避免历史反复扫描并扩展单进程 task state | 部分交付 |
+| P0 | 程序化内容检测接口 | 已交付 |
+| P1 | OpenAI、Anthropic 与其他模型服务的统一接入 | 已交付 |
+| P2 | 流式输出检查与释放 | 已交付 |
+| P3 | 跨步骤执行记录与规则执行基础设施 | 已交付 |
+| P4 | 长任务记录与性能优化 | 部分交付 |
 | P5 | 部署工程：热加载、发布、SBOM 和可观测性 | 规划 |
 
-“已交付”只表示当前合同与测试覆盖的范围，不表示所有 T01–T10 路径完成，也不改变 capability 状态矩阵中
-`baseline`、`adapter_only` 或 `planned` 的含义。
+“已交付”的语义范围是当前合同与测试覆盖。T01–T10 路径与各项组件的完成度由状态矩阵中的
+`verified`、`baseline`、`adapter_only` 和 `planned` 表达。
 
-### P0：直接 Detector SDK
+### P0：程序化内容检测接口
 
-`DetectorRunner` 提供 text/canonical JSON/batch、capability 枚举和脱敏错误，并与 MatchPlan 共用唯一有界
-Detector 执行器。它只返回 fact，不返回 Decision，也不控制应用副作用。
+应用可以直接提交文本、结构化 JSON 或一批输入，选择已注册的检测组件并获得脱敏结果。输入大小、执行时间、
+结果数量和错误信息均有明确上限。该接口与安全规则使用同一套检测组件执行机制；操作方式由调用方决定。
 
-### P1：Provider Adapter 标准化
+### P1：统一接入模型服务
 
-- `ModelProviderAdapter` 统一封闭 wire Schema、固定相对上游路径、canonical request/output 和流 decoder；
-- OpenAI Chat Completions/Responses 与 Anthropic Messages API 使用同一个 InputNormalizer、Session、Runtime
-  和 Enforcement；Anthropic 内置 Adapter 覆盖文本、client tool use/result、普通与 SSE 响应，并拒绝会
-  绕过 MCP Gateway 的 server-side MCP/Tool；
-- Responses 当前限 text/instructions/custom function/function output；隐藏历史、内置 Tool、background 和
-  多模态后置；
-- 可信宿主可以在 `/v1/providers/...` 注册 Adapter，启动时拒绝路由覆盖与上游路径逃逸；
-- Toy Provider 的 `{prompt} → {answer}` 非流式与 `token/done` named SSE 黑盒测试只验证架构不依赖
-  OpenAI wire format，不把 Toy 写成正式 Provider capability。
+- 所有模型服务接入层都把请求、普通响应和流式响应转换成统一且字段封闭的内部格式；
+- OpenAI Chat Completions、OpenAI Responses 与 Anthropic Messages 共用相同的规则检查和执行记录；
+- Anthropic 接入覆盖文本、客户端工具调用和工具结果，服务端代执行的工具请求由 MCP 工具代理处理；
+- OpenAI Responses 接入当前覆盖文本、instructions、自定义函数和函数结果；
+- 部署者可以注册其他模型服务，注册信息固定上游路径，客户端请求选择已注册服务；
+- 一个最小测试协议验证统一接入机制适用于 OpenAI 格式之外的请求与流式响应。
 
-### P2：Streaming
+### P2：流式输出检查与释放
 
-- 支持 Chat 的 data-only SSE/`[DONE]`、Responses 的 named SSE/`response.completed` 与 Anthropic
-  `message_start/content_block/message_delta/message_stop`；
-- 每个文本窗口按累计 Canonical 前缀 tentative 检查，Tool arguments 完整 JSON/Schema/Policy 检查后才释放；
-- terminal event 对完整 output 再检查并只提交一个最终 Event；
-- block/error 隐藏当前未通过窗口并发脱敏 SSE error，但此前已通过并释放的窗口无法撤回；
-- 原始上游 event 不透传；Adapter 重编码封闭字段，并绑定 function delta/done/item/terminal 一致性；
-- 上游 bytes、单 event、event 数量和总时间有界；未知/畸形内容失败关闭。
+- 支持 OpenAI Chat、OpenAI Responses 与 Anthropic Messages 的服务器推送流式格式；
+- 每段文本按“从开头到当前段”的累计内容检查，检查通过后释放当前段；
+- 工具参数完成 JSON 解析、字段格式检查和安全规则检查后释放；
+- 流结束时再次检查完整输出，并保存一条完整的最终记录；
+- 当前段触发阻断或错误时，代理隐藏该段并发送脱敏错误；此前已经发送的内容保持已发送状态；
+- 代理重新编码允许的字段，校验工具参数片段、完成标志和最终响应之间的一致性；
+- 上游字节数、单条消息大小、消息数量和总耗时均有上限，未知或畸形内容按失败处理。
 
-当前实现会重复分析累计前缀。增量 Matcher/cache 是 P4，而不是把 P2 的性能写成已经解决。
+当前实现会重复分析从流开头到当前位置的累计内容。P4 负责增量分析和结果复用。
 
-## P3：跨事件安全语境
+## P3：跨步骤执行记录与规则执行基础设施
 
-- 单进程 Gateway task session 已交付：Model 与 MCP 可共享 Trace；observed Model proposal 经可信宿主显式
-  `call_id` 引用并通过工具名/参数校验后，连接到实际 MCP ToolCall；显式 Model history 可把匹配的 ToolResult
-  输入边重连到同 task 内 observed MCP ToolResult。该能力提供真实 source→sink 图，不自动判断用户意图或
-  source trust。
-- P3 暂不增加 Tool risk、意图判断或默认 source→sink block 规则；评测当前只有策略决策点 detection
-  benchmark（见 `evals/detection/README.md`），按能力轴 replay trace 并输出混淆矩阵。原端到端 AgentDojo
-  pilot 已随 `evals/agentdojo` 移除（baseline ASR 为 0 导致测量无效，见 evals/README 预检约定）。
-- benchmark 对正常/攻击样本使用同一 source 分类，不读取攻击标签；关系只证明事件来源，不独立决定 block；
-- 判据失败后的走向（收窄产品范围、修正规则粒度或停止该方向）不在预注册内决定，在 `docs/proposals/`
-  中依据失败样本讨论。区分两类响应：修正已测量的粒度缺陷（如字段级来源）必须附带新的预注册判据后
-  重跑；事后增加放行规则直到指标通过仍然禁止；
-- 是否引入 destination、Tool risk 或 T01–T04 Policy 由真实失败样本决定（目前来自 release_external 轴的
-  detector-gap 归因，不是自证脚本）；
-- T10 保持明确边界外，直到存在 Framework Hook、Sandbox 或网络代理。
+- 单进程代理可以为一个任务保存连续执行记录，并让模型调用与 MCP 工具调用共享这些记录。MCP 是 Agent 调用
+  外部工具的标准协议。可信宿主使用模型服务生成的调用编号引用一次工具调用建议；代理核对工具名称和完整
+  参数后，将建议记录与实际工具调用连接。后续模型请求中的工具结果也可以连接回代理实际观察到的结果。
+- 单元测试与生产路径集成测试覆盖跨步骤规则匹配、允许/记录/阻断结果、调用前检查、输出释放、工具参数
+  一致性、重复调用拒绝、任务记录、故障关闭和受保护操作的执行次数。
+- `evals/prompt_injection` 记录第三方提示注入检测组件在锁定语料上的召回率、误报率和可用阈值。
+- 具体应用的规则集由部署方定义。安全与效用指标属于对应工作负载，并使用独立标注场景评估。
+- 真实 Agent 对照评测以未启用规则时存在成功攻击样本为准入条件；启用规则前后使用相同任务、攻击和模型。
+- 数据去向分类、工具风险分类和 T01–T04 默认规则属于独立规则集产品能力，其设计输入是明确产品需求和有
+  代表性的失败样本。T01–T04 是安全模型中关于数据泄露和外部内容影响工具操作的四类威胁路径。
+- Agent 直接执行的 Shell、函数和网络请求需要框架钩子、进程隔离或网络代理提供控制。
 
-P3 只围绕单用户数据流构建规则，不引入 principal/tenant Registry、owner-aware Policy 或跨用户状态。
-T09 使用跨目的地授权复用/confused-deputy 路径，不使用跨租户泄漏定义。
+P3 服务单用户数据流规则。用户目录、租户登记、数据所有者规则和跨用户状态属于多用户产品能力。T09 描述
+同一用户环境中旧授权被用于另一数据去向的风险。
 
-## P4：长 Session 与性能
+## P4：长任务记录与性能
 
-- 为 Matcher 建立安全的历史 cursor、增量索引与 relation/finding cache，避免每个窗口或新 Event 全量扫描；
-- 用真实长会话与长流 benchmark 固定内存、延迟和缓存 identity；
-- 单进程内存 task-session Store、opaque token、滑动 TTL、容量上限和显式删除已经交付；下一步为已有 Store
-  增加历史 cursor/去重，而不是重复设计第二套 Session 语义；
-- 跨进程/重启持久化、CAS 与集群路由仍未设计。任何扩展仍只服务同一用户的连续运行，不加入用户、租户或
-  数据所有权字段。
+- 为历史记录建立增量索引和可安全复用的分析结果，减少每个新操作和每段流式输出的重复扫描；
+- 使用真实长会话与长流固定内存和延迟目标；
+- 当前单进程内存存储提供随机任务令牌、滑动过期时间、容量上限和显式删除；下一步是在该存储上增加增量
+  读取和去重；
+- 跨进程共享、重启恢复和集群路由属于后续设计，服务范围保持单个用户的连续任务。
 
 ## P5：部署工程
 
@@ -84,11 +77,12 @@ T09 使用跨目的地授权复用/confused-deputy 路径，不使用跨租户�
 
 ## Capability 维护
 
-Detector 与 Predicate 的稳定 ID/状态继续只由 `capability-status.yaml` 管理。明确的验证缺口是锁定的
-BIPIA/NotInject 公开评测已暴露 `P0-D04 prompt_injection_model`（DeBERTa）攻击召回过低、过度防御，以及
-`P0-D05 prompt_injection_model_promptguard2` 对 BIPIA content_undetectable 载荷低于随机，两者保持
-`baseline`；`P1-D04 is_similar` 与 `P1-D05 prompt_injection_judge` 的真实 backend 尚未 smoke/eval，
-保持 `adapter_only`。不通过重复命名掩盖现有 capability 的质量缺口。
+Detector 与 Predicate 的稳定 ID/状态由 `capability-status.yaml` 管理。锁定的 BIPIA/NotInject 公开评测
+记录 `P0-D04 prompt_injection_model`（DeBERTa）的低攻击召回与过度防御，以及
+`P0-D05 prompt_injection_model_promptguard2` 在 BIPIA content_undetectable 载荷上的低排序能力，两者状态为
+`baseline`。`P1-D04 is_similar` 的当前状态为 `adapter_only`；`P1-D05 prompt_injection_judge` 已完成一次
+真实模型特性评估，当前 FPR 与完整完成定义对应 `adapter_only` 状态。这些指标描述指定 capability 的依赖
+特性。
 
 ## 可验证 Transformation（P3 之后）
 

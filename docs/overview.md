@@ -1,58 +1,61 @@
 # 架构概览
 
 > 适合谁：第一次理解系统或评审跨层变化的人。
-> 解决什么：从安全目标、Policy 分析到实际 Enforcement 的完整主线。
-> 不包含什么：YAML 字段参考、Matcher 细节和协议错误码。
+> 解决什么：从规则输入、分析到实际阻断的完整主线。
+> 相关细节：YAML 字段见 Policy 作者指南，规则匹配见分析引擎参考，协议错误码见 Gateway 协议参考。
 
 ## 1. 系统定位
 
-Agent Guardrail 是本地 Policy Analyzer 加 Enforcement Runtime/Gateway。它保护用户的数据、意图和资源，
-使用 `source → transform → sink` 描述威胁；Detector 只产生事实，完整违规还需要可信 source/sink、
-destination 或 authorization 语境。
+Agent Guardrail 是面向 AI Agent 的可解释安全规则分析与执行控制框架。它在 Agent 调用模型和外部工具时
+执行部署者编写的安全规则。输入包括检测组件给出的结果、
+Agent 已经发生和即将发生的操作记录、这些记录之间的明确联系，以及部署者提供的规则；输出是允许、记录或
+阻断。应用可以直接读取结果，代理服务也可以在模型与 MCP 工具调用前、输出释放前落实结果。MCP 是 Agent
+调用外部工具的标准协议。
 
-当前唯一生产策略链是：
+框架保证规则按照固定格式加载、分析过程受资源上限约束、执行记录保持一致，以及阻断发生在受保护操作之前。
+检测准确度由所选检测组件决定，具体规则的安全与效用由对应应用工作负载评估。数据流使用“来自哪里、经过
+什么处理、最终发送到哪里或触发什么操作”的路径描述。
+
+后文使用以下代码术语：`Detector` 表示检测组件，`Event` 表示一条结构化执行记录，`Relation` 表示两条记录
+之间明确的产生或影响关系，`Decision` 表示允许、记录或阻断结果，`Gateway` 表示位于 Agent 与模型或工具
+服务之间的代理。
+
+生产安全规则经过一条固定执行链：
 
 ```text
-strict v3 YAML
-  → AuthorPolicy schema/type check
-  → immutable MatchPlan
-  → capability linking
-  → SnapshotMatcher
-  → AnalysisReport[Finding, AnalysisError]
-  → MatchPolicyAnalyzer
-  → Decision
-  → EnforcementSession
+严格 YAML 规则
+  → 字段和类型检查
+  → 不可变的内部执行计划
+  → 连接部署者注册的检测与条件判断组件
+  → 在当前执行历史和待检查操作中匹配规则
+  → 生成命中结果或分析错误
+  → 汇总为允许、记录或阻断
+  → 在模型或工具边界落实结果
 ```
 
-生产没有 Python Rule、动态 import、callback、mandatory anchor、v1/v2 fallback 或第二套解释器。Core、
-Matcher 和 Analyzer 都不执行 LLM、Tool 或其他 Agent 业务副作用。
+生产规则采用数据配置，所有结果经过上述执行链。分析服务负责读取记录和计算结果；模型调用、工具调用和
+其他 Agent 业务操作由边界代理或应用执行。
 
-项目同时提供一个较小的 `DetectorRunner` 事实接口：应用不写 YAML，直接对 text/canonical JSON 调用部署方
-发布的 Detector。该接口只返回脱敏 Detection，不做跨 Event 判断或 allow/log/block；其 Detector 调用与
-上述 Policy 链共享同一个 descriptor、timeout 和结果校验执行器，不是第二套 Policy 链。
+项目同时提供直接内容检测接口，代码名称为 `DetectorRunner`。应用可以提交文本或结构化 JSON，直接调用
+部署者发布的检测组件并获得脱敏结果。该接口与安全规则共享相同的输入上限、超时、结果数量和格式校验。
 
 ## 2. 运行图
 
 ```text
-Semantic SDK call / Provider payload or SSE
+应用调用、模型服务请求或流式消息
           │
           ▼
-GuardrailRun / Adapter / InputNormalizer
-          │ CandidateEvent batch
+接入接口完成协议转换和字段规范化
+          │ 当前待检查操作
           ▼
-EnforcementSession
-  ├─ 分配 Event identity、sequence 和 time
-  ├─ 校验 origin、relation、Event security facts、flow security context 和容量
-  └─ 构造 immutable PendingTrace
+执行边界分配记录编号和顺序，并校验来源、记录联系、安全上下文和容量
           │
           ▼
-MatchPolicyAnalyzer
-  ├─ SnapshotMatcher ──► AnalysisReport
-  └─ Finding/Error ────► Decision
+规则分析读取已确认历史与当前操作，生成命中结果或错误
           │
           ▼
-allow/log：原子提交全部 pending Event
-block：丢弃原始 pending Event，只提交脱敏 Decision Event
+允许/记录：一次性保存当前操作
+阻断：保存脱敏结果并丢弃当前操作中的原始内容
 ```
 
 Runtime 管理 Analyzer 生命周期；Adapter 只处理 Provider/Framework wire↔canonical 协议；Enforcement

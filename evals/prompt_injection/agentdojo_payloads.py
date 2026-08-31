@@ -49,7 +49,9 @@ async def _load_texts() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     sys.path.insert(0, str(_HERE))
     from run import Sample, _load_manifest, _load_samples  # reuse the pinned loader
 
-    release = json.loads((_DEFAULT_DATA / "detection" / "agentdojo-release.json").read_text())
+    release = json.loads(
+        (_DEFAULT_DATA / "prompt-injection" / "agentdojo-release.json").read_text()
+    )
     attacks = [
         {
             "sample_id": f"aj-{case['suite']}-{case['task_id']}",

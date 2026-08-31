@@ -1,7 +1,7 @@
 [project]
 name = "agent-guardrail-corpus"
 version = "0.1.0"
-description = "Environment for regenerating the third-party AgentDojo release corpus and running model-profile detection"
+description = "Environment for regenerating the third-party AgentDojo prompt-injection corpus"
 requires-python = ">=3.12,<3.14"
 dependencies = [
     "agentdojo==0.1.35",

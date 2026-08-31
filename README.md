@@ -1,6 +1,6 @@
 # Agent Guardrail
 
-**An explainable policy analyzer and enforcement gateway for AI agents.**
+**An explainable safety-rule analysis and execution-control framework for AI agents.**
 
 English | [简体中文](README.zh-CN.md)
 
@@ -9,65 +9,73 @@ English | [简体中文](README.zh-CN.md)
 [![Status](https://img.shields.io/badge/status-alpha-f59e0b)](docs/roadmap.md)
 [![License](https://img.shields.io/badge/license-MIT-22c55e)](LICENSE)
 
-Agent Guardrail can run bounded Detectors directly without YAML, or compile a strict YAML policy
-into an immutable match plan for cross-event decisions. Applications can use both modes through
-framework-neutral SDKs; Gateways additionally enforce decisions at concrete model and tool
-execution checkpoints.
+Deployers connect content-detection components and write safety rules. Agent Guardrail reads the
+messages, model calls, tool calls, and tool results produced while an agent runs. It applies those
+rules to allow, record, or block an operation before a model or tool runs and before output reaches
+the agent.
 
-The project focuses on three assets: **user data, user intent, and user resources**. Detector hits
-are evidence, not security decisions by themselves; policies combine those facts with trusted
-source, destination, and authorization context.
+The framework guarantees consistent rule loading and enforcement. Detection accuracy depends on
+the selected detection component; security and utility outcomes depend on the application's rule
+set and workload.
 
-> **Project status — v0.1.0 alpha.** The direct Detector SDK, event/Policy SDK, core runtime, Inline
-> wrappers, provider-neutral Adapter contract, OpenAI Chat/Responses and Anthropic Messages streaming Gateway, MCP
-> Gateway, optional in-memory task sessions shared across model/tool boundaries, and remote Core
-> path are implemented and tested. The application is explicitly single-user; it is not a sandbox
-> or durable/distributed session service and does not model users, tenants, or data ownership.
+> **Project status — v0.1.0 alpha.** The programmatic detection and rule interfaces, model proxy,
+> tool proxy using MCP (a standard protocol for agent tools), streaming-output checks, in-memory
+> records for one task, and separately deployed rule-analysis service are implemented and tested.
+> The deployment model serves one user. Host infrastructure supplies process isolation, durable
+> state, identity, and resource limits.
 
-## Why Agent Guardrail?
+## What Agent Guardrail provides
 
-- **Analysis plus enforceable boundaries.** SDK users choose where decisions apply; Gateway blocks
-  before model/tool calls and before model/tool outputs are released.
-- **One auditable policy chain.** Strict `version: 3` YAML becomes `MatchPlan → AnalysisReport →
-  Decision`; there is no second production interpreter.
-- **No executable policy payloads.** YAML cannot import Python, register callbacks, select files,
-  choose network endpoints, or acquire arbitrary I/O permissions.
-- **Typed traces and explicit relations.** Messages, model calls, tool proposals, actual tool calls,
-  and tool results are immutable events. Temporal order is never silently treated as provenance.
-- **Deployment-owned capabilities.** Models, rulesets, processes, and credentials are selected by
-  the deployment, while Policy sees only reviewed capability names and bounded parameters.
-- **Redacted by construction.** Findings, violations, errors, and optional audit records contain
-  structured, masked evidence instead of raw secrets, PII, or prompts.
+- **Analysis and enforcement boundaries.** Applications can call rule analysis directly; proxies
+  can block before model or tool calls and before output release.
+- **One rule-execution path.** Strict YAML configuration becomes one immutable internal plan. The
+  same path produces every allow, record, and block result.
+- **Data-only rule configuration.** YAML selects detection and condition checks registered by the
+  deployer. Deployment code owns implementations, files, processes, endpoints, and permissions.
+- **Structured execution records.** Messages, model calls, proposed tool calls, actual tool calls,
+  and tool results are immutable records. Explicit links show how an earlier record produced or
+  influenced a later operation; timestamps describe ordering.
+- **Deployer-selected detection.** The deployer configures models, rulesets, external processes,
+  and credentials. Safety rules use registered names and bounded parameters.
+- **Redacted evidence.** Matches, violations, errors, and audit records contain structured,
+  masked information.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    A[Agent or client] --> B[Event SDK / Model Provider / MCP adapter]
-    A --> I[Direct Detector SDK]
-    B --> C[EnforcementSession]
-    C -->|PendingTrace| D[Embedded Runtime or Remote Core]
-    D --> E[Policy v3 → MatchPlan → SnapshotMatcher]
-    E --> J[Shared bounded Detector executor]
-    I --> J
-    J -->|masked facts| I
-    E -->|AnalysisReport| F[Decision Analyzer]
-    F -->|allow / log / block| C
-    C -->|allow before call / output release| G[LLM or Tool boundary]
-    C -->|redacted violations| H[(Audit)]
+    A[Agent or application] --> B[Integration or protocol conversion]
+    B --> C[Call and output checkpoints]
+    C --> D[Rule analysis]
+    D --> E[Registered detection and condition checks]
+    D -->|allow / record / block| C
+    C -->|execute after allow| F[Model or external tool]
+    C --> G[(Redacted audit records)]
+    A --> H[Direct content-detection interface]
+    H --> E
 ```
 
-Policies describe semantic events and relations, independently of enforcement placement. Gateway
-adapters map provider traffic into those events and use four execution checkpoints:
+Safety rules read structured execution records and explicit links between those records. Model and
+tool proxies convert external protocols into the common record format and check rules at four
+locations. The four identifiers below name the integration points before a model call, before model
+output release, before a tool call, and before tool-result release:
 
 ```text
 before_model_call → LLM → before_model_output_release
 before_tool_call  → Tool → before_tool_output_release
 ```
 
-Analysis always sees the committed trace plus the complete pending event batch. Allow and log
-decisions atomically commit that batch; block discards the raw pending events and commits only a
-sanitized decision event.
+Each analysis reads the confirmed execution history and the complete operation currently under
+review. Allow and record save the operation atomically. Block saves a redacted result and discards
+the operation's raw content.
+
+Technical documentation and APIs use these names: `Policy` means a YAML safety rule; `Detector`
+means a content-detection component; `Event` means one structured execution record; `Relation`
+means an explicit production or influence link between two records; `Decision` means an allow,
+record, or block result; `Trace` means the continuous execution history for one task; `Gateway`
+means a proxy between an agent and model or tool service; `Core` means the separately deployable
+rule-analysis service; and `capability` means a registered detection or condition check available
+to rules.
 
 ## Quick start
 
@@ -88,11 +96,13 @@ llm executions: 1
 send_email executions: 0
 ```
 
-The model proposed a tool call containing a secret, but the guarded email tool was never executed.
+The output records one model execution and zero email-tool executions after the rule blocked the
+proposed call containing a secret.
 
-## A policy is data, not code
+## Configure safety rules with YAML
 
-This policy blocks a `send_email` tool call when its arguments contain secret material:
+Code and documentation use `Policy` for a YAML safety rule. The following rule blocks a
+`send_email` tool call when its arguments contain secret material:
 
 ```yaml
 version: 3
@@ -205,9 +215,11 @@ See the [integration guide](docs/guides/integration.md) and
 [Gateway protocol reference](docs/reference/gateway-protocol.md) for lifecycle and protocol
 details.
 
-## Capabilities
+## Detection and condition-checking components
 
-The default `local` registry performs no model downloads and publishes:
+Here, a component is a detection or condition check registered by the deployer; the table names are
+stable identifiers used by rule files. The default `local` configuration uses deterministic local
+components:
 
 - Detectors: `secrets`, `pii`, `prompt_injection`, `unicode_security`,
   `python_ast_ipython`, and `hidden_content`.
@@ -226,16 +238,26 @@ Deployment-fixed optional capabilities are deliberately separate:
 | Explicit injection | `is_similar` | Deployment-selected `EmbeddingProfile` and async embedding backend |
 | Explicit injection | `prompt_injection_judge` | Deployment-selected `LLMJudgeBackend`/`LLMJudgeProfile` verdict channel |
 
-The real `prompt_injection_model` backend is currently a `baseline`, not a complete defense: the
-locked public BIPIA/NotInject evaluation exposes low attack recall and substantial over-defense.
-`is_similar` and `prompt_injection_judge` remain `adapter_only` because no external
-embedding or judge service has been accepted as verified. The exact, non-marketing status of every capability lives in the
-[capability matrix](docs/capability-status.yaml); the reproducible Detector evaluation lives under
-[`evals/prompt_injection`](evals/prompt_injection/README.md). The per-policy decision-point eval
-under [`evals/detection`](evals/detection/README.md) reports honest per-axis confusion matrices,
-including the preregistered release-axis gate.
+The real `prompt_injection_model` backend currently has `baseline` status. Locked public corpora
+measure its detection characteristics, including blind spots and over-defense. `is_similar` and
+`prompt_injection_judge` have `adapter_only` status; their verification scope is recorded in the
+[capability matrix](docs/capability-status.yaml). Reproducible third-party Detector
+characterization lives under [`evals/prompt_injection`](evals/prompt_injection/README.md).
 
-## Deployment profiles
+Verification evidence has explicit scope:
+
+| Evidence | Scope |
+| --- | --- |
+| Unit and integration tests | Rule loading and matching, allow/record/block results, call checkpoints, output release, failure handling, and zero protected operations after a pre-call block |
+| Detection-component characterization | Recall, false-positive rate, and usable thresholds for a named component on revision-pinned corpora |
+| Capability matrix | Delivery status and verification scope for each detection and condition-checking component |
+
+The repository currently publishes classification metrics for detection components. Application
+rule sets and real-agent deployments own their workload-specific security and utility metrics.
+
+## Deployment component sets
+
+A profile is a named set of detection components and dependency settings.
 
 ### Default local profile
 

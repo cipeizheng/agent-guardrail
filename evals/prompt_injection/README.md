@@ -1,18 +1,16 @@
-# Prompt injection Detector benchmark
+# 提示注入检测组件特性评估
 
-这是一套独立评测，不属于 pytest，也不改变 capability 的 `verified/baseline/planned` 状态。它回答的范围是：
-当前 `DetectorRunner` 对固定攻击载荷和良性难例的分类效果如何。
+本评估记录提示注入检测组件对固定攻击载荷和良性难例的分类特性。代码中的 `DetectorRunner` 是直接运行
+一个或多个检测组件的接口；组件交付状态记录在 `docs/capability-status.yaml`。
 
 ## 选择与边界
 
-- **[BIPIA attack payloads](https://github.com/microsoft/BIPIA)**：125 条间接 prompt injection 攻击指令，作为正样本。只使用仓库根 MIT
-  许可覆盖的 `text_attack_test.json` 与 `code_attack_test.json`，不下载带独立许可的任务上下文数据。
+- **[BIPIA attack payloads](https://github.com/microsoft/BIPIA)**：125 条间接 prompt injection 攻击指令，作为正样本。输入范围是仓库根 MIT
+  许可覆盖的 `text_attack_test.json` 与 `code_attack_test.json`。
 - **[NotInject](https://github.com/leolee99/PIGuard)**：339 条含有常见注入触发词但语义正常的 hard negatives，作为负样本。
 - 两者均固定到 manifest 中的 Git revision、文件大小和 SHA-256；下载后评测可以完全离线运行。
-- 本评测不调用 LLM、Agent 或 Tool，因此不能给出攻击成功率（ASR）、任务效用或 source→sink 阻断率。
-  BIPIA 的完整端到端协议以及 [AgentDojo](https://github.com/ethz-spylab/agentdojo) 属于下一层评测，
-  需要真实模型驱动的 Agent。
-- [PINT](https://github.com/lakeraai/pint-benchmark) 完整数据没有公开下载入口，因此不作为可复现的第一阶段输入。
+- 主入口执行检测组件。AgentDojo 在这里提供固定攻击载荷；输出指标描述检测组件的分类结果。
+- [PINT](https://github.com/lakeraai/pint-benchmark) 当前列为候选语料；纳入条件是 revision-pinned 公开下载文件。
 
 ## 环境与运行
 
@@ -41,14 +39,15 @@ uv run python evals/prompt_injection/run.py \
 报告包含 confusion matrix、recall、false-positive rate、precision/F1、balanced accuracy、延迟、
 分类别 detection rate，以及按可检测性类别（`benign`/`style_detectable`/`content_undetectable`，
 定义见 `evals/lib/detectability.py`）分组的指标——BIPIA text 攻击在
-`content_undetectable` 上的内容分类 recall 是标签噪声，不读作 Detector 缺口。报告不保存原始
-prompt 或 Detector evidence。`full_deberta` 的部署默认阈值是 0.85,PromptGuard 2 候选 profile
+`content_undetectable` 上的内容分类 recall 按标签噪声解释。报告保存样本 ID、聚合指标与脱敏结果。
+`full_deberta` 的部署默认阈值是 0.85,PromptGuard 2 候选 profile
 (`full_promptguard2`/`promptguard2`,Llama 4 Community License,非默认)为 0.9；Detector version 将模型、运行库和
 阈值身份绑定进报告。`misclassified_sample_ids` 可通过固定数据文件和 manifest 复核。
 
 ### 操作点标定（threshold sweep）
 
-`--prompt-model-threshold` 是部署级参数（传给 `create_deployment_detector_registry`；Policy 不能选择）。
+`--prompt-model-threshold` 是传给 `create_deployment_detector_registry` 的部署级参数，Policy Schema 的参数集合
+位于该阈值之外。
 传入一个足够低的值（≤ 0.01，例如 `1e-6`）时，每个样本的原始分类分数通过 Detection confidence 完整暴露
 （无 Detection 记为 0.0），报告额外输出 `prompt_injection_model` 的 `operating_points`：
 
@@ -77,5 +76,17 @@ uv run python evals/prompt_injection/run.py \
   --detectors prompt_injection
 ```
 
-这些指标只能校准 Detector。P3 的 destination/trust-aware Policy 和受保护副作用必须另做 Gateway/SDK
-source→sink 回放，不能由本报告替代。
+可选的 AgentDojo 固定载荷由独立环境生成：
+
+```bash
+uv run --project evals/corpus python evals/prompt_injection/gen_agentdojo.py
+```
+
+要经生产 `DetectorRunner` 特性评估 DeepSeek judge，可配置 `DEEPSEEK_API_KEY` 后运行：
+
+```bash
+uv run python -m evals.prompt_injection.judge
+```
+
+该命令输出 DeepSeek judge 在固定语料上的分类特性。仓库单元测试和集成测试验证规则执行、调用前检查、
+输出释放和受保护操作的执行次数。

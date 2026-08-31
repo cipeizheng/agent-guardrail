@@ -56,13 +56,12 @@ priority_capabilities:
     status: baseline
     threat_paths: [T03, T04]
     implementation: prompt_injection_model
-    note: 2026-08-18 新增的候选部署 profile（full_promptguard2/promptguard2），把 full_deberta
-      的 DeBERTa 换成 Meta PromptGuard 2 86M，评分路径对齐 LlamaFirewall（全空白剥离重分词、截断 512、
-      MALICIOUS 类概率），资产按镜像 commit + size + SHA-256 pin，构造期逐项校验并 smoke-test。在锁定的
-      AgentDojo 35 条攻击 + NotInject 339 条良性难例上 AUC 0.972、0.9 阈值 recall 0.971、FPR 4.1%
-      （同条件下 DeBERTa AUC 0.590、recall 0.257、FPR 39.8%）；但 BIPIA 125 条 content_undetectable
-      载荷 AUC 0.436 仍低于随机，即语义目标劫持的概念性上限没有被更强分类器消除。权重为 Llama 4
-      Community License（非 MIT），因此 profile 为显式 opt-in 候选，绝不设为默认部署；仅视为基线接入。
+    note: 候选部署 profile（full_promptguard2/promptguard2）使用 Meta PromptGuard 2 86M，评分路径对齐
+      LlamaFirewall（全空白剥离重分词、截断 512、MALICIOUS 类概率），资产按镜像 commit + size + SHA-256
+      pin，构造期逐项校验并 smoke-test。锁定的 AgentDojo 35 条攻击与 NotInject 339 条良性难例记录 AUC
+      0.972、0.9 阈值 recall 0.971、FPR 4.1%（同条件下 DeBERTa AUC 0.590、recall 0.257、FPR 39.8%）；
+      BIPIA 125 条 content_undetectable 载荷记录 AUC 0.436。上述数字描述 PromptGuard 2 在指定语料上的
+      分类特性。权重许可证是 Llama 4 Community License，profile 采用显式 opt-in 配置，状态为 baseline。
 
   - id: P0-D06
     name: yara_injection_signatures
@@ -118,11 +117,11 @@ priority_capabilities:
     status: adapter_only
     threat_paths: [T03, T04]
     implementation: prompt_injection_judge
-    note: 2026-08-16 新增的部署注入 LLM judge 通道（类比 is_similar 的 EmbeddingProfile 模式）。adapter、
-      Schema、descriptor 预算（16 KiB、10 秒）、阈值/版本身份绑定、脱敏和 fail-closed 路径已由单元测试覆盖；
-      真实外部 backend（DeepSeek judge 经 DetectorRunner 全链路）已在 release_external 语料上跑通一次模型臂
-      （recall 0.82、NotInject FPR 0.37，judge 意图判别覆盖了 prompt_injection_model 概念外的载荷），但尚未
-      达到完成定义的边界/超时用例与 Enforcement 断言，且 FPR 未达可用操作点，状态保持 adapter_only。
+    note: 部署注入 LLM judge 通道采用与 is_similar EmbeddingProfile 一致的依赖注入模式。单元测试覆盖
+      adapter、Schema、descriptor 预算（16 KiB、10 秒）、阈值/版本身份绑定、脱敏和 fail-closed 路径。
+      DeepSeek judge 经 DetectorRunner 全链路在固定 BIPIA、NotInject 与 AgentDojo 载荷上完成一次模型臂，
+      记录 recall 0.82、NotInject FPR 0.37。上述数字描述 DeepSeek judge 在指定语料上的分类特性。
+      verified 完成定义仍需真实 backend 的边界/超时用例与 Enforcement 断言，当前状态为 adapter_only。
 
 other_current_capabilities:
   - name: prompt_injection

@@ -36,10 +36,8 @@ Policy 作者指南 → Capability 参考
 - [Gateway 协议参考](reference/gateway-protocol.md)：端点、映射、生命周期和错误。
 - [Gateway 运行指南](guides/operations.md)：启动、Agent Sandbox 部署边界、环境变量、Secret、Audit 和 Health。
 - [Remote Core 双容器设计](design/remote-core-deployment.md)：Core/Gateway 责任、协议与失败边界。
-- [Prompt injection Detector 评测](../evals/prompt_injection/README.md)：不调用 Agent/LLM 的锁定公开数据回归。
-- [策略决策点 detection 评测](../evals/detection/README.md)：按能力轴 replay trace，对 Policy 输出分轴混淆矩阵。
-- [第三方语料生成环境](../evals/corpus/README.md)：固定 agentdojo 版本，再生成 release 轴的外部注入语料与
-  full_deberta 剖面运行环境。
+- [Prompt Injection Detector 特性评估](../evals/prompt_injection/README.md)：记录固定第三方语料上的分类指标与操作点。
+- [第三方语料生成环境](../evals/corpus/README.md)：固定 AgentDojo 版本并导出 Prompt Injection 攻击载荷。
 
 ## 修改 Core
 

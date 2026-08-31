@@ -1,15 +1,12 @@
 """Immutable run-directory reporting shared by every eval entry point.
 
-A run never overwrites a previous result (the judge-arm 402-rerun overwrite is
-the motivating incident). Every report is:
+Each run allocates a fresh result directory. Every report is:
 
 1. stamped with a ``run`` block (run id, UTC timestamp, git revision);
 2. written to a fresh timestamped directory ``<results_root>/results/<run_id>/report.json``;
 3. recorded as one append-only line in ``<results_root>/results/index.jsonl``;
 4. atomically copied to a ``latest`` pointer for backward-compatible consumers.
 
-Existing single-file reports under ``results/`` (written before this module)
-stay in place; the index simply starts at the first run that uses it.
 """
 
 from __future__ import annotations

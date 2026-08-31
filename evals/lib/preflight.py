@@ -2,9 +2,8 @@
 
 A comparative eval only measures something when its control arm shows signal:
 a baseline attack-success rate of 0 makes every guarded-arm number
-indistinguishable from "the attack never fired" (the AgentDojo floor-effect
-finding in evals/NEXT-STEPS.md). This module centralizes that check so each
-comparative entry point aborts before spending the treatment arm.
+indistinguishable from "the attack never fired". Comparative entry points use
+this check before spending the treatment arm.
 """
 
 from __future__ import annotations

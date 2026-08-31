@@ -49,7 +49,9 @@ def _load_groups() -> list[Group]:
     sys.path.insert(0, str(_HERE))
     from run import _load_manifest, _load_samples
 
-    release = json.loads((_DEFAULT_DATA / "detection" / "agentdojo-release.json").read_text())
+    release = json.loads(
+        (_DEFAULT_DATA / "prompt-injection" / "agentdojo-release.json").read_text()
+    )
     manifest, files = _load_manifest(_HERE / "manifest.json", _DEFAULT_DATA / "prompt-injection")
     samples = _load_samples(files)
     groups = [

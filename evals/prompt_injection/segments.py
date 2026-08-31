@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Segment-and-aggregate input-construction experiment (NEXT-STEPS P1-3).
+"""Segment-and-aggregate Detector input-construction characterization.
 
 The threshold sweep (P0-1) closed threshold tuning: raw-text scores are
 rank-inverted on BIPIA/NotInject. But that corpus never tested the deployment
@@ -25,8 +25,7 @@ Attribution readouts:
 - benign envelope FPR per condition: the cost of segmenting (more chances to
   fire on benign text).
 
-Author-constructed filler carries the same author-imagination bias as
-evals/detection corpus cases; this is a mechanism probe, not a corpus claim.
+Author-constructed filler defines this mechanism probe's input scope.
 """
 
 from __future__ import annotations
@@ -223,7 +222,7 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
 
     report: dict[str, Any] = {
         "schema_version": 1,
-        "scope": "segment-and-aggregate input construction (NEXT-STEPS P1-3)",
+        "scope": "segment-and-aggregate Detector input construction",
         "configuration": {
             "capability": "prompt_injection_model",
             "threshold": _THRESHOLD,

@@ -1,6 +1,6 @@
 # Agent Guardrail
 
-**面向 AI Agent 的可解释 Policy Analyzer 与 Enforcement Gateway。**
+**面向 AI Agent 的可解释安全规则分析与执行控制框架。**
 
 [English](README.md) | 简体中文
 
@@ -9,61 +9,60 @@
 [![Status](https://img.shields.io/badge/status-alpha-f59e0b)](docs/roadmap.md)
 [![License](https://img.shields.io/badge/license-MIT-22c55e)](LICENSE)
 
-Agent Guardrail 可以不写 YAML 直接运行有界 Detector，也可以把严格 YAML Policy 编译为不可变 MatchPlan，
-对跨 Event 行为返回可解释 Decision。两种模式都提供框架无关 SDK；Gateway 还会在具体模型与工具执行检查点
-强制落实 Decision。
+部署者接入内容检测组件并编写安全规则。Agent Guardrail 读取 Agent 运行过程中的消息、模型调用、工具调用和
+工具结果，根据规则给出允许、记录或阻断结果，并在模型或工具真正执行前以及输出交给 Agent 前落实结果。
 
-项目聚焦三类资产：**用户数据、用户意图和用户资源**。Detector 命中只是证据，不会单独成为安全结论；
-Policy 还需要把这些事实与可信的 source、destination 和 authorization 语境组合。
+框架保证规则按照固定方式加载和执行，并保证调用前阻断能够停止受保护的操作。内容检测的准确度取决于所选
+检测组件；实际安全效果取决于应用采用的具体规则和真实工作负载。
 
-> **项目状态 — v0.1.0 alpha。** 直接 Detector SDK、Event/Policy SDK、Core Runtime、Inline Wrapper、
-> Provider-neutral Adapter 合同、OpenAI Chat/Responses 与 Anthropic Messages 流式 Gateway、MCP Gateway、跨模型/工具边界共享的
-> 可选内存 task session 和远程 Core 路径已经实现并通过测试。应用明确只供单用户使用；它不是完整
-> Sandbox 或持久化/分布式 Session 服务，也不建模用户目录、租户或数据所有权。
+> **项目状态 — v0.1.0 alpha。** 程序化内容检测接口、规则接口、模型调用代理、基于 MCP 标准协议的工具调用
+> 代理、流式输出检查、单个任务的内存执行记录，以及独立部署的规则分析服务已经实现并通过测试。MCP 用于
+> Agent 调用外部工具。当前部署模型服务一个用户；宿主基础设施提供进程隔离、持久化状态、身份和资源限制。
 
-## 为什么使用 Agent Guardrail？
+## Agent Guardrail 提供什么？
 
-- **分析与可执行边界。** SDK 用户自行决定 Decision 的执行位置；Gateway 会在模型/工具调用前以及输出释放前
-  实施阻断。
-- **唯一、可审计的 Policy 链。** 严格 `version: 3` YAML 进入 `MatchPlan → AnalysisReport → Decision`，
-  不存在第二套生产解释器。
-- **Policy 不是可执行载荷。** YAML 不能 import Python、注册 callback、选择文件或网络 endpoint，也不能
-  获得任意 I/O 权限。
-- **类型化 Trace 与显式 Relation。** Message、ModelCall、ToolCallProposal、实际 ToolCall 和 ToolResult
-  都是不可变 Event；时间先后不会被静默当作 provenance。
-- **部署方拥有 capability。** 模型、规则集、进程和凭据由部署选择，Policy 只能看到审查过的 capability
-  名称与有界参数。
-- **默认脱敏。** Finding、Violation、Error 和可选 Audit 保存结构化遮罩证据，不保存原始 Secret、PII
-  或 prompt。
+- **分析与执行边界。** 应用可以自行调用规则分析；代理服务可以在模型或工具调用前以及输出释放前实施阻断。
+- **统一的规则执行路径。** 严格的 YAML 配置会生成一份不可变的内部执行计划，所有允许、记录和阻断结果都由
+  同一路径产生。
+- **纯数据规则配置。** YAML 只能选择部署者预先注册的检测和判断能力；实现代码、文件、进程、网络地址和
+  访问权限始终由部署代码持有。
+- **结构化执行记录。** 消息、模型调用、模型建议的工具调用、实际工具调用和工具结果都保存为不可变记录；
+  显式连接描述某条早期记录如何产生或影响后续操作，时间顺序只描述先后关系。
+- **部署者选择检测能力。** 模型、规则集、外部进程和凭据由部署者配置，安全规则只能使用已注册的名称和
+  有界参数。
+- **脱敏证据。** 命中结果、违规记录、错误和审计记录保存结构化遮罩信息。
 
 ## 架构
 
 ```mermaid
 flowchart LR
-    A[Agent 或 Client] --> B[Event SDK / Model Provider / MCP Adapter]
-    A --> I[直接 Detector SDK]
-    B --> C[EnforcementSession]
-    C -->|PendingTrace| D[Embedded Runtime 或 Remote Core]
-    D --> E[Policy v3 → MatchPlan → SnapshotMatcher]
-    E --> J[共享有界 Detector 执行器]
-    I --> J
-    J -->|脱敏 fact| I
-    E -->|AnalysisReport| F[Decision Analyzer]
-    F -->|allow / log / block| C
-    C -->|调用前 allow / 输出释放| G[LLM 或 Tool 边界]
-    C -->|脱敏 Violation| H[(Audit)]
+    A[Agent 或应用] --> B[接入接口或协议转换]
+    B --> C[调用与输出检查点]
+    C --> D[规则分析]
+    D --> E[已注册的检测和条件判断组件]
+    D -->|允许 / 记录 / 阻断| C
+    C -->|允许后执行| F[模型或外部工具]
+    C --> G[(脱敏审计记录)]
+    A --> H[直接内容检测接口]
+    H --> E
 ```
 
-Policy 描述语义 Event 与 Relation，不绑定执行位置。Gateway Adapter 将 Provider 流量转换为这些 Event，
-并在四个执行检查点实施 Decision：
+安全规则读取结构化执行记录以及记录之间的明确联系。模型和工具代理把外部协议转换成统一记录，并在四个
+位置检查规则。下面四个英文名称是代码中的接入点，分别表示模型调用前、模型输出释放前、工具调用前和工具
+结果释放前：
 
 ```text
 before_model_call → LLM → before_model_output_release
 before_tool_call  → Tool → before_tool_output_release
 ```
 
-分析始终读取已提交 Trace 加完整 pending Event batch。allow/log 会原子提交整批 Event；block 会丢弃原始
-pending Event，只提交脱敏 Decision Event。
+每次分析都读取已经确认的执行历史和当前待检查的完整操作。允许和记录会一次性保存当前操作；阻断会保存
+脱敏结果，并丢弃当前操作中的原始内容。
+
+技术文档和 API 使用以下名称：`Policy` 表示 YAML 安全规则，`Detector` 表示内容检测组件，`Event` 表示一条
+结构化执行记录，`Relation` 表示两条记录之间明确的产生或影响关系，`Decision` 表示允许、记录或阻断结果，
+`Trace` 表示一个任务的连续执行历史，`Gateway` 表示位于 Agent 与模型或工具服务之间的代理，`Core` 表示
+可以独立部署的规则分析服务，`capability` 表示规则可以引用的已注册检测或条件判断能力。
 
 ## 快速开始
 
@@ -84,11 +83,11 @@ llm executions: 1
 send_email executions: 0
 ```
 
-模型提出了包含 Secret 的 ToolCall，但受保护的邮件工具完全没有执行。
+输出记录一次模型调用；规则阻断包含密钥的工具调用建议后，邮件工具执行次数为零。
 
-## Policy 是数据，不是代码
+## 使用 YAML 配置安全规则
 
-下面的 Policy 会在 `send_email` 参数包含 Secret 时阻断 ToolCall：
+代码和文档使用 `Policy` 表示 YAML 安全规则。下面的规则会在 `send_email` 的参数包含密钥时阻断工具调用：
 
 ```yaml
 version: 3
@@ -195,9 +194,10 @@ async with Client("http://127.0.0.1:8080/v1/mcp", cache=None) as client:
 生命周期和协议细节见[接入指南](docs/guides/integration.md)与
 [Gateway 协议参考](docs/reference/gateway-protocol.md)。
 
-## Capability
+## 检测与条件判断能力
 
-默认 `local` Registry 不下载模型，发布：
+本节中的“能力”表示部署者注册的检测组件或条件判断组件；表格中的名称是规则文件使用的固定标识。默认
+`local` 配置使用本地确定性组件：
 
 - Detector：`secrets`、`pii`、`prompt_injection`、`unicode_security`、
   `python_ast_ipython`、`hidden_content`。
@@ -215,13 +215,24 @@ async with Client("http://127.0.0.1:8080/v1/mcp", cache=None) as client:
 | `promptguard2` | `prompt_injection_model` | 仅 PromptGuard 2（无 presidio/semgrep/yara），用于 eval 隔离与轻量部署 |
 | 显式注入 | `is_similar` 与 `prompt_injection_judge` | 部署选择的 embedding / LLM judge backend（均为 `adapter_only`） |
 
-真实 `prompt_injection_model` backend 当前只是 `baseline`，不是完整防御：锁定的 BIPIA/NotInject 公开
-评测暴露出攻击召回低和明显过度防御。`is_similar` 与 `prompt_injection_judge` 仍为 `adapter_only`，因为
-真实外部 embedding / LLM judge 服务尚未达到 verified。所有 capability 的准确、非营销状态只以[Capability 状态矩阵](docs/capability-status.yaml)
-为准；可复现 Detector 评测位于 [`evals/prompt_injection`](evals/prompt_injection/README.md)。分策略决策点
-评测位于 [`evals/detection`](evals/detection/README.md)，给出诚实的分轴混淆矩阵，含预注册的 release 轴 gate。
+真实 `prompt_injection_model` backend 当前状态为 `baseline`。锁定的公开语料测量其检测特性，包括盲区和
+过度防御。`is_similar` 与 `prompt_injection_judge` 当前状态为 `adapter_only`，各项 capability 的交付状态与
+验证范围记录在[Capability 状态矩阵](docs/capability-status.yaml)中。可复现的第三方 Detector 特性评估位于
+[`evals/prompt_injection`](evals/prompt_injection/README.md)。
 
-## 部署 Profile
+验证证据具有明确范围：
+
+| 证据 | 范围 |
+| --- | --- |
+| 单元测试与集成测试 | 规则加载与匹配、允许/记录/阻断结果、调用检查点、输出释放、故障处理，以及调用前阻断后受保护操作的执行次数为零 |
+| 检测组件特性评估 | 指定检测组件在锁定版本语料上的召回率、误报率和可用阈值 |
+| 能力状态矩阵 | 每个检测组件和条件判断组件的交付状态与验证范围 |
+
+仓库当前发布检测组件的分类指标。具体规则集与真实 Agent 部署负责各自工作负载的安全和效用指标。
+
+## 部署组件组合
+
+下文的 profile 表示一组预先命名的检测组件和依赖配置。
 
 ### 默认本地 Profile
 

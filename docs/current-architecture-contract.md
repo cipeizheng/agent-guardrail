@@ -2,7 +2,7 @@
 
 > 状态：日常实现的唯一架构合同，只描述当前事实、不可破坏约束和明确范围。架构历史只存在于 Git，
 > 不属于实现输入。
-> 最后核对：2026-08-31，版本 `0.1.0`。
+> 最后核对：2026-09-01，版本 `0.1.0`。
 
 ## 1. 当前生产链
 
@@ -61,7 +61,8 @@ strict version: 3 YAML → AuthorPolicy → immutable MatchPlan
 
 ## 3. 安全对象与上下文
 
-- 核心资产：用户数据、用户意图、用户资源；威胁使用 `source → transform → sink` 描述。
+- 规则可建模的对象包括用户数据、用户意图和用户资源；执行路径描述信息来自哪里、经过什么处理以及最终
+  发送到哪里或触发什么操作。
 - `FlowSecurityContext` 的 trust/sensitivity/destination/authorization 只能经 Session/PendingTrace
   专用通道注入，非 unknown 事实必须带允许的 authority。
 - `EventSecurityFacts` 与 `FlowSecurityContext` 不自动互相复制：前者描述一个 Event payload 的来源可信度并
@@ -154,6 +155,9 @@ default-deny egress、宿主隔离或资源配额。
 - Registry descriptor、MatchPlan linking 和 Decision evidence 路径通过；
 - README、专项文档、roadmap 和 capability 状态同步；
 - 项目质量门通过。
+
+验证证据按对象归属：分类指标描述指定检测组件与固定语料；规则与代理服务测试描述执行合同；具体规则集与
+真实 Agent 部署使用各自工作负载的安全和效用指标。
 
 外部模型/服务的 adapter 测试只证明接入合同；在真实后端 smoke/eval 完成前状态必须是 `adapter_only`。
 

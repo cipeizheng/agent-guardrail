@@ -45,8 +45,6 @@ def classify_corpus(benchmark_id: str, dataset_id: str) -> str:
 
     if benchmark_id == "notinject":
         return "benign"
-    if benchmark_id == "ajben":  # AgentDojo flow-axis benign mirrors
-        return "benign"
     if benchmark_id.startswith("agentdojo") or benchmark_id == "ajatk":
         return "style_detectable"
     return _CORPUS_CLASSES.get((benchmark_id, dataset_id), "unclassified")
