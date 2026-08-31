@@ -30,6 +30,9 @@ class GatewaySettings(BaseSettings):
     upstream_auth_mode: Literal["server_managed", "pass_through"] = "server_managed"
     upstream_api_key: SecretStr | None = None
     upstream_allowed_hosts: tuple[str, ...] = ()
+    anthropic_upstream_base_url: str | None = None
+    anthropic_upstream_api_key: SecretStr | None = None
+    anthropic_upstream_allowed_hosts: tuple[str, ...] = ()
     gateway_api_keys: tuple[SecretStr, ...] = ()
     audit_path: Path | None = None
     max_request_bytes: int = Field(default=1_048_576, ge=1_024, le=16_777_216)
@@ -39,6 +42,10 @@ class GatewaySettings(BaseSettings):
         le=67_108_864,
     )
     max_trace_events: int = Field(default=16, ge=2, le=1_000)
+    task_sessions_required: bool = False
+    task_session_max_sessions: int = Field(default=128, ge=1, le=10_000)
+    task_session_ttl_seconds: float = Field(default=1_800.0, gt=0, le=86_400)
+    task_session_max_trace_events: int = Field(default=256, ge=2, le=1_000)
     upstream_timeout_seconds: float = Field(default=60.0, gt=0, le=600)
     detector_profile: (
         Literal["local", "full_deberta", "full_promptguard2", "promptguard2"]
@@ -63,10 +70,10 @@ class GatewaySettings(BaseSettings):
     port: int = Field(default=8080, ge=1, le=65_535)
     log_level: Literal["critical", "error", "warning", "info", "debug", "trace"] = "info"
 
-    @field_validator("upstream_base_url")
+    @field_validator("upstream_base_url", "anthropic_upstream_base_url")
     @classmethod
     def validate_upstream_url(cls, value: str | None) -> str | None:
-        if value is None:
+        if value is None or value == "":
             return None
         parsed = urlsplit(value)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
@@ -96,6 +103,16 @@ class GatewaySettings(BaseSettings):
                 raise ValueError("core_api_key must be non-blank and trimmed")
         return value
 
+    @field_validator(
+        "upstream_api_key",
+        "anthropic_upstream_api_key",
+        "mcp_upstream_api_key",
+        mode="before",
+    )
+    @classmethod
+    def normalize_optional_secret(cls, value: object) -> object:
+        return None if value == "" else value
+
     @field_validator("mcp_upstream_url")
     @classmethod
     def validate_mcp_upstream_url(cls, value: str | None) -> str | None:
@@ -108,7 +125,11 @@ class GatewaySettings(BaseSettings):
             raise ValueError("mcp_upstream_url cannot contain credentials, query, or fragment")
         return value
 
-    @field_validator("upstream_allowed_hosts", "mcp_upstream_allowed_hosts")
+    @field_validator(
+        "upstream_allowed_hosts",
+        "anthropic_upstream_allowed_hosts",
+        "mcp_upstream_allowed_hosts",
+    )
     @classmethod
     def normalize_allowed_hosts(cls, values: tuple[str, ...]) -> tuple[str, ...]:
         normalized = tuple(value.strip().lower() for value in values)
@@ -162,6 +183,11 @@ class GatewaySettings(BaseSettings):
                     else ()
                 ),
                 *(
+                    (self.anthropic_upstream_api_key.get_secret_value(),)
+                    if self.anthropic_upstream_api_key is not None
+                    else ()
+                ),
+                *(
                     (self.mcp_upstream_api_key.get_secret_value(),)
                     if self.mcp_upstream_api_key is not None
                     else ()
@@ -169,7 +195,11 @@ class GatewaySettings(BaseSettings):
             ]
             if core_credential in other_credentials:
                 raise ValueError("core_api_key must be a dedicated service credential")
-        if self.upstream_base_url is None and self.mcp_upstream_url is None:
+        if (
+            self.upstream_base_url is None
+            and self.anthropic_upstream_base_url is None
+            and self.mcp_upstream_url is None
+        ):
             raise ValueError("at least one LLM or MCP upstream must be configured")
         if self.upstream_base_url is not None:
             host = urlsplit(self.upstream_base_url).hostname
@@ -179,6 +209,22 @@ class GatewaySettings(BaseSettings):
                 raise ValueError("upstream_base_url host is not in upstream_allowed_hosts")
             if self.upstream_auth_mode == "server_managed" and self.upstream_api_key is None:
                 raise ValueError("upstream_api_key is required in server_managed mode")
+        if self.anthropic_upstream_base_url is not None:
+            anthropic_host = urlsplit(self.anthropic_upstream_base_url).hostname
+            if anthropic_host is None:
+                raise ValueError("anthropic_upstream_base_url must contain a hostname")
+            if (
+                self.anthropic_upstream_allowed_hosts
+                and anthropic_host.lower() not in self.anthropic_upstream_allowed_hosts
+            ):
+                raise ValueError(
+                    "anthropic_upstream_base_url host is not in "
+                    "anthropic_upstream_allowed_hosts"
+                )
+            if self.anthropic_upstream_api_key is None:
+                raise ValueError(
+                    "anthropic_upstream_api_key is required when Anthropic is configured"
+                )
         if self.mcp_upstream_url is not None:
             mcp_host = urlsplit(self.mcp_upstream_url).hostname
             if mcp_host is None:
@@ -232,3 +278,9 @@ class GatewaySettings(BaseSettings):
         if self.upstream_base_url is None:
             raise RuntimeError("model upstream is not configured")
         return self.upstream_base_url + "responses"
+
+    @property
+    def anthropic_messages_url(self) -> str:
+        if self.anthropic_upstream_base_url is None:
+            raise RuntimeError("Anthropic upstream is not configured")
+        return self.anthropic_upstream_base_url + "v1/messages"

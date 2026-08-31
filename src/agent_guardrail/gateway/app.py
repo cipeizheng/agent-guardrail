@@ -9,7 +9,6 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any
-from uuid import uuid4
 
 import httpx
 from fastapi import FastAPI
@@ -17,6 +16,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.requests import Request
 from starlette.responses import Response
 
+from agent_guardrail.adapters.anthropic import AnthropicAdapter
 from agent_guardrail.adapters.openai import OpenAIAdapter, OpenAIResponsesAdapter
 from agent_guardrail.adapters.protocols import (
     ModelProviderAdapter,
@@ -43,12 +43,19 @@ from agent_guardrail.gateway.config import GatewaySettings
 from agent_guardrail.gateway.http import RequestReadError, read_json_body
 from agent_guardrail.gateway.mcp import MCPGateway
 from agent_guardrail.gateway.mcp_upstream import MCPUpstream
+from agent_guardrail.gateway.task_sessions import (
+    TASK_SESSION_HEADER,
+    TaskSessionError,
+    TaskSessionStore,
+    relink_observed_tool_results,
+)
 from agent_guardrail.gateway.upstream import (
+    AnthropicUpstream,
     ModelUpstream,
     UpstreamError,
     validate_upstream_path,
 )
-from agent_guardrail.models import Decision, SecurityDestination, Trace
+from agent_guardrail.models import Decision, SecurityDestination
 from agent_guardrail.runtime import GuardrailRuntime, RuntimeNotReadyError
 from agent_guardrail.runtime.remote import RemoteGuardrailRuntime
 
@@ -64,9 +71,12 @@ class GatewayServices:
     runtime: DecisionRuntime
     chat_adapter: OpenAIAdapter
     responses_adapter: OpenAIResponsesAdapter
+    anthropic_adapter: AnthropicAdapter
     normalizer: InputNormalizer
     upstream: ModelUpstream | None
+    anthropic_upstream: AnthropicUpstream | None
     mcp: MCPGateway
+    task_sessions: TaskSessionStore
     audit: AuditSink
     authenticator: GatewayAuthenticator
 
@@ -136,10 +146,22 @@ def create_app(
         if settings.upstream_base_url is not None
         else None
     )
+    anthropic_upstream = (
+        AnthropicUpstream(client=http_client, settings=settings)
+        if settings.anthropic_upstream_base_url is not None
+        else None
+    )
     mcp_upstream = (
         MCPUpstream(client=http_client, settings=settings)
         if settings.mcp_upstream_url is not None
         else None
+    )
+    task_sessions = TaskSessionStore(
+        analyzer=active_runtime,
+        audit=active_audit,
+        max_sessions=settings.task_session_max_sessions,
+        ttl_seconds=settings.task_session_ttl_seconds,
+        max_trace_events=settings.task_session_max_trace_events,
     )
     mcp_gateway = MCPGateway(
         settings=settings,
@@ -147,15 +169,19 @@ def create_app(
         upstream=mcp_upstream,
         audit=active_audit,
         authenticator=authenticator,
+        task_sessions=task_sessions,
     )
     services = GatewayServices(
         settings=settings,
         runtime=active_runtime,
         chat_adapter=OpenAIAdapter(),
         responses_adapter=OpenAIResponsesAdapter(),
+        anthropic_adapter=AnthropicAdapter(),
         normalizer=InputNormalizer(max_candidates=settings.max_trace_events),
         upstream=model_upstream,
+        anthropic_upstream=anthropic_upstream,
         mcp=mcp_gateway,
+        task_sessions=task_sessions,
         audit=active_audit,
         authenticator=authenticator,
     )
@@ -167,6 +193,7 @@ def create_app(
             await active_runtime.start()
             yield
         finally:
+            await task_sessions.clear()
             if owns_http_client:
                 await http_client.aclose()
             await active_runtime.close()
@@ -209,6 +236,46 @@ def create_app(
             {"version": info.version, "content_hash": info.content_hash},
         )
 
+    @app.post("/v1/guardrail/task-sessions")
+    async def create_task_session(request: Request) -> JSONResponse:
+        authentication_error = _authenticate(services, request)
+        if authentication_error is not None:
+            return authentication_error
+        try:
+            task = await services.task_sessions.create()
+        except TaskSessionError as exc:
+            return _error_response(
+                503,
+                error_type="guardrail_unavailable",
+                code=exc.code,
+                message=str(exc),
+            )
+        return JSONResponse(
+            {
+                "session_token": task.token,
+                "trace_id": task.trace_id,
+                "expires_in_seconds": services.task_sessions.ttl_seconds,
+            },
+            headers={"cache-control": "no-store"},
+        )
+
+    @app.delete("/v1/guardrail/task-sessions")
+    async def delete_task_session(request: Request) -> Response:
+        authentication_error = _authenticate(services, request)
+        if authentication_error is not None:
+            return authentication_error
+        try:
+            token = _required_single_header(request, TASK_SESSION_HEADER)
+            await services.task_sessions.delete(token)
+        except TaskSessionError as exc:
+            return _error_response(
+                400,
+                error_type="invalid_request_error",
+                code=exc.code,
+                message=str(exc),
+            )
+        return Response(status_code=204)
+
     @app.post("/v1/openai/chat/completions")
     async def chat_completions(request: Request) -> Response:
         return await _handle_model_request(request, services, services.chat_adapter)
@@ -224,6 +291,24 @@ def create_app(
     @app.post("/v1/chat/completions")
     async def chat_completions_sdk_compatible(request: Request) -> Response:
         return await _handle_model_request(request, services, services.chat_adapter)
+
+    @app.post("/v1/anthropic/messages")
+    async def anthropic_messages(request: Request) -> Response:
+        return await _handle_model_request(
+            request,
+            services,
+            services.anthropic_adapter,
+            anthropic_authentication=True,
+        )
+
+    @app.post("/v1/messages")
+    async def anthropic_sdk_compatible(request: Request) -> Response:
+        return await _handle_model_request(
+            request,
+            services,
+            services.anthropic_adapter,
+            anthropic_authentication=True,
+        )
 
     for route_path, provider_adapter in (model_routes or {}).items():
         _validate_model_route(route_path, provider_adapter)
@@ -268,12 +353,30 @@ async def _handle_model_request(
     request: Request,
     services: GatewayServices,
     adapter: Any,
+    *,
+    anthropic_authentication: bool = False,
 ) -> Response:
-    client_authorization_or_error = _authenticate_with_value(services, request)
+    client_authorization_or_error = _authenticate_with_value(
+        services,
+        request,
+        anthropic=anthropic_authentication,
+    )
     if isinstance(client_authorization_or_error, JSONResponse):
         return client_authorization_or_error
-    trace_id = f"trc_{uuid4().hex}"
-    if services.upstream is None:
+    try:
+        session = await _resolve_enforcement_session(request, services)
+    except TaskSessionError as exc:
+        return _error_response(
+            400,
+            error_type="invalid_request_error",
+            code=exc.code,
+            message=str(exc),
+        )
+    trace_id = session.trace.id
+    active_upstream: ModelUpstream | None = (
+        services.anthropic_upstream if anthropic_authentication else services.upstream
+    )
+    if active_upstream is None:
         return _error_response(
             503,
             error_type="upstream_error",
@@ -289,6 +392,10 @@ async def _handle_model_request(
         provider_request = adapter.parse_request(raw_request)
         canonical_request = adapter.request_to_canonical(provider_request)
         normalized_request = services.normalizer.normalize_model_call(canonical_request)
+        normalized_request = relink_observed_tool_results(
+            normalized_request,
+            trace=session.trace,
+        )
         upstream_payload = adapter.request_payload(provider_request)
         if not isinstance(upstream_payload, dict):
             raise ProviderAdapterError(
@@ -340,6 +447,15 @@ async def _handle_model_request(
             trace_id=trace_id,
             checkpoint=EnforcementCheckpoint.BEFORE_MODEL_CALL.value,
         )
+    except TaskSessionError as exc:
+        return _error_response(
+            400,
+            error_type="invalid_request_error",
+            code=exc.code,
+            message=str(exc),
+            trace_id=trace_id,
+            checkpoint=EnforcementCheckpoint.BEFORE_MODEL_CALL.value,
+        )
     except Exception:
         return _error_response(
             400,
@@ -350,11 +466,6 @@ async def _handle_model_request(
             checkpoint=EnforcementCheckpoint.BEFORE_MODEL_CALL.value,
         )
 
-    session = EnforcementSession(
-        analyzer=services.runtime,
-        trace=Trace(id=trace_id, max_events=services.settings.max_trace_events),
-        audit=services.audit,
-    )
     try:
         pre_decision = await session.submit_candidates(
             normalized_request.candidates,
@@ -376,7 +487,7 @@ async def _handle_model_request(
 
     if streaming:
         try:
-            upstream_response = await services.upstream.open_stream(
+            upstream_response = await active_upstream.open_stream(
                 adapter.upstream_path,
                 upstream_payload,
                 client_authorization=client_authorization_or_error,
@@ -416,7 +527,7 @@ async def _handle_model_request(
         )
 
     try:
-        raw_response = await services.upstream.complete(
+        raw_response = await active_upstream.complete(
             adapter.upstream_path,
             upstream_payload,
             client_authorization=client_authorization_or_error,
@@ -593,11 +704,48 @@ def _authenticate(services: GatewayServices, request: Request) -> JSONResponse |
     return result if isinstance(result, JSONResponse) else None
 
 
+async def _resolve_enforcement_session(
+    request: Request,
+    services: GatewayServices,
+) -> EnforcementSession:
+    values = request.headers.getlist(TASK_SESSION_HEADER)
+    if len(values) > 1:
+        raise TaskSessionError(
+            "task_session_invalid",
+            "The Gateway task session header must occur at most once.",
+        )
+    if not values:
+        if services.settings.task_sessions_required:
+            raise TaskSessionError(
+                "task_session_required",
+                "A Gateway task session is required for this request.",
+            )
+        return services.task_sessions.ephemeral(
+            max_trace_events=services.settings.max_trace_events,
+        ).enforcement
+    return (await services.task_sessions.get(values[0])).enforcement
+
+
+def _required_single_header(request: Request, name: str) -> str:
+    values = request.headers.getlist(name)
+    if len(values) != 1 or not values[0]:
+        raise TaskSessionError(
+            "task_session_invalid",
+            "The Gateway task session header must occur exactly once.",
+        )
+    return values[0]
+
+
 def _authenticate_with_value(
     services: GatewayServices,
     request: Request,
+    *,
+    anthropic: bool = False,
 ) -> str | None | JSONResponse:
     try:
+        if anthropic:
+            services.authenticator.authenticate_anthropic(request)
+            return None
         return services.authenticator.authenticate(request)
     except GatewayAuthenticationError:
         return _error_response(

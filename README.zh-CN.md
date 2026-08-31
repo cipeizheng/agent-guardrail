@@ -17,9 +17,9 @@ Agent Guardrail 可以不写 YAML 直接运行有界 Detector，也可以把严�
 Policy 还需要把这些事实与可信的 source、destination 和 authorization 语境组合。
 
 > **项目状态 — v0.1.0 alpha。** 直接 Detector SDK、Event/Policy SDK、Core Runtime、Inline Wrapper、
-> Provider-neutral Adapter 合同、OpenAI Chat/Responses 流式 Gateway、无状态 MCP Gateway 和远程 Core
-> 路径已经实现并通过测试。应用明确只供单用户使用；它不是完整 Sandbox 或持久 Session 服务，也不建模
-> 用户目录、租户或数据所有权。
+> Provider-neutral Adapter 合同、OpenAI Chat/Responses 与 Anthropic Messages 流式 Gateway、MCP Gateway、跨模型/工具边界共享的
+> 可选内存 task session 和远程 Core 路径已经实现并通过测试。应用明确只供单用户使用；它不是完整
+> Sandbox 或持久化/分布式 Session 服务，也不建模用户目录、租户或数据所有权。
 
 ## 为什么使用 Agent Guardrail？
 
@@ -133,8 +133,8 @@ binding、relation、quantifier、派生值、Finding、预算和可信安全参
 | 直接 Detector SDK | 任意 Python 代码需要在某个插入点获得检测 fact | 无 YAML；有界 text/JSON/batch 检测，动作由应用决定 |
 | Event/Policy SDK | 任意 Python Agent/Framework 能暴露语义 Event | 无需框架专用 Adapter；应用选择插入点并携带显式 `EventRef` Relation |
 | Inline Wrapper | 可以注入 LLM 与 Tool 接口 | 中介经过共享任务级 Session 的调用 |
-| Model Provider Gateway | OpenAI Chat/Responses 或部署 Adapter | 完整请求检查；非流式原子输出检查；不可撤回的前缀检查 SSE |
-| MCP Gateway | Tool 来自固定 MCP Server | 每个无状态 `tools/call` 都经过执行前后检查 |
+| Model Provider Gateway | OpenAI Chat/Responses、Anthropic Messages 或部署 Adapter | 完整请求检查；非流式原子输出检查；不可撤回的前缀检查 SSE；可选共享任务 Trace |
+| MCP Gateway | Tool 来自固定 MCP Server | 每个 `tools/call` 都经过检查；经校验的 proposal 引用可在执行前连接模型 Trace |
 | Remote Core | Policy/Detector 资产需要与边缘流量隔离 | Gateway 持有流量和副作用，Core 分析完整 `PendingTrace` |
 | Docker Compose | 自托管 Core + Gateway | 只读容器、Core 私网、Provider/Core 凭据隔离 |
 
@@ -168,6 +168,20 @@ client = OpenAI(
 `stream=False/True`。Streaming 只释放已经检查的累计文本前缀与完整验证的 Tool arguments；后续 block
 不能撤回早先窗口。需要完整输出原子判断时使用 `stream=False`。可信部署可在 `/v1/providers/...` 注册非
 OpenAI wire Adapter，客户端仍不能选择上游 URL。
+
+Anthropic Client 使用 Gateway 根地址：
+
+```python
+from anthropic import Anthropic
+
+client = Anthropic(
+    api_key="gateway-key",
+    base_url="http://127.0.0.1:8080",
+)
+```
+
+当前覆盖 Messages 文本、client `tools/tool_use/tool_result` 及流式事件；`mcp_servers`、Anthropic server
+tools、thinking 和多模态会失败关闭，避免服务端工具执行绕过本项目的 MCP Enforcement。
 
 MCP Python SDK v2：
 
@@ -257,7 +271,7 @@ Core 镜像包含完整 Detector profile，因此体积较大。在本地环境�
 
 Agent Guardrail 只能中介实际经过 Wrapper 或 Gateway 的流量。当前不提供：
 
-- 跨请求 Session 状态或 Policy 热更新；
+- 持久化/分布式 Session、自动 history cursor 或 Policy 热更新；
 - 对直接 Shell、函数、文件系统或任意 HTTP 的 Sandbox/拦截；
 - Web 管理界面或分布式 Policy 服务；
 - Moderation、copyright 或 OCR capability。
@@ -282,7 +296,7 @@ Detector 命中不能证明恶意意图或授权。生产 Rule 应当把 Detecto
 | [架构概览](docs/overview.md) | 理解 Event、MatchPlan、Runtime 和 Enforcement |
 | [Policy 作者指南](docs/guides/policy-authoring.md) | 编写严格生产 YAML Policy |
 | [Capability 参考](docs/reference/capabilities.md) | 使用 Detector、Predicate 与可选 backend |
-| [接入指南](docs/guides/integration.md) | 接入 Agent、OpenAI Client 或 MCP Client |
+| [接入指南](docs/guides/integration.md) | 接入 Agent、OpenAI/Anthropic Client 或 MCP Client |
 | [运行指南](docs/guides/operations.md) | 配置 Secret、profile、Docker、Audit 和 Health |
 | [安全模型](docs/security-model.md) | 审查资产、信任边界和 T01–T10 |
 | [Roadmap](docs/roadmap.md) | 查看规划且不与已交付行为混淆 |

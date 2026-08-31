@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from typing import cast
-from uuid import uuid4
 
 from fastapi.responses import JSONResponse, Response
 from pydantic import JsonValue
@@ -31,12 +30,22 @@ from agent_guardrail.gateway.mcp_upstream import (
     MCPUpstreamError,
     MCPUpstreamResponse,
 )
+from agent_guardrail.gateway.task_sessions import (
+    TASK_SESSION_HEADER,
+    TOOL_PROPOSAL_HEADER,
+    TaskSession,
+    TaskSessionError,
+    TaskSessionStore,
+)
 from agent_guardrail.models import (
+    CandidateEvent,
+    CandidateRelation,
     Decision,
     EventKind,
     EventOrigin,
+    RelationKind,
     SecurityDestination,
-    Trace,
+    ToolCall,
 )
 from agent_guardrail.runtime import PolicyAnalyzer
 
@@ -52,12 +61,14 @@ class MCPGateway:
         upstream: MCPUpstream | None,
         audit: AuditSink,
         authenticator: GatewayAuthenticator,
+        task_sessions: TaskSessionStore,
     ) -> None:
         self.settings = settings
         self.runtime = runtime
         self.upstream = upstream
         self.audit = audit
         self.authenticator = authenticator
+        self.task_sessions = task_sessions
         self.adapter = MCPAdapter()
 
     async def handle(self, http_request: Request) -> Response:
@@ -160,35 +171,82 @@ class MCPGateway:
         http_request: Request,
         client_authorization: str | None,
     ) -> Response:
-        trace_id = f"trc_{uuid4().hex}"
-        session = EnforcementSession(
-            analyzer=self.runtime,
-            trace=Trace(id=trace_id, max_events=self.settings.max_trace_events),
-            audit=self.audit,
-        )
-        tool_call = self.adapter.request_to_tool_call(request)
         try:
-            pre_decision = await session.submit(
+            task, persistent = await self._resolve_session(http_request)
+        except TaskSessionError as exc:
+            return self._rpc_error(
+                MCPAdapterError(
+                    code=exc.code,
+                    message=str(exc),
+                    rpc_code=INVALID_REQUEST,
+                    status_code=400,
+                    request_id=request.envelope.id,
+                )
+            )
+        session = task.enforcement
+        trace_id = session.trace.id
+        async with task.operation_lock:
+            try:
+                proposal_id = self._proposal_id(http_request, persistent=persistent)
+                tool_call = self.adapter.request_to_tool_call(request)
+                proposal_event_id: str | None = None
+                if proposal_id is not None:
+                    proposal_event_id = self._validated_proposal_event_id(
+                        session,
+                        proposal_id=proposal_id,
+                        tool_call=tool_call,
+                    )
+                    tool_call = tool_call.model_copy(update={"call_id": proposal_id})
+            except TaskSessionError as exc:
+                return self._rpc_error(
+                    MCPAdapterError(
+                        code=exc.code,
+                        message=str(exc),
+                        rpc_code=INVALID_REQUEST,
+                        status_code=400,
+                        request_id=request.envelope.id,
+                    )
+                )
+            pre_candidate = CandidateEvent(
+                key="mcp-tool-call",
                 kind=EventKind.TOOL_CALL,
                 payload=cast(dict[str, JsonValue], tool_call.model_dump(mode="json")),
-                metadata={"adapter": "mcp_gateway", "protocol_version": request.protocol_version},
+                metadata={
+                    "adapter": "mcp_gateway",
+                    "protocol_version": request.protocol_version,
+                },
                 origin=EventOrigin.CLIENT_ASSERTED,
-                security_context=session.security_context.with_enforcement_destination(
-                    SecurityDestination.EXTERNAL_TOOL
+                relations=(
+                    (
+                        CandidateRelation(
+                            source_event_id=proposal_event_id,
+                            kind=RelationKind.INFLUENCED_BY,
+                        ),
+                    )
+                    if proposal_event_id is not None
+                    else ()
                 ),
             )
-        except GuardrailUnavailable:
-            return self._guardrail_unavailable(
-                request,
-                trace_id,
-                EnforcementCheckpoint.BEFORE_TOOL_CALL,
-            )
-        if pre_decision.blocked:
-            return self._guardrail_blocked(
-                request,
-                pre_decision,
-                EnforcementCheckpoint.BEFORE_TOOL_CALL,
-            )
+            try:
+                pre_decision = await session.submit_candidates(
+                    (pre_candidate,),
+                    primary_key=pre_candidate.key,
+                    security_context=session.security_context.with_enforcement_destination(
+                        SecurityDestination.EXTERNAL_TOOL
+                    ),
+                )
+            except GuardrailUnavailable:
+                return self._guardrail_unavailable(
+                    request,
+                    trace_id,
+                    EnforcementCheckpoint.BEFORE_TOOL_CALL,
+                )
+            if pre_decision.blocked:
+                return self._guardrail_blocked(
+                    request,
+                    pre_decision,
+                    EnforcementCheckpoint.BEFORE_TOOL_CALL,
+                )
 
         try:
             upstream = await self._forward(request, http_request, client_authorization)
@@ -198,6 +256,8 @@ class MCPGateway:
                 request_id=request.envelope.id,
             )
             result = self.adapter.response_to_tool_result(parsed, request=request)
+            if proposal_id is not None:
+                result = result.model_copy(update={"call_id": proposal_id})
         except MCPUpstreamError as exc:
             return self._upstream_error(request, exc, trace_id=trace_id)
         except MCPAdapterError as exc:
@@ -233,6 +293,92 @@ class MCPGateway:
             media_type=upstream.media_type,
             headers={"x-guardrail-trace-id": trace_id},
         )
+
+    async def _resolve_session(
+        self,
+        request: Request,
+    ) -> tuple[TaskSession, bool]:
+        values = request.headers.getlist(TASK_SESSION_HEADER)
+        if len(values) > 1:
+            raise TaskSessionError(
+                "task_session_invalid",
+                "The Gateway task session header must occur at most once.",
+            )
+        if not values:
+            if self.settings.task_sessions_required:
+                raise TaskSessionError(
+                    "task_session_required",
+                    "A Gateway task session is required for this request.",
+                )
+            return (
+                self.task_sessions.ephemeral(
+                    max_trace_events=self.settings.max_trace_events,
+                ),
+                False,
+            )
+        return await self.task_sessions.get(values[0]), True
+
+    @staticmethod
+    def _proposal_id(request: Request, *, persistent: bool) -> str | None:
+        values = request.headers.getlist(TOOL_PROPOSAL_HEADER)
+        if len(values) > 1:
+            raise TaskSessionError(
+                "tool_proposal_invalid",
+                "The tool proposal header must occur at most once.",
+            )
+        if not values:
+            return None
+        proposal_id = values[0]
+        if (
+            not persistent
+            or not proposal_id
+            or proposal_id != proposal_id.strip()
+            or len(proposal_id) > 256
+        ):
+            raise TaskSessionError(
+                "tool_proposal_invalid",
+                "The tool proposal reference is invalid for this task session.",
+            )
+        return proposal_id
+
+    @staticmethod
+    def _validated_proposal_event_id(
+        session: EnforcementSession,
+        *,
+        proposal_id: str,
+        tool_call: ToolCall,
+    ) -> str:
+        matches = []
+        for event in session.trace.events:
+            if (
+                event.kind is not EventKind.TOOL_CALL_PROPOSAL
+                or event.origin is not EventOrigin.OBSERVED
+            ):
+                continue
+            proposal = ToolCall.model_validate(event.payload)
+            if proposal.call_id == proposal_id:
+                matches.append((event, proposal))
+        if len(matches) != 1:
+            raise TaskSessionError(
+                "tool_proposal_invalid",
+                "The tool proposal reference is missing, ambiguous, or not committed.",
+            )
+        event, proposal = matches[0]
+        if proposal.name != tool_call.name or proposal.arguments != tool_call.arguments:
+            raise TaskSessionError(
+                "tool_proposal_mismatch",
+                "The MCP tool call does not match its observed model proposal.",
+            )
+        if any(
+            candidate.kind is EventKind.TOOL_CALL
+            and ToolCall.model_validate(candidate.payload).call_id == proposal_id
+            for candidate in session.trace.events
+        ):
+            raise TaskSessionError(
+                "tool_proposal_replayed",
+                "The observed model proposal has already been executed.",
+            )
+        return event.id
 
     async def _forward(
         self,

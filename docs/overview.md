@@ -56,8 +56,10 @@ block：丢弃原始 pending Event，只提交脱敏 Decision Event
 ```
 
 Runtime 管理 Analyzer 生命周期；Adapter 只处理 Provider/Framework wire↔canonical 协议；Enforcement
-控制何时允许副作用；Gateway 组合 HTTP、认证、固定上游和请求级 Session。OpenAI Chat/Responses 以及可信
-部署注册的非 OpenAI Adapter 复用同一 InputNormalizer/Session/Runtime，不复制 Policy 执行链。
+控制何时允许副作用；Gateway 组合 HTTP、认证、固定上游以及请求级或显式任务级 Session。OpenAI
+Chat/Responses、Anthropic Messages 以及可信部署注册的其他 Adapter 复用同一
+InputNormalizer/Session/Runtime，不复制 Policy 执行链。Anthropic 仅映射 client tools；服务端 MCP/Tool
+执行不属于已中介流量并被内置 Adapter 拒绝。
 
 三种产品入口的职责不同：
 
@@ -94,6 +96,12 @@ handoff 等任意语义插入位置。`GuardrailRun` 是框架无关 SDK：应�
 精确来源只存在于类型化 `Event.relations`。Adapter/Enforcement 只能在掌握对应事实时建立
 `derived_from` 或 `influenced_by`；`precedes/immediately_precedes` 只由 sequence 得出，绝不自动生成
 Relation。
+
+单进程 Gateway task session 允许 Model 与 MCP 请求共享 Trace。可信 Host 用 opaque token 选择已有 task，
+并可把 provider `call_id` 作为专用 proposal 引用随 MCP 请求携带；Gateway 只有在同 task 内找到唯一已提交的
+observed proposal，且工具名/参数完全一致时，才建立 proposal→实际 ToolCall 的 `influenced_by`。显式
+Model history 中可唯一匹配的 MCP ToolResult 输入边同样重连到 observed ToolResult。该机制不从时间、名称
+相似或普通 payload 猜测 Relation，也不自动建立 source trust 或用户授权。
 
 ## 4. Snapshot 与 pending 分析
 
@@ -139,11 +147,12 @@ Streaming block/error 会隐藏当前未通过窗口并以脱敏 SSE error 终�
 也不能保证未来上下文不会改变对旧前缀的判断。需要完整输出原子保证时使用非流式模式。当前累计前缀重复
 分析，增量性能属于 P4。
 
-这些名称只属于 OpenAI/MCP Gateway 的执行检查点，不进入 Event、PendingTrace、Decision、Inline Wrapper
+这些名称只属于 Model/MCP Gateway 的执行检查点，不进入 Event、PendingTrace、Decision、Inline Wrapper
 或 YAML。编程式 SDK 只负责分析并返回 Decision；应用必须在真正副作用前检查 `blocked`。
 
-OpenAI 和 MCP Gateway 每个受保护 HTTP 请求创建独立 Session；Inline LLM 与 Tool Wrapper 则必须共享同一
-任务级 Session/Trace。Gateway 只能中介经过它的流量，Agent 直接 Shell/函数/HTTP 需要 Framework Hook、
+OpenAI、Anthropic 和 MCP Gateway 在没有 task token 时为每个受保护 HTTP 请求创建独立 Session；有效 token 时复用
+同一单用户任务级 Session/Trace。Inline LLM 与 Tool Wrapper 也必须共享任务级 Session/Trace。Gateway 的
+task state 只有单进程内存、TTL 和容量界限，不是持久化/分布式历史服务。Gateway 只能中介经过它的流量，Agent 直接 Shell/函数/HTTP 需要 Framework Hook、
 Sandbox 或网络代理。Guardrail 不拦截 syscall、进程、宿主文件系统或任意网络 egress；对应边界外威胁和
 所需强制控制见[安全模型的 Sandbox 责任矩阵](security-model.md#8-guardrail-无法替代的-sandbox-控制)。
 

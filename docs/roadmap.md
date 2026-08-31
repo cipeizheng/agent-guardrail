@@ -10,8 +10,8 @@
 | P0 | 直接 Detector SDK：不写 YAML，在任意代码位置调用 Detector | 已交付 |
 | P1 | Provider Adapter 标准化：Responses API，并证明不依赖 OpenAI wire format | 已交付 |
 | P2 | Streaming：定义并实现已释放内容不可撤回的保证 | 已交付 |
-| P3 | 跨事件安全语境：可信来源、Tool risk 与有用的 source→sink Rule | 下一阶段 |
-| P4 | 长 Session 与性能：避免历史反复扫描，再考虑跨 HTTP 状态 | 规划 |
+| P3 | 跨事件安全语境：可信来源、Tool risk 与有用的 source→sink Rule | 进行中 |
+| P4 | 长 Session 与性能：避免历史反复扫描并扩展单进程 task state | 部分交付 |
 | P5 | 部署工程：热加载、发布、SBOM 和可观测性 | 规划 |
 
 “已交付”只表示当前合同与测试覆盖的范围，不表示所有 T01–T10 路径完成，也不改变 capability 状态矩阵中
@@ -25,7 +25,9 @@ Detector 执行器。它只返回 fact，不返回 Decision，也不控制应用
 ### P1：Provider Adapter 标准化
 
 - `ModelProviderAdapter` 统一封闭 wire Schema、固定相对上游路径、canonical request/output 和流 decoder；
-- OpenAI Chat Completions 与 Responses API 使用同一个 InputNormalizer、Session、Runtime 和 Enforcement；
+- OpenAI Chat Completions/Responses 与 Anthropic Messages API 使用同一个 InputNormalizer、Session、Runtime
+  和 Enforcement；Anthropic 内置 Adapter 覆盖文本、client tool use/result、普通与 SSE 响应，并拒绝会
+  绕过 MCP Gateway 的 server-side MCP/Tool；
 - Responses 当前限 text/instructions/custom function/function output；隐藏历史、内置 Tool、background 和
   多模态后置；
 - 可信宿主可以在 `/v1/providers/...` 注册 Adapter，启动时拒绝路由覆盖与上游路径逃逸；
@@ -34,7 +36,8 @@ Detector 执行器。它只返回 fact，不返回 Decision，也不控制应用
 
 ### P2：Streaming
 
-- 支持 Chat 的 data-only SSE/`[DONE]` 与 Responses 的 named SSE/`response.completed`；
+- 支持 Chat 的 data-only SSE/`[DONE]`、Responses 的 named SSE/`response.completed` 与 Anthropic
+  `message_start/content_block/message_delta/message_stop`；
 - 每个文本窗口按累计 Canonical 前缀 tentative 检查，Tool arguments 完整 JSON/Schema/Policy 检查后才释放；
 - terminal event 对完整 output 再检查并只提交一个最终 Event；
 - block/error 隐藏当前未通过窗口并发脱敏 SSE error，但此前已通过并释放的窗口无法撤回；
@@ -45,6 +48,10 @@ Detector 执行器。它只返回 fact，不返回 Decision，也不控制应用
 
 ## P3：跨事件安全语境
 
+- 单进程 Gateway task session 已交付：Model 与 MCP 可共享 Trace；observed Model proposal 经可信宿主显式
+  `call_id` 引用并通过工具名/参数校验后，连接到实际 MCP ToolCall；显式 Model history 可把匹配的 ToolResult
+  输入边重连到同 task 内 observed MCP ToolResult。该能力提供真实 source→sink 图，不自动判断用户意图或
+  source trust。
 - P3 暂不增加 Tool risk、意图判断或默认 source→sink block 规则；评测当前只有策略决策点 detection
   benchmark（见 `evals/detection/README.md`），按能力轴 replay trace 并输出混淆矩阵。原端到端 AgentDojo
   pilot 已随 `evals/agentdojo` 移除（baseline ASR 为 0 导致测量无效，见 evals/README 预检约定）。
@@ -63,8 +70,10 @@ T09 使用跨目的地授权复用/confused-deputy 路径，不使用跨租户�
 
 - 为 Matcher 建立安全的历史 cursor、增量索引与 relation/finding cache，避免每个窗口或新 Event 全量扫描；
 - 用真实长会话与长流 benchmark 固定内存、延迟和缓存 identity；
-- 完成单进程增量语义后，再设计跨请求 Session Store、run token、TTL/CAS 与 Policy identity；
-- Session Store 仍服务同一用户的连续运行，不加入用户、租户或数据所有权字段。
+- 单进程内存 task-session Store、opaque token、滑动 TTL、容量上限和显式删除已经交付；下一步为已有 Store
+  增加历史 cursor/去重，而不是重复设计第二套 Session 语义；
+- 跨进程/重启持久化、CAS 与集群路由仍未设计。任何扩展仍只服务同一用户的连续运行，不加入用户、租户或
+  数据所有权字段。
 
 ## P5：部署工程
 

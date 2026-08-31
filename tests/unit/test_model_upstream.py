@@ -9,6 +9,7 @@ from pydantic import SecretStr
 
 from agent_guardrail.gateway import GatewaySettings
 from agent_guardrail.gateway.upstream import (
+    AnthropicUpstream,
     ModelUpstream,
     UpstreamError,
     validate_upstream_path,
@@ -45,6 +46,36 @@ async def test_complete_uses_fixed_path_server_auth_and_bounded_json() -> None:
             "responses",
             {"prompt": "safe"},
             client_authorization="Bearer client-key",
+        )
+    finally:
+        await client.aclose()
+
+    assert payload == {"answer": "safe"}
+
+
+@pytest.mark.asyncio
+async def test_anthropic_upstream_uses_fixed_version_and_dedicated_key() -> None:
+    anthropic_settings = GatewaySettings(
+        policy_file=Path("policy.yaml"),
+        anthropic_upstream_base_url="https://api.anthropic.test",
+        anthropic_upstream_api_key=SecretStr("anthropic-upstream-key"),
+        anthropic_upstream_allowed_hosts=("api.anthropic.test",),
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url == "https://api.anthropic.test/v1/messages"
+        assert request.headers["x-api-key"] == "anthropic-upstream-key"
+        assert request.headers["anthropic-version"] == "2023-06-01"
+        assert "authorization" not in request.headers
+        return httpx.Response(200, json={"answer": "safe"})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    upstream = AnthropicUpstream(client=client, settings=anthropic_settings)
+    try:
+        payload = await upstream.complete(
+            "v1/messages",
+            {"model": "claude-test"},
+            client_authorization="Bearer client-key-must-not-forward",
         )
     finally:
         await client.aclose()

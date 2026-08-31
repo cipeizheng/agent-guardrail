@@ -19,10 +19,10 @@ are evidence, not security decisions by themselves; policies combine those facts
 source, destination, and authorization context.
 
 > **Project status — v0.1.0 alpha.** The direct Detector SDK, event/Policy SDK, core runtime, Inline
-> wrappers, provider-neutral Adapter contract, OpenAI Chat/Responses streaming Gateway, stateless
-> MCP Gateway, and remote Core path are implemented and tested. The application is explicitly
-> single-user; it is not a sandbox or persistent-session service and does not model users, tenants,
-> or data ownership.
+> wrappers, provider-neutral Adapter contract, OpenAI Chat/Responses and Anthropic Messages streaming Gateway, MCP
+> Gateway, optional in-memory task sessions shared across model/tool boundaries, and remote Core
+> path are implemented and tested. The application is explicitly single-user; it is not a sandbox
+> or durable/distributed session service and does not model users, tenants, or data ownership.
 
 ## Why Agent Guardrail?
 
@@ -138,8 +138,8 @@ derived values, findings, budgets, and trusted security parameters.
 | Direct Detector SDK | Any Python code needs a fact at an arbitrary insertion point | No YAML; bounded text/JSON/batch detection, with application-owned action |
 | Event/Policy SDK | Any Python agent/framework can expose semantic events | No framework adapter required; the application carries explicit `EventRef` relations and can bind trusted source facts to exact Events |
 | Inline wrappers | You can inject LLM and tool interfaces | Mediates calls passing through the shared task-level session |
-| Model Provider Gateway | OpenAI Chat/Responses or a deployment adapter | Full request checks; atomic non-streaming output checks; non-retractable prefix-guarded SSE |
-| MCP Gateway | Tools are exposed by a fixed MCP server | Checks every stateless `tools/call` before and after execution |
+| Model Provider Gateway | OpenAI Chat/Responses, Anthropic Messages, or a deployment adapter | Full request checks; atomic non-streaming output checks; non-retractable prefix-guarded SSE; optional shared task Trace |
+| MCP Gateway | Tools are exposed by a fixed MCP server | Checks every `tools/call`; a validated proposal reference can link it to the model Trace before execution |
 | Remote Core | Policy and detector assets must be isolated from the edge | Gateway owns traffic and side effects; Core analyzes complete `PendingTrace` values |
 | Docker Compose | Self-hosted Core + Gateway | Read-only containers, private Core network, separated provider and Core credentials |
 
@@ -176,6 +176,21 @@ validated tool arguments; a later block cannot retract an earlier released prefi
 `stream=False` when complete-output atomicity is required. Trusted deployments can register a
 non-OpenAI wire adapter at `/v1/providers/...`; client requests still cannot select an upstream
 URL.
+
+An Anthropic client uses the Gateway root URL:
+
+```python
+from anthropic import Anthropic
+
+client = Anthropic(
+    api_key="gateway-key",
+    base_url="http://127.0.0.1:8080",
+)
+```
+
+The built-in subset covers Messages text, client `tools/tool_use/tool_result`, and streaming.
+`mcp_servers`, Anthropic server tools, thinking, and multimodal content fail closed so server-side
+tool execution cannot bypass this project's MCP enforcement boundary.
 
 For MCP Python SDK v2:
 
@@ -274,7 +289,7 @@ The Core image includes the full detector profile and is intentionally large. Re
 Agent Guardrail only mediates traffic that passes through its wrappers or gateways. It does not
 currently provide:
 
-- cross-request session state or policy hot reload;
+- durable/distributed session state, automatic history cursors, or policy hot reload;
 - a sandbox or interception for direct shell, function, filesystem, or arbitrary HTTP access;
 - a web management UI or distributed policy service;
 - moderation, copyright, or OCR capabilities.
@@ -303,7 +318,7 @@ are maintained in the [current architecture contract](docs/current-architecture-
 | [Architecture overview](docs/overview.md) | Understand Event, MatchPlan, Runtime, and Enforcement |
 | [Policy authoring](docs/guides/policy-authoring.md) | Write strict production YAML policies |
 | [Capability reference](docs/reference/capabilities.md) | Use detectors, predicates, and optional backends |
-| [Integration guide](docs/guides/integration.md) | Connect an Agent, OpenAI client, or MCP client |
+| [Integration guide](docs/guides/integration.md) | Connect an Agent, OpenAI/Anthropic client, or MCP client |
 | [Operations guide](docs/guides/operations.md) | Configure secrets, profiles, Docker, audit, and health |
 | [Security model](docs/security-model.md) | Review assets, trust boundaries, and T01–T10 |
 | [Roadmap](docs/roadmap.md) | See planned work without confusing it with shipped behavior |

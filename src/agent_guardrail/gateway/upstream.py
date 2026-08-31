@@ -49,10 +49,7 @@ class ModelUpstream:
         *,
         client_authorization: str | None,
     ) -> object:
-        headers = {"accept": "application/json", "content-type": "application/json"}
-        authorization = self._upstream_authorization(client_authorization)
-        if authorization is not None:
-            headers["authorization"] = authorization
+        headers = self._headers(stream=False, client_authorization=client_authorization)
 
         try:
             async with self.client.stream(
@@ -84,10 +81,7 @@ class ModelUpstream:
     ) -> httpx.Response:
         """Open a validated SSE response whose lifetime is owned by the caller."""
 
-        headers = {"accept": "text/event-stream", "content-type": "application/json"}
-        authorization = self._upstream_authorization(client_authorization)
-        if authorization is not None:
-            headers["authorization"] = authorization
+        headers = self._headers(stream=True, client_authorization=client_authorization)
         request = self.client.build_request(
             "POST",
             self._url(upstream_path),
@@ -131,7 +125,47 @@ class ModelUpstream:
             return None
         return f"Bearer {self.settings.upstream_api_key.get_secret_value()}"
 
+    def _headers(
+        self,
+        *,
+        stream: bool,
+        client_authorization: str | None,
+    ) -> dict[str, str]:
+        headers = {
+            "accept": "text/event-stream" if stream else "application/json",
+            "content-type": "application/json",
+        }
+        authorization = self._upstream_authorization(client_authorization)
+        if authorization is not None:
+            headers["authorization"] = authorization
+        return headers
+
     def _url(self, upstream_path: str) -> str:
         if self.settings.upstream_base_url is None:
             raise RuntimeError("model upstream is not configured")
         return self.settings.upstream_base_url + validate_upstream_path(upstream_path)
+
+
+class AnthropicUpstream(ModelUpstream):
+    """Fixed Anthropic destination using a deployment-owned API key."""
+
+    def _headers(
+        self,
+        *,
+        stream: bool,
+        client_authorization: str | None,
+    ) -> dict[str, str]:
+        del client_authorization
+        if self.settings.anthropic_upstream_api_key is None:
+            raise RuntimeError("Anthropic upstream API key is not configured")
+        return {
+            "accept": "text/event-stream" if stream else "application/json",
+            "content-type": "application/json",
+            "x-api-key": self.settings.anthropic_upstream_api_key.get_secret_value(),
+            "anthropic-version": "2023-06-01",
+        }
+
+    def _url(self, upstream_path: str) -> str:
+        if self.settings.anthropic_upstream_base_url is None:
+            raise RuntimeError("Anthropic upstream is not configured")
+        return self.settings.anthropic_upstream_base_url + validate_upstream_path(upstream_path)

@@ -57,6 +57,7 @@ agent-guardrail-prefetch-promptguard2 = "agent_guardrail.config.deployment:prefe
 
 [dependency-groups]
 dev = [
+    "anthropic>=1,<2",
     "fastapi>=0.115,<1",
     "httpx>=0.28,<1",
     "jsonschema>=4.23,<5",

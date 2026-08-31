@@ -2,7 +2,7 @@
 
 > 适合谁：启动和运维 embedded Gateway 或 Core/Gateway 双容器的人。
 > 解决什么：安装、容器、环境变量、Secret、Audit 和健康检查。
-> 不包含什么：集群编排、Policy 热加载或跨请求 Session Store。
+> 不包含什么：集群编排、Policy 热加载或跨进程/持久化 Session Store。
 
 ## 1. Embedded 启动
 
@@ -13,7 +13,8 @@ uv run python -m agent_guardrail.gateway
 
 进程内包含 FastAPI Gateway、一个 GuardrailRuntime、固定 Model Provider/MCP 上游客户端和可选 JSONL
 AuditSink。
-该 embedded 模式不依赖数据库、远程 Core 或跨请求 Session Store。
+该 embedded 模式不依赖数据库或远程 Core。可选 task-session Store 只保存在本 Gateway 进程内存中，进程
+退出即丢失。
 
 ### 完整本地 Detector profile
 
@@ -132,7 +133,7 @@ Policy 不能借此改写 endpoint/model/凭据，但这一限制不能替代部
 ## 2. 双容器启动
 
 仓库只定义两个运行服务：`core` 持有 Policy、完整 Detector 资产和分析 Runtime；`gateway` 持有 Provider/
-MCP 配置、请求级 Trace、Audit 和副作用顺序。CPU/CUDA 是 Core 的运行配置，不会创建第三个服务。
+MCP 配置、请求级/任务级 Trace、Audit 和副作用顺序。CPU/CUDA 是 Core 的运行配置，不会创建第三个服务。
 
 ```bash
 cp .env.example .env
@@ -210,12 +211,19 @@ Broker 和凭据留在 Sandbox 外。最低部署合同是：
 | `AGENT_GUARDRAIL_UPSTREAM_ALLOWED_HOSTS` | 空 | JSON host allowlist |
 | `AGENT_GUARDRAIL_UPSTREAM_AUTH_MODE` | `server_managed` | `server_managed/pass_through` |
 | `AGENT_GUARDRAIL_UPSTREAM_API_KEY` | server-managed 时必填 | Model Provider 上游 Key |
+| `AGENT_GUARDRAIL_ANTHROPIC_UPSTREAM_BASE_URL` | 空 | 固定 Anthropic base URL，如 `https://api.anthropic.com` |
+| `AGENT_GUARDRAIL_ANTHROPIC_UPSTREAM_ALLOWED_HOSTS` | 空 | JSON Anthropic host allowlist |
+| `AGENT_GUARDRAIL_ANTHROPIC_UPSTREAM_API_KEY` | Anthropic 模式必填 | 独立 Anthropic Provider Key |
 | `AGENT_GUARDRAIL_GATEWAY_API_KEYS` | 空 | JSON 客户端 Key；生产应配置 |
 | `AGENT_GUARDRAIL_AUDIT_PATH` | 空 | 设置后启用 JSONL Audit |
 | `AGENT_GUARDRAIL_LOG_LEVEL` | `info` | Uvicorn 日志级别 |
 | `AGENT_GUARDRAIL_MAX_REQUEST_BYTES` | `1048576` | 请求体上限 |
 | `AGENT_GUARDRAIL_MAX_UPSTREAM_RESPONSE_BYTES` | `4194304` | 非流式响应或完整 SSE 流字节上限 |
 | `AGENT_GUARDRAIL_MAX_TRACE_EVENTS` | `16` | 请求级 Trace Event 上限 |
+| `AGENT_GUARDRAIL_TASK_SESSIONS_REQUIRED` | `false` | 要求 Model 与 MCP `tools/call` 使用任务 Session |
+| `AGENT_GUARDRAIL_TASK_SESSION_MAX_SESSIONS` | `128` | 单进程同时保留的任务 Session 上限 |
+| `AGENT_GUARDRAIL_TASK_SESSION_TTL_SECONDS` | `1800` | 任务 Session 滑动 TTL |
+| `AGENT_GUARDRAIL_TASK_SESSION_MAX_TRACE_EVENTS` | `256` | 每个任务级 Trace Event 上限 |
 | `AGENT_GUARDRAIL_UPSTREAM_TIMEOUT_SECONDS` | `60` | 非流式网络 timeout；完整 SSE 流 wall-clock 上限 |
 | `AGENT_GUARDRAIL_DETECTOR_PROFILE` | `local` | `local/full_deberta/full_promptguard2/promptguard2` 部署 preset（与组件变量互斥） |
 | `AGENT_GUARDRAIL_DETECTOR_PII` | 空 | 逐组件配置：`none/presidio`（见"逐组件 Detector 配置"） |
@@ -233,8 +241,23 @@ Broker 和凭据留在 Sandbox 外。最低部署合同是：
 | `AGENT_GUARDRAIL_MCP_TIMEOUT_SECONDS` | `60` | MCP 上游总超时 |
 | `AGENT_GUARDRAIL_MCP_MAX_RESPONSE_BYTES` | `4194304` | MCP 响应体上限 |
 
-至少配置一个 LLM 或 MCP 上游。固定 URL 不能含凭据、query 或 fragment；配置非空 host allowlist 时
-hostname 必须匹配。
+至少配置通用/OpenAI、Anthropic 或 MCP 三类上游之一。固定 URL 不能含凭据、query 或 fragment；配置非空
+host allowlist 时 hostname 必须匹配。Anthropic 当前只有 server-managed 模式，Gateway 固定使用
+`x-api-key` 与稳定 API version header；入站 SDK Key 不能当成上游 Key 转发。
+
+创建任务级 Trace：
+
+```bash
+curl -sS -X POST http://127.0.0.1:8080/v1/guardrail/task-sessions \
+  -H "Authorization: Bearer $GATEWAY_CLIENT_KEY"
+```
+
+响应中的 `session_token` 应只由可信 Agent Host 保存在控制通道；后续 Model 与 MCP `tools/call` 请求通过
+`X-Agent-Guardrail-Session` header 携带。执行模型产生的工具建议时，Host 还应把 provider 返回的 `call_id`
+放入 `X-Agent-Guardrail-Proposal-Id`；Gateway 会校验工具名和参数后建立 proposal→实际 ToolCall Relation。
+任务结束后用同一 session header 请求 `DELETE /v1/guardrail/task-sessions`。token 不代表用户身份或业务授权，
+不得写入 prompt、Audit 或应用日志。生产要依赖跨边界关系时应设置
+`AGENT_GUARDRAIL_TASK_SESSIONS_REQUIRED=true`，并让 Agent 只能访问受控 Gateway 上游。
 
 Core 使用独立前缀：`AGENT_GUARDRAIL_CORE_POLICY_FILE` 与
 `AGENT_GUARDRAIL_CORE_API_KEY` 必填；`AGENT_GUARDRAIL_CORE_DETECTOR_PROFILE` 默认 `local`，双容器镜像

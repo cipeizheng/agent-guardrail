@@ -19,7 +19,7 @@ from agent_guardrail.adapters.streaming import (
 )
 from agent_guardrail.core import MatchPolicyAnalyzer
 from agent_guardrail.enforcement import InMemoryAuditSink
-from agent_guardrail.gateway import GatewaySettings, create_app
+from agent_guardrail.gateway import TASK_SESSION_HEADER, GatewaySettings, create_app
 from agent_guardrail.models import (
     ChatMessage,
     ChatRole,
@@ -51,6 +51,113 @@ def gateway_settings() -> GatewaySettings:
         upstream_api_key=SecretStr("upstream-test-key"),
         upstream_allowed_hosts=("provider.example",),
         gateway_api_keys=(SecretStr("gateway-test-key"),),
+    )
+
+
+def anthropic_gateway_settings() -> GatewaySettings:
+    return GatewaySettings(
+        policy_file=POLICY_FILE,
+        anthropic_upstream_base_url="https://api.anthropic.test",
+        anthropic_upstream_api_key=SecretStr("anthropic-upstream-key"),
+        anthropic_upstream_allowed_hosts=("api.anthropic.test",),
+        gateway_api_keys=(SecretStr("gateway-test-key"),),
+    )
+
+
+def anthropic_request_payload(*, stream: bool = False) -> dict[str, object]:
+    return {
+        "model": "claude-test",
+        "max_tokens": 256,
+        "messages": [{"role": "user", "content": "Email the report"}],
+        "tools": [
+            {
+                "name": "send_email",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "to": {"type": "string"},
+                        "body": {"type": "string"},
+                    },
+                    "required": ["to", "body"],
+                    "additionalProperties": False,
+                },
+            }
+        ],
+        "stream": stream,
+    }
+
+
+def anthropic_response(body: str = "safe") -> dict[str, object]:
+    return {
+        "id": "msg_1",
+        "type": "message",
+        "role": "assistant",
+        "content": [
+            {
+                "type": "tool_use",
+                "id": "toolu_1",
+                "name": "send_email",
+                "input": {"to": "outside@example.com", "body": body},
+            }
+        ],
+        "model": "claude-test",
+        "stop_reason": "tool_use",
+        "stop_sequence": None,
+        "usage": {"input_tokens": 10, "output_tokens": 5},
+    }
+
+
+def anthropic_text_stream(content: str) -> bytes:
+    events = [
+        (
+            "message_start",
+            {
+                "type": "message_start",
+                "message": {
+                    "id": "msg_stream",
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [],
+                    "model": "claude-test",
+                    "stop_reason": None,
+                    "stop_sequence": None,
+                    "usage": {"input_tokens": 4, "output_tokens": 1},
+                },
+            },
+        ),
+        (
+            "content_block_start",
+            {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {"type": "text", "text": ""},
+            },
+        ),
+        (
+            "content_block_delta",
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "text_delta", "text": content},
+            },
+        ),
+        ("content_block_stop", {"type": "content_block_stop", "index": 0}),
+        (
+            "message_delta",
+            {
+                "type": "message_delta",
+                "delta": {"stop_reason": "end_turn", "stop_sequence": None},
+                "usage": {"output_tokens": 5},
+            },
+        ),
+        ("message_stop", {"type": "message_stop"}),
+    ]
+    return b"".join(
+        f"event: {name}\n".encode()
+        + b"data: "
+        + json.dumps(payload, separators=(",", ":")).encode()
+        + b"\n\n"
+        for name, payload in events
     )
 
 
@@ -609,6 +716,70 @@ async def test_allow_proxies_once_with_server_managed_auth() -> None:
 
 
 @pytest.mark.asyncio
+async def test_task_session_lifecycle_reuses_trace_and_rejects_deleted_token() -> None:
+    settings = gateway_settings().model_copy(update={"task_sessions_required": True})
+    async with app_client(
+        lambda request: httpx.Response(200, json=text_response()),
+        settings=settings,
+    ) as (client, requests):
+        created = await client.post(
+            "/v1/guardrail/task-sessions",
+            headers=auth_headers(),
+        )
+        token = created.json()["session_token"]
+        task_headers = {**auth_headers(), TASK_SESSION_HEADER: token}
+
+        first = await client.post(
+            "/v1/openai/chat/completions",
+            headers=task_headers,
+            json=request_payload(),
+        )
+        second = await client.post(
+            "/v1/openai/chat/completions",
+            headers=task_headers,
+            json=request_payload(),
+        )
+        deleted = await client.delete(
+            "/v1/guardrail/task-sessions",
+            headers=task_headers,
+        )
+        rejected = await client.post(
+            "/v1/openai/chat/completions",
+            headers=task_headers,
+            json=request_payload(),
+        )
+
+    assert created.status_code == 200
+    assert created.headers["cache-control"] == "no-store"
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.headers["x-guardrail-trace-id"] == created.json()["trace_id"]
+    assert second.headers["x-guardrail-trace-id"] == created.json()["trace_id"]
+    assert deleted.status_code == 204
+    assert rejected.status_code == 400
+    assert rejected.json()["error"]["code"] == "task_session_invalid"
+    assert len(requests) == 2
+
+
+@pytest.mark.asyncio
+async def test_required_task_session_fails_before_model_upstream() -> None:
+    settings = gateway_settings().model_copy(update={"task_sessions_required": True})
+    async with app_client(
+        lambda request: httpx.Response(200, json=text_response()),
+        settings=settings,
+    ) as (client, requests):
+        response = await client.post(
+            "/v1/openai/chat/completions",
+            headers=auth_headers(),
+            json=request_payload(),
+        )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "task_session_required"
+    assert requests == []
+
+
+@pytest.mark.asyncio
 async def test_standard_openai_route_aliases_use_their_provider_adapters() -> None:
     def upstream(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/chat/completions"):
@@ -633,6 +804,100 @@ async def test_standard_openai_route_aliases_use_their_provider_adapters() -> No
     assert responses.status_code == 200
     assert responses.json()["output"][0]["content"][0]["text"] == "Safe response"
     assert len(requests) == 2
+
+
+@pytest.mark.asyncio
+async def test_anthropic_sdk_route_uses_dedicated_auth_and_canonical_pipeline() -> None:
+    analyzer = RecordingAnalyzer()
+
+    def upstream(request: httpx.Request) -> httpx.Response:
+        assert request.url == "https://api.anthropic.test/v1/messages"
+        assert request.headers["x-api-key"] == "anthropic-upstream-key"
+        assert request.headers["anthropic-version"] == "2023-06-01"
+        assert json.loads(request.content)["model"] == "claude-test"
+        return httpx.Response(200, json=anthropic_response())
+
+    async with app_client(
+        upstream,
+        settings=anthropic_gateway_settings(),
+        runtime=GuardrailRuntime(analyzer),
+    ) as (client, requests):
+        response = await client.post(
+            "/v1/messages",
+            headers={"x-api-key": "gateway-test-key"},
+            json=anthropic_request_payload(),
+        )
+
+    assert response.status_code == 200
+    assert response.json()["content"][0]["id"] == "toolu_1"
+    assert len(requests) == 1
+    assert [(kind, origin) for kind, origin, _, _ in analyzer.events] == [
+        (EventKind.MESSAGE, EventOrigin.CLIENT_ASSERTED),
+        (EventKind.MODEL_CALL, EventOrigin.OBSERVED),
+        (EventKind.TOOL_CALL_PROPOSAL, EventOrigin.OBSERVED),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_anthropic_output_block_hides_tool_use_and_has_no_tool_side_effect() -> None:
+    async with app_client(
+        lambda request: httpx.Response(200, json=anthropic_response(FAKE_SECRET)),
+        settings=anthropic_gateway_settings(),
+    ) as (client, requests):
+        response = await client.post(
+            "/v1/anthropic/messages",
+            headers=auth_headers(),
+            json=anthropic_request_payload(),
+        )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["checkpoint"] == "before_model_output_release"
+    assert FAKE_SECRET not in response.text
+    assert "toolu_1" not in response.text
+    assert len(requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_anthropic_stream_releases_safe_prefix_and_hides_blocked_delta() -> None:
+    async with app_client(
+        lambda request: httpx.Response(
+            200,
+            content=anthropic_text_stream(FAKE_SECRET),
+            headers={"content-type": "text/event-stream"},
+        ),
+        settings=anthropic_gateway_settings(),
+        runtime=GuardrailRuntime(streaming_message_analyzer()),
+    ) as (client, requests):
+        response = await client.post(
+            "/v1/messages",
+            headers={"x-api-key": "gateway-test-key"},
+            json=anthropic_request_payload(stream=True),
+        )
+
+    assert response.status_code == 200
+    assert FAKE_SECRET not in response.text
+    assert "event: error" in response.text
+    assert "guardrail_blocked" in response.text
+    assert len(requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_anthropic_rejects_server_mcp_before_upstream() -> None:
+    payload = anthropic_request_payload()
+    payload["mcp_servers"] = [{"type": "url", "url": "https://mcp.example"}]
+    async with app_client(
+        lambda request: httpx.Response(200, json=anthropic_response()),
+        settings=anthropic_gateway_settings(),
+    ) as (client, requests):
+        response = await client.post(
+            "/v1/messages",
+            headers={"x-api-key": "gateway-test-key"},
+            json=payload,
+        )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "invalid_request"
+    assert requests == []
 
 
 @pytest.mark.asyncio

@@ -1,6 +1,6 @@
 # Agent 与 Enforcement 接入指南
 
-> 适合谁：把 Runtime 接入应用、Agent、OpenAI Client 或 MCP Client 的开发者。
+> 适合谁：把 Runtime 接入应用、Agent、OpenAI/Anthropic Client 或 MCP Client 的开发者。
 > 解决什么：Runtime/Session 生命周期、框架无关 SDK、接入选择和 Gateway 执行检查点。
 > 不包含什么：HTTP 错误码和 MatchPlan 求值细节。
 
@@ -159,7 +159,7 @@ YAML 与 SDK 编排不重合：代码决定“何时产生哪些 Event、是否�
 | 可注入 LLM 与 Tool 接口 | Inline Wrapper | 中介经过包装器的模型和工具调用 |
 | 可配置 Model Provider Base URL | Provider Gateway | 中介模型请求与非流式/流式响应 |
 | Tool 通过 MCP Server | MCP Gateway | 中介固定 Server 的 `tools/call` |
-| LLM HTTP + MCP Tool | 两种 Gateway | 分别覆盖模型和工具边界 |
+| LLM HTTP + MCP Tool | 两种 Gateway + task session | 共享 Trace，并把经校验的模型 proposal 连接到实际 ToolCall |
 | 直接 Shell/函数/HTTP | 当前不能完整覆盖 | 需要 Hook/Sandbox/网络代理 |
 
 LLM Gateway 阻止 ToolCall 返回 Agent，不等于阻止 Agent 经其他路径执行工具。
@@ -223,7 +223,9 @@ client = OpenAI(
 URL 设为 `/v1` 使用标准 `/v1/chat/completions`、`/v1/responses` alias。Responses 当前只支持可完整映射的
 文本、instructions、custom function 与 function output。
 
-每个请求创建独立 Session。规范化历史 Event 与 `MODEL_CALL` 在固定上游前于 `before_model_call` 检查；
+默认每个请求创建独立 Session。可信 Host 可先创建 Gateway task session，再通过 OpenAI Client 的
+`default_headers={"X-Agent-Guardrail-Session": token}` 让多次 Model 请求与 MCP `tools/call` 共享同一 Trace。
+规范化历史 Event 与 `MODEL_CALL` 在固定上游前于 `before_model_call` 检查；
 非流式响应完整通过输出 Decision 后才释放。`stream=True` 时，Chat data-only SSE 和 Responses named SSE
 都由 Adapter 转为累计 Canonical output：
 
@@ -233,7 +235,8 @@ URL 设为 `/v1` 使用标准 `/v1/chat/completions`、`/v1/responses` alias。R
 - block/error 发送脱敏 SSE error，当前未通过窗口不释放；此前窗口已经发送，不能撤回。
 
 响应头 `x-guardrail-streaming: prefix-guarded-non-retractable` 明示这一弱于完整缓冲的保证。需要完整输出
-原子判断时使用 `stream=False`。当前仍不提供跨 HTTP 请求 Session。
+原子判断时使用 `stream=False`。task 模式只持久保存一个进程内的有界 Trace；完整请求历史仍会展开，只有
+显式匹配的 MCP ToolResult 输入边重连到 observed Event，不是通用 history cursor。
 
 非 OpenAI wire format 可由可信部署代码实现 `ModelProviderAdapter`，并在
 `create_app(model_routes={"/v1/providers/name": adapter})` 注册。路由和相对上游路径在启动时固定；请求不能
@@ -244,6 +247,21 @@ Adapter 合同分三组方法：`parse_request/request_to_canonical/request_payl
 `upstream_path`。流 decoder 只能返回 `HOLD/GUARD/FINAL` 与累计 `ModelResponse`，不能执行 Policy 或创建
 可信安全事实。公共类型从 `agent_guardrail` 导出，HTTP 组合仍由 gateway extra 的 `create_app` 完成。
 
+Anthropic Client 使用 Gateway 根地址，SDK 会调用标准 `/v1/messages`：
+
+```python
+from anthropic import Anthropic
+
+client = Anthropic(
+    api_key="gateway-key",
+    base_url="http://127.0.0.1:8080",
+)
+```
+
+Messages 的文本与 client `tool_use/tool_result` 进入相同 Canonical/Session/Runtime 管线；`tool_use.id` 可作为
+后续 MCP proposal header。不要向该路由传 `mcp_servers` 或 Anthropic server tools：当前会在调用模型上游前
+拒绝，因为让 Anthropic 服务端直接执行 MCP/Tool 会绕过本项目的 `before_tool_call`。
+
 ## 9. MCP Gateway
 
 ```python
@@ -252,8 +270,14 @@ async with Client("http://127.0.0.1:8080/v1/mcp", cache=None) as client:
 ```
 
 当前支持 MCP `2026-07-28` 的 `server/discover`、`ping`、`tools/list`、`tools/call`。只有 `tools/call`
-创建 Session 并经过 `before_tool_call/before_tool_output_release`；其他方法不伪造 Tool Event。每次调用
-独立，因此没有跨 ToolCall 计数或隐式审批。
+使用 Session 并经过 `before_tool_call/before_tool_output_release`；其他方法不伪造 Tool Event。没有 task
+header 时每次调用独立；携带与 Model 请求相同的 `X-Agent-Guardrail-Session` 时复用任务 Trace。
+
+执行模型返回的 ToolCallProposal 时，可信 Host 应同时发送
+`X-Agent-Guardrail-Proposal-Id: <provider call_id>`。Gateway 只在该 proposal 已由本 Gateway observed、已经
+提交且工具名/参数完全一致时，建立 proposal→实际 ToolCall Relation；不匹配、歧义、重放和未提交的流式
+proposal 都在工具执行前失败。没有 proposal 的宿主直接 MCP 调用仍可检查，但不会获得这条因果 Relation。
+task 创建、TTL、删除和强制模式见[运行指南](operations.md#4-环境变量)。
 
 ## 10. Audit 与测试组件
 
@@ -262,7 +286,7 @@ Policy version/hash。
 
 `agent_guardrail.testing` 的 ScriptedLLM、FakeToolExecutor 和 SimulatedAgent 用于确定性验证 allow/log/block
 和副作用计数，不证明 Detector 算法准确率；生产模块不得导入 testing。真实 HTTP 黑盒测试还验证外部
-OpenAI/MCP Agent 只改变 URL，调用前 block 时固定上游调用次数为零。
+OpenAI/Anthropic/MCP Agent 只改变 URL，调用前 block 时固定上游调用次数为零。
 
 精确 HTTP/MCP 合同见[Gateway 协议参考](../reference/gateway-protocol.md)，进程配置见
 [运行指南](operations.md)。

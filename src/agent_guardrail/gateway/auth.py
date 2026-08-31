@@ -27,3 +27,15 @@ class GatewayAuthenticator:
         if not any(secrets.compare_digest(candidate, key) for key in self._keys):
             raise GatewayAuthenticationError
         return authorization
+
+    def authenticate_anthropic(self, request: Request) -> None:
+        """Accept Anthropic SDK ``x-api-key`` or the regular Gateway bearer key."""
+
+        if not self._keys:
+            return
+        api_key = request.headers.get("x-api-key")
+        if api_key is not None and any(
+            secrets.compare_digest(api_key, key) for key in self._keys
+        ):
+            return
+        self.authenticate(request)

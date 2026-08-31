@@ -1,15 +1,15 @@
 # Remote Core 双容器设计
 
 > 当前实现：固定 Policy 的无状态 Core HTTP 服务与可选择 embedded/remote Decision backend 的 Gateway。
-> 不包含：Policy 热加载、跨请求 Session Store、远程 Policy 上传或第二执行器。产品明确只支持单用户，
-> 不设计多用户/多租户控制平面。
+> 不包含：Policy 热加载、持久化/分布式 Session Store、远程 Policy 上传或第二执行器。产品明确只支持
+> 单用户，不设计多用户/多租户控制平面。单进程 task-session state 只存在于 Gateway，不改变 Core 无状态性。
 
 ## 1. 责任边界
 
 | 组件 | 持有 | 不持有 |
 | --- | --- | --- |
 | Core | Policy、MatchPlan、Detector profile、模型、规则、Decision | Provider Key、Gateway Client Key、Agent 副作用、Audit payload |
-| Gateway | Provider/MCP 配置与 Key、请求级 Trace、Enforcement、脱敏 Audit | Policy 文件、Detector 模型、规则文件 |
+| Gateway | Provider/MCP 配置与 Key、请求级/任务级 Trace、Enforcement、脱敏 Audit | Policy 文件、Detector 模型、规则文件 |
 
 编程式 SDK 和 Inline Wrapper 继续把 `GuardrailRuntime` 直接注入 `EnforcementSession`。远程 Gateway 注入
 `RemoteGuardrailRuntime`；两者实现同一 `PolicyAnalyzer.analyze_pending` 边界。

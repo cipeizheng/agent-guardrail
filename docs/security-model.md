@@ -25,7 +25,7 @@ Audit 数据的机密性与可追责性、分析服务的可用性和所有受�
 默认信任：
 
 - 部署管理员及其只读 Policy、启动配置和 capability 注册清单；
-- 本项目 Runtime、EnforcementSession、InputNormalizer 和协议 Adapter 的实现；
+- 本项目 Runtime、EnforcementSession、InputNormalizer、单进程 task-session Store 和协议 Adapter 的实现；
 - 双容器部署中的 Core 实现、只读 Policy/模型资产以及 Gateway→Core 专用服务凭据；
 - 由可信 Enforcement Point 实际建立的执行 checkpoint、Event origin 和类型化 Relation；
 - 只接收已经脱敏结构的 AuditSink。
@@ -43,6 +43,10 @@ Enforcement Point，不证明内容正确、安全或已获授权。
 
 本产品只有一个用户，不建立 principal、tenant、数据所有者或跨用户共享模型。Gateway/Core Bearer key 是
 部署服务凭据，只保护调用边界，不代表终端用户身份。
+
+Gateway task token 只选择一个既有的单用户 Trace，是不可猜测的相关性 capability，不代表用户同意或业务
+授权。可信 Agent Host 必须在控制通道创建、携带和删除它，不得写入 prompt。显式 proposal header 只接受
+同 task 内已提交的 observed proposal，并校验工具名/参数；它不能提交 Event ID、Relation 或 security fact。
 
 远程 Core 的内部网络不是低敏通道：`PendingTrace` 可能包含完整 prompt、PII 或 Tool arguments。部署必须
 限制 Core 端口只对 Gateway 可达，并保护链路与节点；Core/Gateway 均不得记录协议 body。Core 不持有
@@ -163,7 +167,9 @@ Detector 或 Policy 写回 Trace。内容级外泄判断仍需敏感数据 Detec
 选择条件。
 
 LLM Gateway 只能中介经过它的模型请求和响应；MCP Gateway 只能中介经过固定 MCP Server 的
-`tools/call`。Agent 直接调用本地 Shell、函数或 HTTP 是 T10，需要 Framework Hook、Sandbox 或网络代理。
+`tools/call`。两者携带同一有效 task token 时可共享 Trace，并把经校验的 observed proposal 连接到实际
+ToolCall；没有 token 时仍是隔离的请求级 Trace。Agent 直接调用本地 Shell、函数或 HTTP 是 T10，需要
+Framework Hook、Sandbox 或网络代理。
 
 ## 7. T01–T10 威胁基线
 
@@ -171,8 +177,8 @@ LLM Gateway 只能中介经过它的模型请求和响应；MCP Gateway 只能�
 | --- | --- | --- | --- |
 | T01 | 敏感数据 → 未授权模型提供商 | `before_model_call` | 部分：Detector、调用前检查、destination context 已有；完整 authorization Policy 未实现 |
 | T02 | 敏感数据 → 外部 Tool | `before_tool_call` | 部分：Detector、external_tool context、邮件与来源路径示例已实现 |
-| T03 | 不可信 ToolResult 注入 → 后续模型请求 | `before_model_call` | 部分：Event trust 可跨提交保存并与 Detector/关系组合；Adapter 尚未自动分类 trust，默认 Policy 未交付 |
-| T04 | 不可信影响 → 未授权高权限 Tool | `before_tool_call` | 部分：静态 Tool Rule/context 已有；risk/独立授权 Policy 未实现 |
+| T03 | 不可信 ToolResult 注入 → 后续模型请求 | `before_model_call` | 部分：task 模式可把显式 history 输入边重连到 observed MCP ToolResult，Event trust 可与 Detector/关系组合；Adapter 尚未自动分类 trust，默认 Policy 未交付 |
+| T04 | 不可信影响 → 未授权高权限 Tool | `before_tool_call` | 部分：task 模式可建立 observed proposal→实际 MCP ToolCall 的校验关系并在副作用前决策；Tool risk/独立授权 Policy 未实现 |
 | T05 | 敏感模型输出 → 未授权客户端展示面 | `before_model_output_release` | 部分：输出释放前检查/client destination 已有；展示面授权 Policy 未实现 |
 | T06 | 原始敏感数据 → Finding/Error/Audit | Audit | 已支持结构、遮罩和测试；受信任 producer 仍是边界 |
 | T07 | Unicode 控制/格式字符绕过 Detector | `before_model_call` | 部分：Unicode fact、type 选择和调用前检查已有；来源 trust/意图语境 Policy 未完整交付 |

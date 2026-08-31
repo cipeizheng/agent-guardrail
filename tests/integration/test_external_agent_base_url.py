@@ -11,15 +11,19 @@ from pathlib import Path
 import httpx
 import pytest
 import uvicorn
+from anthropic import BadRequestError as AnthropicBadRequestError
 from fastapi import FastAPI
 from openai import BadRequestError
 from pydantic import SecretStr
 
 from agent_guardrail.gateway import GatewaySettings, create_app
 from agent_guardrail.runtime import GuardrailRuntime
+from tests.blackbox.external_anthropic_agent import ExternalAnthropicAgent
 from tests.blackbox.external_openai_agent import ExternalEmailAgent, ExternalResponsesAgent
 from tests.integration.test_gateway import (
     POLICY_FILE,
+    anthropic_response,
+    anthropic_text_stream,
     chat_stream,
     response_api_payload,
     responses_stream,
@@ -30,7 +34,11 @@ from tests.support import FAKE_SECRET
 
 
 @asynccontextmanager
-async def running_gateway(app: FastAPI) -> AsyncIterator[str]:
+async def running_gateway(
+    app: FastAPI,
+    *,
+    base_path: str = "/v1/openai",
+) -> AsyncIterator[str]:
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server_socket.bind(("127.0.0.1", 0))
@@ -58,7 +66,7 @@ async def running_gateway(app: FastAPI) -> AsyncIterator[str]:
         raise RuntimeError("test Gateway did not start")
 
     try:
-        yield f"http://127.0.0.1:{port}/v1/openai"
+        yield f"http://127.0.0.1:{port}{base_path}"
     finally:
         server.should_exit = True
         await task
@@ -98,6 +106,15 @@ def _settings() -> GatewaySettings:
         policy_file=POLICY_FILE,
         upstream_base_url="https://provider.example/v1",
         upstream_api_key=SecretStr("upstream-test-key"),
+        gateway_api_keys=(SecretStr("gateway-test-key"),),
+    )
+
+
+def _anthropic_settings() -> GatewaySettings:
+    return GatewaySettings(
+        policy_file=POLICY_FILE,
+        anthropic_upstream_base_url="https://api.anthropic.test",
+        anthropic_upstream_api_key=SecretStr("anthropic-upstream-key"),
         gateway_api_keys=(SecretStr("gateway-test-key"),),
     )
 
@@ -208,6 +225,63 @@ async def test_official_chat_sdk_consumes_guarded_stream() -> None:
     await upstream_client.aclose()
 
     assert result == "Safe response"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("streaming", [False, True])
+async def test_official_anthropic_sdk_uses_messages_gateway(streaming: bool) -> None:
+    def upstream(request: httpx.Request) -> httpx.Response:
+        assert request.url == "https://api.anthropic.test/v1/messages"
+        assert request.headers["x-api-key"] == "anthropic-upstream-key"
+        assert request.headers["anthropic-version"] == "2023-06-01"
+        payload = json.loads(request.content)
+        assert bool(payload.get("stream")) is streaming
+        if streaming:
+            return httpx.Response(
+                200,
+                content=anthropic_text_stream("Safe response"),
+                headers={"content-type": "text/event-stream"},
+            )
+        response = anthropic_response()
+        response["content"] = [{"type": "text", "text": "Safe response"}]
+        response["stop_reason"] = "end_turn"
+        return httpx.Response(200, json=response)
+
+    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+    app = create_app(_anthropic_settings(), upstream_http_client=upstream_client)
+
+    async with running_gateway(app, base_path="") as gateway_base_url:
+        agent = ExternalAnthropicAgent(base_url=gateway_base_url)
+        try:
+            result = await (agent.run_stream() if streaming else agent.run())
+        finally:
+            await agent.close()
+    await upstream_client.aclose()
+
+    assert result == "Safe response"
+
+
+@pytest.mark.asyncio
+async def test_official_anthropic_sdk_never_receives_blocked_tool_use() -> None:
+    upstream_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, json=anthropic_response(FAKE_SECRET))
+        )
+    )
+    app = create_app(_anthropic_settings(), upstream_http_client=upstream_client)
+
+    async with running_gateway(app, base_path="") as gateway_base_url:
+        agent = ExternalAnthropicAgent(base_url=gateway_base_url)
+        try:
+            with pytest.raises(AnthropicBadRequestError) as blocked:
+                await agent.run_tool_turn()
+        finally:
+            await agent.close()
+    await upstream_client.aclose()
+
+    assert blocked.value.status_code == 400
+    assert FAKE_SECRET not in blocked.value.response.text
+    assert agent.tool_executions == 0
 
 
 @pytest.mark.asyncio

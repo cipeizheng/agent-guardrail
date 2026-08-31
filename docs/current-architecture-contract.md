@@ -2,7 +2,7 @@
 
 > 状态：日常实现的唯一架构合同，只描述当前事实、不可破坏约束和明确范围。架构历史只存在于 Git，
 > 不属于实现输入。
-> 最后核对：2026-08-14，版本 `0.1.0`。
+> 最后核对：2026-08-31，版本 `0.1.0`。
 
 ## 1. 当前生产链
 
@@ -29,12 +29,25 @@ strict version: 3 YAML → AuthorPolicy → immutable MatchPlan
   脱敏 `Detection` fact，不返回 allow/log/block，也不执行 Agent 的 LLM/Tool/业务副作用。
 - Model Provider Adapter 只负责封闭 wire Schema 与 provider-neutral `ModelRequest/ModelResponse` 转换；
   可信部署代码可在 `/v1/providers/...` 注册固定相对上游路径，客户端不能选择 URL。
-- OpenAI Chat Completions 与 Responses API 均支持非流式和 SSE Streaming；内置路由同时提供
-  `/v1/openai/...` 与标准 SDK base URL 所需的 `/v1/...` 形式。
-- MCP `2026-07-28` 无状态 `POST /v1/mcp`：`server/discover`、`ping`、`tools/list`、`tools/call`。
+- OpenAI Chat Completions、OpenAI Responses 与 Anthropic Messages API 均支持非流式和 SSE
+  Streaming；内置路由同时提供带 Provider 名的形式与标准 SDK base URL alias。Anthropic 只接收可完整映射
+  的文本、client `tools/tool_use/tool_result`，不开放服务端 MCP Connector、server tools、thinking、缓存、
+  container 或多模态内容。
+- MCP `2026-07-28` 无状态 `POST /v1/mcp`：`server/discover`、`ping`、`tools/list`、`tools/call`；不建立
+  MCP 协议 Session。Model 与 `tools/call` 可选择携带 Gateway 自有的 opaque task-session header，共享
+  同一 `EnforcementSession/Trace`。
 - Gateway 可选择进程内 Runtime，或通过版本化内部 HTTP 协议调用固定 Policy 的无状态 Core；两种模式复用
   同一 `PolicyAnalyzer.analyze_pending` 和唯一 v3 Policy 执行链。当前内部 Remote Core 协议版本为 v4。
 - Inline LLM/Tool Wrapper 是低层便利接入，并必须共享一个请求/任务级 `EnforcementSession` 与 `Trace`。
+- Gateway 提供单进程、内存、有界、滑动 TTL 的单用户 task-session Store。可信宿主显式创建/删除 task，
+  Model 与 MCP 请求只能用 opaque token 选择已有 task；token 是相关性 capability，不是用户身份或授权。
+  `task_sessions_required` 可要求所有受保护 Model/`tools/call` 请求携带 token；未启用时无 token 的请求仍使用
+  独立请求级 Session。
+- 同一 task 中，Model 输出的 observed `TOOL_CALL_PROPOSAL` 可由可信宿主通过 provider `call_id` 在 MCP
+  请求专用 header 中引用。Gateway 必须验证 proposal 已提交且工具名/参数完全一致，才建立
+  `proposal → actual TOOL_CALL` 的 `influenced_by`；缺失、歧义、不匹配和重放均不得产生 Relation，显式非法
+  引用在工具副作用前失败。后续显式 Model history 中同 `call_id + tool name` 的 ToolResult 输入边会重连到
+  同 task 内 Gateway 实际观察到的 MCP `TOOL_RESULT`。
 - Canonical `Event.model_version` 为 4；一等 MatchPlan Event：`MESSAGE`、`MODEL_CALL`、
   `TOOL_CALL_PROPOSAL`、`TOOL_CALL`、`TOOL_RESULT`；payload 封闭且有 Schema 硬上限。Event、
   PendingTrace、Decision 和 YAML binding 不含 Enforcement Phase。`MODEL_CALL` 是轻量实际模型操作，
@@ -74,9 +87,12 @@ strict version: 3 YAML → AuthorPolicy → immutable MatchPlan
    上游调用。Streaming 每个文本窗口只在累计 Canonical 前缀通过 tentative Decision 后释放，Tool arguments
    必须完整 JSON/Schema/Policy 检查后释放，终止时再原子提交完整输出；Gateway 只释放 Adapter 重新编码的
    封闭 SSE event，不透传原始 event；已释放窗口不能撤回。
-6. MCP `tools/call` 每个 HTTP 请求使用独立 Session，并完整经过 `before_tool_call` 与
-   `before_tool_output_release`；不得重新引入
-   `initialize`、`Mcp-Session-Id`、GET stream 或 DELETE session。
+   Anthropic 的不完整 `max_tokens/pause_turn/model_context_window_exceeded` turn 必须失败关闭；服务端
+   `mcp_servers` 不能绕过 MCP Gateway 的调用前检查。
+6. MCP `tools/call` 无 task token 时使用独立 Session；有效 Gateway task token 时复用该 task 的 Session。
+   两种模式都完整经过 `before_tool_call` 与 `before_tool_output_release`；不得重新引入 MCP
+   `initialize`、`Mcp-Session-Id`、GET stream 或 DELETE session。Gateway task-session 生命周期不是 MCP
+   协议生命周期。
 7. `block` 不提交原始 pending Event，只提交脱敏 Decision Event；任一 Event block 时整批不提交。
 8. Violation 必须绑定 pending Event；系统错误、超时和预算耗尽不能静默变成 no-match/allow。
 9. 日志、Error、Finding、Violation metadata 和 Audit 不得包含完整 Secret、原始 PII 或完整 prompt。
@@ -110,7 +126,7 @@ strict version: 3 YAML → AuthorPolicy → immutable MatchPlan
 
 ## 6. 明确未交付
 
-Framework 自动 history cursor、CEL/Invariant DSL、Policy 热加载、跨请求 Session Store、
+Framework 自动 history cursor、CEL/Invariant DSL、Policy 热加载、持久化/分布式 Session Store、
 MCP subscriptions、特定 Framework 生命周期 Adapter、Sandbox、Event 级 sensitivity、自动 source trust
 分类、destination Registry、授权凭证、Redaction
 TransformationPlan、SBOM/镜像签名/集群编排，以及状态矩阵中标为 `planned` 的能力。
@@ -120,6 +136,10 @@ TransformationPlan、SBOM/镜像签名/集群编排，以及状态矩阵中标�
 
 当前 Responses Adapter 不接受隐藏服务端历史、内置远程 Tool、background、多模态或无法完整映射的 output；
 Streaming 尚未做增量 Matcher/cache，每个累计前缀会重新分析，长流性能优化属于 P4。
+
+当前 task-session Store 只在一个 Gateway 进程内存中存在，没有 CAS、跨进程共享或重启恢复；显式 Model
+history 仍按请求展开，只有可由 `call_id + tool name` 唯一匹配的 observed MCP ToolResult 输入边重连到历史
+Event，不构成通用 history cursor。流式 proposal 只有 terminal 完整输出提交后才能作为 MCP Relation source。
 
 当前 Compose 的 Core/Gateway 容器加固只缩小服务自身权限，不构成 Agent Sandbox，也不提供 Agent 的
 default-deny egress、宿主隔离或资源配额。

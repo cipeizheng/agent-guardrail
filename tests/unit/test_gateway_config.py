@@ -41,6 +41,41 @@ def test_gateway_settings_load_prefixed_environment(monkeypatch: pytest.MonkeyPa
     assert settings.gateway_api_keys[0].get_secret_value() == "client-key"
 
 
+def test_gateway_settings_support_anthropic_as_the_only_model_upstream() -> None:
+    settings = GatewaySettings(
+        policy_file=Path("policy.yaml"),
+        anthropic_upstream_base_url="https://api.anthropic.com",
+        anthropic_upstream_api_key=SecretStr("anthropic-key"),
+        anthropic_upstream_allowed_hosts=("api.anthropic.com",),
+    )
+
+    assert settings.anthropic_messages_url == "https://api.anthropic.com/v1/messages"
+
+    compose_style = GatewaySettings(
+        policy_file=Path("policy.yaml"),
+        upstream_base_url="",
+        upstream_api_key="",  # pyright: ignore[reportArgumentType]
+        anthropic_upstream_base_url="https://api.anthropic.com",
+        anthropic_upstream_api_key=SecretStr("anthropic-key"),
+    )
+    assert compose_style.upstream_base_url is None
+    assert compose_style.upstream_api_key is None
+
+    with pytest.raises(ValidationError, match="anthropic_upstream_api_key"):
+        GatewaySettings(
+            policy_file=Path("policy.yaml"),
+            anthropic_upstream_base_url="https://api.anthropic.com",
+        )
+
+    with pytest.raises(ValidationError, match="anthropic_upstream_allowed_hosts"):
+        GatewaySettings(
+            policy_file=Path("policy.yaml"),
+            anthropic_upstream_base_url="https://evil.example",
+            anthropic_upstream_api_key=SecretStr("anthropic-key"),
+            anthropic_upstream_allowed_hosts=("api.anthropic.com",),
+        )
+
+
 def test_gateway_settings_load_fixed_detector_profile(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AGENT_GUARDRAIL_POLICY_FILE", "policy.yaml")
     monkeypatch.setenv("AGENT_GUARDRAIL_UPSTREAM_BASE_URL", "https://provider.example/v1")

@@ -1,6 +1,6 @@
 # Gateway 协议参考
 
-> 适合谁：修改 OpenAI/MCP Adapter、HTTP 路由、认证或错误映射的人。
+> 适合谁：修改 OpenAI/Anthropic/MCP Adapter、HTTP 路由、认证或错误映射的人。
 > 解决什么：当前端点、请求生命周期、Canonical 映射和协议边界。
 > 不包含什么：环境变量完整清单和 Agent 选择接入方式。
 
@@ -10,7 +10,7 @@
 FastAPI Route
   → Provider Adapter
   → InputNormalizer / Canonical Tool boundary
-  → request-scoped EnforcementSession
+  → request-scoped or explicit task-scoped EnforcementSession
   → embedded GuardrailRuntime / remote Core DecisionClient
   → fixed UpstreamClient
 ```
@@ -25,14 +25,18 @@ Session 管理 Trace/Decision/Audit；Runtime 是唯一 Policy 判断入口。Ga
 | `GET /health/live` | 进程存活 |
 | `GET /health/ready` | Runtime ready |
 | `GET /v1/policies/current` | 当前 Policy version/hash |
+| `POST /v1/guardrail/task-sessions` | 创建单用户任务级 Session，返回 opaque token 与 Trace ID |
+| `DELETE /v1/guardrail/task-sessions` | 使用 task header 删除任务级 Session |
 | `POST /v1/openai/chat/completions` | OpenAI Chat Completions，非流式或 SSE |
 | `POST /v1/openai/responses` | OpenAI Responses，非流式或命名 SSE |
 | `POST /v1/chat/completions` | 标准 OpenAI SDK base URL 的 Chat alias |
 | `POST /v1/responses` | 标准 OpenAI SDK base URL 的 Responses alias |
+| `POST /v1/anthropic/messages` | Anthropic Messages，非流式或命名 SSE |
+| `POST /v1/messages` | 标准 Anthropic SDK base URL alias |
 | `POST /v1/providers/...` | 可信部署代码注册的其他 Provider Adapter 路由 |
 | `POST /v1/mcp` | MCP `2026-07-28` Streamable HTTP 代理 |
 
-## 3. OpenAI 范围
+## 3. Model Provider 范围
 
 Chat Completions 支持文本消息、function/tool calls、tool declaration 和请求声明 JSON Schema 的 Tool
 arguments 校验。Responses 支持 text/instructions、custom function、function output，以及对应非流式和 SSE
@@ -43,24 +47,36 @@ arguments 校验。Responses 支持 text/instructions、custom function、functi
 仓内 Toy Provider 黑盒测试使用 `{prompt} → {answer}` 和 `token/done` named SSE 证明普通与流式管线都不
 依赖 OpenAI payload；这不是声明 Toy Adapter 是正式发布的 Provider 集成。
 
-每个 HTTP 请求创建独立 Session：
+Anthropic Messages 支持顶层/system message 文本、user/assistant 文本、client tool declaration、
+`tool_use/tool_result`、常用采样参数以及非流式/流式输出。`tool_result` 必须紧跟对应 tool turn 且在 user
+content 中先于 text；`tool_use.id` 映射 canonical `call_id`，可在同一 Gateway task 中由 MCP proposal
+header 引用。当前拒绝 `mcp_servers`、server tools/results、thinking/redacted thinking、图片/文档、
+citations、cache control、container 和 output config。它们不能静默跳过，也不能绕开本项目持有的 MCP
+执行边界。
 
-- 完整 messages 作为本次 `client_asserted` snapshot，不是服务端可信历史；
+受保护请求有两种明确模式：
+
+- 默认无 `X-Agent-Guardrail-Session` 时创建独立请求级 Session；
+- 可信宿主先调用 `POST /v1/guardrail/task-sessions`，再让 Model/`tools/call` 请求携带返回的 opaque token，
+  两类请求即复用同一 `EnforcementSession/Trace`；部署可用
+  `AGENT_GUARDRAIL_TASK_SESSIONS_REQUIRED=true` 禁止前一种模式；
+- 完整 messages 仍作为本次 `client_asserted` snapshot，不会因 task token 自动升级为服务端可信历史；
 - request 历史加 `MODEL_CALL` 和 observed response 各形成一个原子 batch；
 - 不接受客户端覆盖 Trace、Policy、origin、Relation 或 security fact；公共协议不提供 principal、tenant 或
   owner 字段；
-- 不维护跨请求 Session Store 或 Tool 调用计数。
+- task token 是有界状态的相关性 capability，不是终端用户身份或业务授权；只存在于当前 Gateway 进程内存，
+  使用滑动 TTL、容量/Trace 上限和显式删除，不跨进程或重启恢复。
 
 ## 4. Provider Canonical 映射
 
-| OpenAI 数据 | EventKind | Origin / Relation |
+| Provider 数据 | EventKind | Origin / Relation |
 | --- | --- | --- |
 | request system/user/assistant 文本 | `message` | `client_asserted` |
-| request assistant tool call | `tool_call_proposal` | `client_asserted` |
-| request tool role message | `tool_result` | `client_asserted`；`influenced_by` 对应 proposal |
+| request assistant tool call / Anthropic `tool_use` | `tool_call_proposal` | `client_asserted` |
+| request tool role / Anthropic `tool_result` | `tool_result` | `client_asserted`；`influenced_by` 对应 proposal |
 | 即将发生的上游模型调用 | `model_call` | `observed`；所有请求历史经 `influenced_by` 指向此调用 |
 | response assistant 文本/refusal | `message` | `observed`；`derived_from` model call |
-| response assistant tool call | `tool_call_proposal` | `observed`；`derived_from` model call |
+| response assistant tool call / `tool_use` | `tool_call_proposal` | `observed`；`derived_from` model call |
 
 Responses `instructions` 映射 system Message；string input 映射 user Message；message/function_call/
 function_call_output history 映射同一组 Canonical Message、ToolCallProposal 和 ToolResult。多个 function call
@@ -68,6 +84,11 @@ function_call_output history 映射同一组 Canonical Message、ToolCallProposa
 
 request ToolResult 必须匹配当前 turn 的 ToolCall ID，Normalizer 建立批内 Relation，并拒绝孤立、重复、跨轮
 或未完成 group。响应 ToolCall 的名称必须在请求 tools 中声明，arguments 必须通过声明 Schema。
+
+task 模式下，如果请求历史中的 ToolResult `call_id + tool name` 唯一匹配同一 Trace 内由 MCP Gateway
+observed 的 ToolResult，当前 ModelCall 的输入边会指向该 observed Event；客户端提交的历史 Event 本身仍保持
+`client_asserted`。歧义匹配在请求模型上游前失败。其他 Message/Tool 历史仍按快照展开，当前没有通用 history
+cursor 或去重。
 
 tool declaration、usage 和 finish reason 当前不形成独立 Event；`model` 只进入轻量 `MODEL_CALL`，不会把
 完整 Provider request 作为聚合 Event。未知 Provider 字段拒绝，不复制到 metadata 或 MatchPlan。
@@ -89,8 +110,8 @@ tool declaration、usage 和 finish reason 当前不形成独立 Event；`model`
 调用前检查不能与上游请求并发。response normalization、Trace capacity 或输出 Decision 失败发生在上游调用后，
 但原始响应仍不得释放。
 
-allow/log 原子提交整个 batch；block 丢弃原始 pending Event，只追加脱敏 Decision Event。Trace 只在请求
-内存中存在，Audit 只持久化 Violation 摘要。
+allow/log 原子提交整个 batch；block 丢弃原始 pending Event，只追加脱敏 Decision Event。请求级 Trace
+随请求结束；task Trace 保存到 TTL、显式删除、容量耗尽或进程结束。Audit 只持久化 Violation 摘要。
 
 ## 6. Streaming 生命周期与不可撤回边界
 
@@ -104,7 +125,8 @@ allow/log 原子提交整个 batch；block 丢弃原始 pending Event，只追�
 ```
 
 - Chat Completions 使用 data-only SSE 与 `[DONE]`；Responses 要求 SSE `event` 与 JSON `type` 一致，并以
-  `response.completed` 终止。
+  `response.completed` 终止；Anthropic 要求 `message_start → content block → message_delta → message_stop`
+  命名事件序列，tool input 的 `partial_json` 到 block stop 才解析与放行。
 - 原始上游 event 不直接透传；Adapter 严格校验后重新编码封闭 event，未映射的 Responses metadata 会被
   丢弃。
 - 重复 JSON key 会在重新编码时归一化；unknown field/event、UTF-8/JSON/SSE 错误、identity 改变、超限、
@@ -126,6 +148,8 @@ payload 或堆栈。
 | 情况 | HTTP | 是否调用上游 |
 | --- | ---: | --- |
 | 协议/结构/大小非法 | 400/413/415/422 | 否 |
+| task token 缺失/非法/过期，或 proposal 引用不匹配 | 400 | 否 |
+| task-session 容量耗尽 | 503（创建端点） | 否 |
 | `before_model_call` block | 400 | 否 |
 | Runtime 不可用 | 503 | 否 |
 | 上游失败 | 502/504 | 是 |
@@ -149,11 +173,15 @@ Model Provider 上游认证支持：
 - `server_managed`：客户端 Key 认证 Gateway，服务端 Key 调用固定上游；
 - `pass_through`：转发客户端 Authorization。
 
+以上两种模式用于通用/OpenAI 上游。Anthropic 固定使用独立的 server-managed `x-api-key`，并固定发送
+`anthropic-version: 2023-06-01`；标准 Anthropic SDK 发给 Gateway 的 `x-api-key` 只认证 Gateway，不会转发
+为 Provider Key，也可改用 Gateway Bearer Key。两类 Provider Key 可同时配置且互不覆盖。
+
 Authorization 永不记录；请求不能指定动态 URL；host allowlist 可限制固定地址；redirect 关闭。
 
 ## 9. MCP `2026-07-28`
 
-当前仅支持无状态：
+MCP wire 协议仍只支持无状态：
 
 - `server/discover`、`ping`、`tools/list`、`tools/call`；
 - 不支持旧 `initialize`、`notifications/initialized`、`Mcp-Session-Id`、GET stream、DELETE session；
@@ -162,7 +190,14 @@ Authorization 永不记录；请求不能指定动态 URL；host allowlist 可�
 - 普通 JSON 和请求级 SSE 均完整缓冲；不支持 subscription、长连接 notification 或实时 progress。
 
 只有 `tools/call` 映射 Canonical ToolCall，执行 `before_tool_call`，allow 后请求固定 Server，完整读取
-ToolResult 后执行 `before_tool_output_release`。每次调用创建独立 Session；`tools/list` 不伪装 Tool Event。
+ToolResult 后执行 `before_tool_output_release`。无 Gateway task token 时每次调用创建独立 Session；有效 token
+时复用对应 task Session。`tools/list` 不伪装 Tool Event。
+
+可信宿主可同时发送 `X-Agent-Guardrail-Proposal-Id: <provider call_id>`。Gateway 只接受同一 task Trace 中
+唯一、已提交、`observed` 的 Model `TOOL_CALL_PROPOSAL`，并要求 MCP 工具名和 arguments 与 proposal 完全
+一致；通过后实际 `TOOL_CALL` 使用该 call ID，并以 `influenced_by` 指回 proposal。缺失/歧义、参数不匹配、
+重复执行或没有 task token 的显式 proposal 引用均在 MCP 上游副作用前失败。直接由宿主发起、没有 proposal
+的 MCP 调用仍可执行，但不会伪造 proposal Relation。流式 proposal 必须等 terminal 完整输出提交后才能引用。
 
 Guardrail block 返回 HTTP 200 中 JSON-RPC Error `-32040`；不支持协议版本为 `-32022`；Header/body
 不一致为 `-32020`。调用前 block 时固定上游请求次数必须为零；输出释放前 block 时上游已执行一次，但
@@ -170,10 +205,10 @@ Guardrail block 返回 HTTP 200 中 JSON-RPC Error `-32040`；不支持协议版
 
 ## 10. 资源与生命周期
 
-Gateway 限制 request/response bytes、Core 与上游 timeout、Trace Event、Violation、MatchPlan/capability
-预算和 HTTP 连接池。应用启动时创建 embedded 或 remote Runtime；remote 启动会认证 Core 并固定 Policy
-identity，readiness 会检查 Core 可达且 identity 未变化。每个受保护调用创建独立 Session，health、Policy
-query 和 MCP 非 Tool 方法不创建 Session。
+Gateway 限制 request/response bytes、Core 与上游 timeout、Trace Event、task 数量/TTL、Violation、
+MatchPlan/capability 预算和 HTTP 连接池。应用启动时创建 embedded 或 remote Runtime；remote 启动会认证
+Core 并固定 Policy identity，readiness 会检查 Core 可达且 identity 未变化。无 task token 的受保护调用创建
+独立 Session；health、Policy query 和 MCP 非 Tool 方法不创建或修改 task Session。
 
 启动和 Settings 见[运行指南](../guides/operations.md)，接入示例见
 [Agent 与 Enforcement 接入](../guides/integration.md)。
