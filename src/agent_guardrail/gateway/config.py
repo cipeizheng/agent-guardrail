@@ -42,10 +42,6 @@ class GatewaySettings(BaseSettings):
         le=67_108_864,
     )
     max_trace_events: int = Field(default=16, ge=2, le=1_000)
-    task_sessions_required: bool = False
-    task_session_max_sessions: int = Field(default=128, ge=1, le=10_000)
-    task_session_ttl_seconds: float = Field(default=1_800.0, gt=0, le=86_400)
-    task_session_max_trace_events: int = Field(default=256, ge=2, le=1_000)
     upstream_timeout_seconds: float = Field(default=60.0, gt=0, le=600)
     detector_profile: (
         Literal["local", "full_deberta", "full_promptguard2", "promptguard2"]

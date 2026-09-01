@@ -22,19 +22,26 @@ from agent_guardrail.detectors import (
 )
 from agent_guardrail.enforcement import (
     EnforcementSession,
-    GuardedLLMClient,
-    GuardrailBlocked,
     InMemoryAuditSink,
 )
 from agent_guardrail.models import (
     ChatMessage,
     ChatRole,
+    Decision,
+    EventKind,
     ModelRequest,
     ModelResponse,
     Trace,
 )
 from agent_guardrail.testing import ScriptedLLM
 from tests.support import analyzer_from_yaml
+
+
+async def _submit_user_message(session: EnforcementSession, text: str) -> Decision:
+    return await session.submit(
+        kind=EventKind.MESSAGE,
+        payload={"role": "user", "content": {"type": "text", "text": text}},
+    )
 
 
 def _text_detector_policy(capability: str, detection_type: str) -> str:
@@ -92,7 +99,7 @@ rules:
         ),
     ],
 )
-async def test_local_aligned_detector_blocks_before_llm_and_allows_adjacent_input(
+async def test_local_aligned_detector_decides_before_provider_and_allows_adjacent_input(
     capability: str,
     detection_type: str,
     attack: str,
@@ -102,38 +109,32 @@ async def test_local_aligned_detector_blocks_before_llm_and_allows_adjacent_inpu
     blocked_inner = ScriptedLLM([ModelResponse(content="must not be used")])
     blocked_trace = Trace(id="trace-blocked")
     audit = InMemoryAuditSink()
-    blocked_client = GuardedLLMClient(
-        inner=blocked_inner,
-        session=EnforcementSession(
-            analyzer=analyzer_from_yaml(policy_source),
-            trace=blocked_trace,
-            audit=audit,
-        ),
+    blocked_session = EnforcementSession(
+        analyzer=analyzer_from_yaml(policy_source),
+        trace=blocked_trace,
+        audit=audit,
     )
 
-    with pytest.raises(GuardrailBlocked) as blocked:
-        await blocked_client.complete(
-            ModelRequest(messages=(ChatMessage(role=ChatRole.USER, content=attack),))
-        )
+    blocked = await _submit_user_message(blocked_session, attack)
 
+    assert blocked.blocked
     assert blocked_inner.call_count == 0
-    assert blocked.value.decision.violations[0].code == "aligned_detector_fact"
-    assert attack not in blocked.value.decision.model_dump_json()
+    assert blocked.violations[0].code == "aligned_detector_fact"
+    assert attack not in blocked.model_dump_json()
     assert attack not in blocked_trace.model_dump_json()
     assert attack not in audit.records[0].model_dump_json()
 
     allowed_inner = ScriptedLLM([ModelResponse(content="safe response")])
-    allowed_client = GuardedLLMClient(
-        inner=allowed_inner,
-        session=EnforcementSession(
-            analyzer=analyzer_from_yaml(policy_source),
-            trace=Trace(id="trace-allowed"),
-        ),
+    allowed_session = EnforcementSession(
+        analyzer=analyzer_from_yaml(policy_source),
+        trace=Trace(id="trace-allowed"),
     )
-
-    response = await allowed_client.complete(
-        ModelRequest(messages=(ChatMessage(role=ChatRole.USER, content=adjacent_safe),))
+    request = ModelRequest(
+        messages=(ChatMessage(role=ChatRole.USER, content=adjacent_safe),)
     )
+    allowed = await _submit_user_message(allowed_session, adjacent_safe)
+    assert not allowed.blocked
+    response = await allowed_inner.complete(request)
 
     assert response.content == "safe response"
     assert allowed_inner.call_count == 1
@@ -171,23 +172,21 @@ rules:
         ("Please summarize the quarterly revenue report", False),
     ],
 )
-async def test_fuzzy_predicate_enforces_before_llm(text: str, blocked: bool) -> None:
+async def test_fuzzy_predicate_decides_before_provider(text: str, blocked: bool) -> None:
     inner = ScriptedLLM([ModelResponse(content="safe response")])
-    client = GuardedLLMClient(
-        inner=inner,
-        session=EnforcementSession(
-            analyzer=analyzer_from_yaml(FUZZY_POLICY),
-            trace=Trace(id="trace-fuzzy"),
-        ),
+    session = EnforcementSession(
+        analyzer=analyzer_from_yaml(FUZZY_POLICY),
+        trace=Trace(id="trace-fuzzy"),
     )
     request = ModelRequest(messages=(ChatMessage(role=ChatRole.USER, content=text),))
+    decision = await _submit_user_message(session, text)
 
     if blocked:
-        with pytest.raises(GuardrailBlocked):
-            await client.complete(request)
+        assert decision.blocked
         assert inner.call_count == 0
     else:
-        assert (await client.complete(request)).content == "safe response"
+        assert not decision.blocked
+        assert (await inner.complete(request)).content == "safe response"
         assert inner.call_count == 1
 
 
@@ -274,19 +273,14 @@ async def test_explicit_adapter_registry_reaches_enforcement_without_leaking_inp
     )
     trace = Trace(id="trace-adapter")
     inner = ScriptedLLM([ModelResponse(content="must not be used")])
-    client = GuardedLLMClient(
-        inner=inner,
-        session=EnforcementSession(
-            analyzer=MatchPolicyAnalyzer(policy),
-            trace=trace,
-        ),
+    session = EnforcementSession(
+        analyzer=MatchPolicyAnalyzer(policy),
+        trace=trace,
     )
 
-    with pytest.raises(GuardrailBlocked) as blocked:
-        await client.complete(
-            ModelRequest(messages=(ChatMessage(role=ChatRole.USER, content=raw_input),))
-        )
+    decision = await _submit_user_message(session, raw_input)
 
+    assert decision.blocked
     assert inner.call_count == 0
-    assert raw_input not in blocked.value.decision.model_dump_json()
+    assert raw_input not in decision.model_dump_json()
     assert raw_input not in trace.model_dump_json()

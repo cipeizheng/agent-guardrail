@@ -1,21 +1,19 @@
-# Invariant 对齐基线
+# 与 Invariant 的规则语义对照
 
-> 适合谁：评审本项目与 Invariant Policy/Monitor 语义差异的人。
-> 解决什么：参考版本、I01–I14 映射和有意不兼容项。
-> 不包含什么：本项目作者语法教程。
+> 本文说明本项目如何对照 Invariant 的规则语义，以及哪些语义已经由生产代码和测试覆盖。
+> 相关参考：[规则编写指南](../guides/policy-authoring.md)、[分析引擎参考](../reference/analysis-engine.md)。
 
-## 1. 参考基线
+## 1. 对照基线
 
-参考对象是同级 checkout `../invariant` 的 commit `2340fe2`。2026-08-10 对 flow、monitor、quantifier、derive、range 和 guarding 测试执行本地回放，结果 63 passed、2 skipped；跳过项依赖可选 Presidio/Transformers detector。
+参考对象是同级目录 `../invariant` 中 commit `2340fe2` 的代码。本页描述该参考实现与本项目生产模型之间的语义对应关系；具体交付状态见[检测能力状态矩阵](../capability-status.yaml)。
 
-本项目要求自己的 Canonical Model、Schema、Matcher 和 Registry 得到等价安全结果，不复制 Invariant 源码、IPL、Python import、handler 或异常类型。I01–I14 由直接调用生产 Schema/编译器/Matcher 的测试覆盖，不维护 test-only 影子解释器。
+本项目使用自己的标准数据模型、Schema、匹配器和注册表，在本项目的安全边界内实现相应语义。I01–I14 由直接调用生产 Schema、编译器和匹配器的测试覆盖；测试不另写一套解释器。
 
-## 2. 术语映射
+## 2. 概念对照
 
 | Invariant | 本项目 |
 | --- | --- |
 | `Policy.analyze(trace)` | 无状态 snapshot → AnalysisReport |
-| `Monitor` | 未实现；增量 Finding 去重属于 P4 roadmap |
 | typed/collection binding | typed Event / 有界 collection binding |
 | predicate / derived variable | 声明式条件或可信 Predicate / derive |
 | `raise PolicyViolation` | 静态脱敏 Finding |
@@ -24,31 +22,31 @@
 | ToolOutput | Canonical `tool_result` |
 | Python detector/import | 部署方 Registry descriptor |
 
-## 3. I01–I14
+## 3. I01–I14 行为对照
 
 | ID | 能力 | 本项目合同 |
 | --- | --- | --- |
-| I01 | typed selection | Event binding 与 origin/domain filter |
-| I02 | multi Event | 命名笛卡尔积与组合预算 |
-| I03 | nested Tool | 安全字段路径与 collection |
-| I04 | derive | 有界 `split_lines` |
-| I05 | predicate composition | 编译期内联；代码只来自 Registry |
-| I06 | quantifier/closure | 有界量词和 lexical binding |
-| I07 | order | 顺序查询不写 Relation |
-| I08 | exact relation | direct/ancestor 类型化 Relation |
-| I09 | stateless | 确定性 SnapshotMatcher |
-| I10 | whole-pending | past + pending，subject 含 pending |
-| I11 | incremental | 未对齐（P4：增量 Matcher/cache）|
-| I12 | host capability | 显式 Registry；拒绝 Policy import |
-| I13 | range/evidence | 有界脱敏位置与 evidence |
-| I14 | parameter | 可信 typed scalar |
+| I01 | 按类型选择事件 | Event binding 与 origin/domain filter |
+| I02 | 选择多个事件 | 命名笛卡尔积与组合预算 |
+| I03 | 访问嵌套工具数据 | 安全字段路径与有界 collection |
+| I04 | 派生值 | 有界 `split_lines` |
+| I05 | 组合条件 | 编译期内联；代码只来自 Registry |
+| I06 | 量词与局部变量 | 有界量词和 lexical binding |
+| I07 | 判断先后顺序 | 顺序查询不写 Relation |
+| I08 | 查询明确关系 | direct/ancestor 类型化 Relation |
+| I09 | 无状态分析 | 确定性 SnapshotMatcher |
+| I10 | 整批待提交分析 | 已提交历史 + 本次完整批次，命中结果必须涉及待提交事件 |
+| I11 | 增量分析 | 当前为 snapshot 分析；增量 Matcher/cache 属于后续规划 |
+| I12 | 部署方提供能力 | 显式 Registry；拒绝 Policy import |
+| I13 | 范围与证据 | 有界脱敏位置与 evidence |
+| I14 | 参数 | 可信 typed scalar |
 
-## 4. 有意差异
+## 4. 安全边界
 
-- Policy 不能 import、指定 module/function 或遍历任意 Python object。
-- Matcher 不调用或包装 Tool/LLM。
-- 时间先后不生成 data lineage。
-- Finding/Error/Decision 不携带完整 Event/content。
-- 使用分项预算，不用单一迭代上限。
+- Policy 使用声明式 binding、Predicate 和 Registry capability；执行计划不加载任意 Python module/function，也不遍历任意对象。
+- Matcher 只消费规范化 Event 和可信 capability 结果；Tool/LLM 调用由入口适配器与宿主负责。
+- 时间先后使用 `precedes` 表达顺序，数据来源使用 `derived_from` 或 `linked_by` 表达。
+- Finding、Error 和 Decision 使用脱敏投影，不携带完整 Event/content。
+- MatchPlan 使用候选、组合、递归、evidence 等分项预算。
 
-新增语义先扩展相邻 I01–I14 生产行为测试。作者格式见[Policy 作者指南](../guides/policy-authoring.md)，执行合同见[分析引擎参考](../reference/analysis-engine.md)。
+新增语义先扩展相邻 I01–I14 生产行为测试，并同步[路线图](../roadmap.md)或[当前架构合同](../current-architecture-contract.md)。作者格式见[规则编写指南](../guides/policy-authoring.md)。

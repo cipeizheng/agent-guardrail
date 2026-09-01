@@ -131,12 +131,13 @@ def test_unsupported_and_legacy_versions_list_only_current_version() -> None:
     assert initialize.value.rpc_code == -32022
 
 
-def test_unknown_method_returns_http_404_method_not_found() -> None:
+@pytest.mark.parametrize("method", ["ping", "resources/read"])
+def test_unknown_method_returns_http_404_method_not_found(method: str) -> None:
     adapter = MCPAdapter()
     payload = tool_request()
-    payload["method"] = "resources/read"
+    payload["method"] = method
     request = adapter.parse_request(payload)
-    request_headers = headers(method="resources/read")
+    request_headers = headers(method=method)
 
     with pytest.raises(MCPAdapterError) as error:
         adapter.validate_headers(request, request_headers)

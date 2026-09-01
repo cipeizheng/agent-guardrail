@@ -1,147 +1,236 @@
-schema_version: 1
-last_verified: "2026-08-18"
+schema_version: 2
+last_reviewed: "2026-09-01"
+
+scope: 本矩阵记录规则可引用的检测与条件判断能力，并分别记录标准部署可达性、真实实现证据和规则执行证据。威胁路径编号来自 security-model.md。
 
 status_vocabulary:
-  verified: 实际算法或声明的真实后端已运行，并满足完整行为完成定义。
-  baseline: 已实现并测试基础能力，但未达到该 roadmap 能力要求的覆盖面。
-  adapter_only: 接入、Schema、预算和 Enforcement 已测试，但真实外部后端未验证。
-  planned: 尚未实现。
+  verified: 真实算法或固定后端位于标准生产路径，正常、违规、边界、失败、脱敏、规则执行和受保护副作用断言满足当前能力的完成定义。
+  baseline: 真实算法或固定后端位于标准生产路径，基础行为已经运行，能力覆盖面或实际效果仍有限。
+  experimental: 真实后端已经通过独立评测路径运行；标准生产配置、完整规则执行和失败边界列为后续验证项。
+  adapter_only: 接口、Schema、预算或模拟后端合同已经测试；真实外部后端接入列为后续验证项。
+  planned: 实现列在后续规划中。
 
-verified_definition:
-  - actual_algorithm_or_backend_executed
-  - safe_attack_boundary_cases
-  - applicable_failure_timeout_budget_cases
-  - redacted_evidence
-  - registry_matchplan_decision_path
-  - enforcement_side_effect_assertion
-  - documentation_synchronized
-  - quality_gates_passed
+access_vocabulary:
+  default: 默认注册表直接提供。
+  configurable: Gateway、Core 或命名部署配置可以启用。
+  custom_registry: 可信应用代码构造自定义注册表后可以启用。
+  unavailable: 当前入口无法启用。
+  not_applicable: 该入口不适用于此类能力。
 
-priority_capabilities:
-  - id: P0-D01
-    name: unicode_security
-    kind: detector
-    status: verified
-    threat_paths: [T03, T04, T07]
-    implementation: unicode_security
-    note: 控制、格式、双向、零宽和有限混合脚本混淆检测已实际运行。
+evidence_vocabulary:
+  current_audit: 本次审计实际运行了实现。
+  quality_gate: 默认测试套件验证实现、预算、失败、脱敏和规则执行合同；本地算法在该套件中直接运行。
+  independent_eval: 仓库具有固定真实后端、真实后端测试和评测入口；该证据来自独立评测路径。
+  adapter_contract: 测试使用确定性模拟后端验证接口和规则执行合同。
+  missing: 对应证据列为后续补充项。
 
-  - id: P0-D02
-    name: secrets
+review_basis:
+  code_paths:
+    - src/agent_guardrail/config/defaults.py
+    - src/agent_guardrail/config/deployment.py
+    - src/agent_guardrail/gateway/config.py
+    - src/agent_guardrail/gateway/app.py
+    - src/agent_guardrail/core_service/config.py
+    - src/agent_guardrail/core_service/app.py
+    - src/agent_guardrail/detector_sdk.py
+    - src/agent_guardrail/detectors
+    - src/agent_guardrail/predicates
+  behavior_tests:
+    - tests/unit/test_security_detectors.py
+    - tests/unit/test_priority_detectors.py
+    - tests/unit/test_secret_detector_parity.py
+    - tests/unit/test_pii_detector.py
+    - tests/unit/test_prompt_detector_parity.py
+    - tests/unit/test_code_detector_parity.py
+    - tests/unit/test_real_detector_backends.py
+    - tests/unit/test_llm_judge_detector.py
+    - tests/unit/test_similarity_detector.py
+    - tests/integration/test_builtin_capabilities.py
+    - tests/integration/test_invariant_detector_alignment.py
+    - tests/integration/test_full_local_detector_profile.py
+  backends_exercised_in_quality_gate:
+    - presidio_spacy_en
+    - semgrep_1_170_0
+    - yara_python_4_5_4
+  backends_covered_by_independent_eval:
+    - protect_ai_deberta_v2
+    - meta_promptguard_2_86m
+    - external_embedding_service
+    - external_llm_judge
+
+capabilities:
+  - id: DET-01
+    runtime_name: secrets
+    profile: local
     kind: detector
     status: verified
     threat_paths: [T01, T02, T05, T09]
-    implementation: secrets
-    note: Invariant 的 GitHub/AWS/Azure/Slack 类别及既有 private/OpenAI/Bearer/assigned 规则、校验、误报过滤和脱敏 Enforcement 路径已实际运行。
+    access: {policy: default, detector_runner: default, gateway_core: default}
+    evidence: {implementation: quality_gate, policy_enforcement: quality_gate, failure_boundaries: quality_gate}
+    scope: 固定格式、上下文校验和误报过滤覆盖 private key、GitHub、AWS、Azure、Slack、OpenAI、Bearer 与赋值型 Secret；结果只包含位置和脱敏指纹。
 
-  - id: P0-D03
-    name: pii
+  - id: DET-02
+    runtime_name: pii
+    profile: local_validators
     kind: detector
     status: verified
     threat_paths: [T01, T02, T05, T09]
-    implementation: pii
-    note: 校验型本地规则及 full_deberta 的 Presidio 2.2.363/spaCy 英文 person/location NER 已真实运行；中文身份证/手机号是额外本地校验能力，通用多语言 NER 不属于完成定义。与固定 Invariant 基线的对比数据见对应评测报告，本矩阵只记录验证状态。
+    access: {policy: default, detector_runner: default, gateway_core: default}
+    evidence: {implementation: quality_gate, policy_enforcement: quality_gate, failure_boundaries: quality_gate}
+    scope: 本地校验规则覆盖电子邮箱、电话、身份证件、金融账号、网络地址和加密货币地址等固定类型；结果不包含原始个人信息。
 
-  - id: P0-D04
-    name: prompt_injection_model
+  - id: DET-03
+    runtime_name: pii
+    profile: presidio_spacy_en
+    kind: detector
+    status: verified
+    threat_paths: [T01, T02, T05, T09]
+    access: {policy: configurable, detector_runner: configurable, gateway_core: configurable}
+    evidence: {implementation: current_audit, policy_enforcement: adapter_contract, failure_boundaries: quality_gate}
+    scope: 固定 Presidio 2.2.363、spaCy 3.8.15 和英文模型增加 person、location、organization 等英文实体类型；本地校验规则同时保留。
+
+  - id: DET-04
+    runtime_name: prompt_injection
+    profile: local_patterns
     kind: detector
     status: baseline
     threat_paths: [T03, T04]
-    implementation: prompt_injection_model
-    note: full_deberta 锁定 Protect AI DeBERTa v2 提交，真实 backend、预算、脱敏和 Enforcement 路径均已运行；但固定 0.85 阈值在锁定的 BIPIA 125 条攻击载荷与 NotInject 339 条良性难例上只有 8% recall、39.82% false-positive rate。2026-08 全量分数标定进一步显示 ROC AUC 仅 0.365（低于随机）且不存在 FPR≤1% 的可达操作点，即差距在分数排序本身而非阈值选择；同月输入构造实验（长 tool result 分段聚合）进一步排除了截断/稀释机制--判别器对"嵌入此代码"类目标劫持载荷裸文本即打 ~0.0002 分，其"注入"概念仅覆盖祈使元指令风格，因此仅为已接入基线，不能作为复杂 prompt injection 的充分防御。
+    access: {policy: default, detector_runner: default, gateway_core: default}
+    evidence: {implementation: quality_gate, policy_enforcement: quality_gate, failure_boundaries: quality_gate}
+    scope: 固定中英文高信号模式覆盖指令覆盖、系统提示泄露、角色替换和控制标记。
+    limitation: 语义改写、任务目标劫持和未落入固定表达形式的间接注入位于检测范围之外。
 
-  - id: P0-D05
-    name: prompt_injection_model_promptguard2
+  - id: DET-05
+    runtime_name: prompt_injection_model
+    profile: protect_ai_deberta_v2
     kind: detector
     status: baseline
     threat_paths: [T03, T04]
-    implementation: prompt_injection_model
-    note: 候选部署 profile（full_promptguard2/promptguard2）使用 Meta PromptGuard 2 86M，评分路径对齐
-      LlamaFirewall（全空白剥离重分词、截断 512、MALICIOUS 类概率），资产按镜像 commit + size + SHA-256
-      pin，构造期逐项校验并 smoke-test。锁定的 AgentDojo 35 条攻击与 NotInject 339 条良性难例记录 AUC
-      0.972、0.9 阈值 recall 0.971、FPR 4.1%（同条件下 DeBERTa AUC 0.590、recall 0.257、FPR 39.8%）；
-      BIPIA 125 条 content_undetectable 载荷记录 AUC 0.436。上述数字描述 PromptGuard 2 在指定语料上的
-      分类特性。权重许可证是 Llama 4 Community License，profile 采用显式 opt-in 配置，状态为 baseline。
+    access: {policy: configurable, detector_runner: configurable, gateway_core: configurable}
+    evidence: {implementation: independent_eval, policy_enforcement: independent_eval, failure_boundaries: quality_gate}
+    scope: 标准部署配置固定 Protect AI DeBERTa v2 模型资产、版本、标签映射、512 token 截断和部署阈值。
+    limitation: 固定公开攻击与良性语料已经显示低召回和高误报，分类结果只作为规则事实。
 
-  - id: P0-D06
-    name: yara_injection_signatures
+  - id: DET-06
+    runtime_name: prompt_injection_model
+    profile: meta_promptguard_2_86m
     kind: detector
-    status: verified
+    status: baseline
     threat_paths: [T03, T04]
-    implementation: yara_injection_signatures
-    note: full_deberta 包内固定 ruleset 已由 yara-python 4.5.4 真实编译和运行，覆盖安全/攻击、UTF-8 span、原生 timeout、结果上限、脱敏和 Enforcement 路径。
+    access: {policy: configurable, detector_runner: configurable, gateway_core: configurable}
+    evidence: {implementation: independent_eval, policy_enforcement: adapter_contract, failure_boundaries: quality_gate}
+    scope: 可选部署配置固定 Meta PromptGuard 2 86M 模型资产、版本、评分方式、512 token 截断和 0.9 默认阈值。
+    limitation: AgentDojo 风格载荷与语义目标劫持载荷呈现不同检测特性；Llama 4 Community License 适用于模型权重。
 
-  - id: P1-P01
-    name: fuzzy_contains
-    kind: predicate
-    status: verified
-    threat_paths: [T03, T04]
-    implementation: fuzzy_contains
-    note: 纯本地有界 Levenshtein substring、工作量上限和 Enforcement 路径已实际运行；不含语义模型 fallback。
-
-  - id: P1-D04
-    name: is_similar
-    kind: detector
-    status: adapter_only
-    threat_paths: [T03, T04]
-    implementation: is_similar
-    note: Invariant 的 string/list、max-pair、严格阈值和三个命名阈值已实现；EmbeddingProfile 固定 model，Policy 不能选择 model/endpoint/凭据；OpenAI-compatible adapter、预算、timeout、脱敏和 before_model_call 零副作用路径已测试，真实外部 embedding backend 尚未 smoke/eval。
-
-  - id: P1-D01
-    name: python_ast_ipython
-    kind: detector
-    status: verified
-    threat_paths: [T04]
-    implementation: python_ast_ipython
-    note: 本地 AST/IPython 结构、危险类别、语法错误、span、上限和 Enforcement 已实际运行，输入从不执行。
-
-  - id: P1-D02
-    name: semgrep
-    kind: detector
-    status: verified
-    threat_paths: [T04]
-    implementation: semgrep
-    note: 外部隔离 Semgrep 1.170.0 与包内固定 Python ruleset 已真实运行；私有临时目录、关闭 metrics/version check、输出上限、4.8 秒硬终止、取消进程组清理、UTF-8 span 和脱敏路径已验证。
-
-  - id: P1-D03
-    name: hidden_content
+  - id: DET-07
+    runtime_name: unicode_security
+    profile: local
     kind: detector
     status: verified
     threat_paths: [T03, T04, T07]
-    implementation: hidden_content
-    note: 隐藏 HTML、不可见 CSS、注释及有界 Base64/百分号/HTML 实体检测和 Enforcement 已实际运行。
+    access: {policy: default, detector_runner: default, gateway_core: default}
+    evidence: {implementation: quality_gate, policy_enforcement: quality_gate, failure_boundaries: quality_gate}
+    scope: 本地算法检测双向控制、零宽字符、其他控制与格式字符，以及有限的 Latin、Greek、Cyrillic 混合脚本混淆。
 
-  - id: P1-D05
-    name: prompt_injection_judge
+  - id: DET-08
+    runtime_name: python_ast_ipython
+    profile: local
     kind: detector
+    status: verified
+    threat_paths: [T04]
+    access: {policy: default, detector_runner: default, gateway_core: default}
+    evidence: {implementation: quality_gate, policy_enforcement: quality_gate, failure_boundaries: quality_gate}
+    scope: 本地解析器识别 Python AST、IPython 结构、语法错误和固定危险类别；输入代码不会被导入或执行。
+
+  - id: DET-09
+    runtime_name: hidden_content
+    profile: local
+    kind: detector
+    status: verified
+    threat_paths: [T03, T04, T07]
+    access: {policy: default, detector_runner: default, gateway_core: default}
+    evidence: {implementation: quality_gate, policy_enforcement: quality_gate, failure_boundaries: quality_gate}
+    scope: 本地算法检测隐藏 HTML、不可见 CSS、注释以及单轮有界 Base64、百分号和 HTML 实体编码内容。
+
+  - id: DET-10
+    runtime_name: semgrep
+    profile: pinned_python_rules
+    kind: detector
+    status: verified
+    threat_paths: [T04]
+    access: {policy: configurable, detector_runner: configurable, gateway_core: configurable}
+    evidence: {implementation: current_audit, policy_enforcement: adapter_contract, failure_boundaries: quality_gate}
+    scope: 标准部署配置使用 Semgrep 1.170.0 和包内固定 Python 规则，私有临时文件、输出上限、进程组终止、字符位置转换和脱敏结果均有明确边界。
+
+  - id: DET-11
+    runtime_name: yara_injection_signatures
+    profile: pinned_injection_rules
+    kind: detector
+    status: verified
+    threat_paths: [T03, T04]
+    access: {policy: configurable, detector_runner: configurable, gateway_core: configurable}
+    evidence: {implementation: current_audit, policy_enforcement: adapter_contract, failure_boundaries: quality_gate}
+    scope: 标准部署配置使用 yara-python 4.5.4、包内固定规则和固定类型映射，覆盖规则编译、原生超时、结果上限、字符位置转换和脱敏结果。
+
+  - id: DET-12
+    runtime_name: prompt_injection_judge
+    profile: external_llm_judge
+    kind: detector
+    status: experimental
+    threat_paths: [T03, T04]
+    access: {policy: custom_registry, detector_runner: custom_registry, gateway_core: custom_registry}
+    evidence: {implementation: independent_eval, policy_enforcement: missing, failure_boundaries: adapter_contract}
+    scope: 库级接口固定 Judge 后端身份、Prompt 指纹、阈值、输入上限、十秒期限和脱敏判定结果；DeepSeek 后端位于独立评测目录。
+    limitation: Judge 通过可信自定义 Registry 接入；真实后端的 Gateway/Core 配置、超时、失败关闭和受保护副作用断言仍属于后续交付。
+
+  - id: SIM-01
+    runtime_name: is_similar
+    profile: openai_compatible_embedding
+    kind: similarity
     status: adapter_only
     threat_paths: [T03, T04]
-    implementation: prompt_injection_judge
-    note: 部署注入 LLM judge 通道采用与 is_similar EmbeddingProfile 一致的依赖注入模式。单元测试覆盖
-      adapter、Schema、descriptor 预算（16 KiB、10 秒）、阈值/版本身份绑定、脱敏和 fail-closed 路径。
-      DeepSeek judge 经 DetectorRunner 全链路在固定 BIPIA、NotInject 与 AgentDojo 载荷上完成一次模型臂，
-      记录 recall 0.82、NotInject FPR 0.37。上述数字描述 DeepSeek judge 在指定语料上的分类特性。
-      verified 完成定义仍需真实 backend 的边界/超时用例与 Enforcement 断言，当前状态为 adapter_only。
+    access: {policy: custom_registry, detector_runner: unavailable, gateway_core: custom_registry}
+    evidence: {implementation: adapter_contract, policy_enforcement: adapter_contract, failure_boundaries: quality_gate}
+    scope: 专用相似度条件实现文本提取、成对最大余弦、命名阈值、固定模型身份、输入预算和脱敏结果。
+    limitation: 测试使用确定性向量和模拟 OpenAI-compatible Client；真实 embedding 服务、标准部署配置和直接检测入口列为后续接入项。
 
-other_current_capabilities:
-  - name: prompt_injection
-    kind: detector
-    status: baseline
+  - id: PRED-01
+    runtime_name: number_in_range
+    profile: local
+    kind: predicate
+    status: verified
+    threat_paths: []
+    access: {policy: default, detector_runner: not_applicable, gateway_core: default}
+    evidence: {implementation: quality_gate, policy_enforcement: quality_gate, failure_boundaries: quality_gate}
+    scope: 纯本地条件判断有限 JSON 数值是否位于闭区间。
+
+  - id: PRED-02
+    runtime_name: length_in_range
+    profile: local
+    kind: predicate
+    status: verified
+    threat_paths: []
+    access: {policy: default, detector_runner: not_applicable, gateway_core: default}
+    evidence: {implementation: quality_gate, policy_enforcement: quality_gate, failure_boundaries: quality_gate}
+    scope: 纯本地条件判断字符串、数组或对象长度是否位于闭区间。
+
+  - id: PRED-03
+    runtime_name: url_host_allowed
+    profile: local
+    kind: predicate
+    status: verified
+    threat_paths: []
+    access: {policy: default, detector_runner: not_applicable, gateway_core: default}
+    evidence: {implementation: quality_gate, policy_enforcement: quality_gate, failure_boundaries: quality_gate}
+    scope: 纯本地条件判断 HTTP 或 HTTPS 主机是否命中精确或子域允许列表。
+    limitation: DNS、私网地址、重绑定、重定向、路径和响应来源属于网络代理与 Sandbox 控制范围。
+
+  - id: PRED-04
+    runtime_name: fuzzy_contains
+    profile: local_levenshtein
+    kind: predicate
+    status: verified
     threat_paths: [T03, T04]
-    implementation: prompt_injection
-    note: 确定性高信号模式及 Enforcement 路径已实际运行；它是可解释的局部补充，不覆盖 BIPIA 的间接或语义改写攻击载荷。
-  - name: number_in_range
-    kind: predicate
-    status: verified
-    implementation: number_in_range
-    note: 有限数值、闭区间和非法边界行为已实际运行。
-  - name: length_in_range
-    kind: predicate
-    status: verified
-    implementation: length_in_range
-    note: 字符串、数组和对象长度的闭区间行为已实际运行。
-  - name: url_host_allowed
-    kind: predicate
-    status: verified
-    implementation: url_host_allowed
-    note: HTTP(S) host 规范化、精确/wildcard allowlist 与非法 URL 边界已实际运行；不单独构成完整 SSRF 防护。
+    access: {policy: default, detector_runner: not_applicable, gateway_core: default}
+    evidence: {implementation: quality_gate, policy_enforcement: quality_gate, failure_boundaries: quality_gate}
+    scope: 纯本地有界 Levenshtein 子串条件支持固定编辑距离和工作量上限。

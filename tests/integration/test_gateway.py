@@ -19,7 +19,7 @@ from agent_guardrail.adapters.streaming import (
 )
 from agent_guardrail.core import MatchPolicyAnalyzer
 from agent_guardrail.enforcement import InMemoryAuditSink
-from agent_guardrail.gateway import TASK_SESSION_HEADER, GatewaySettings, create_app
+from agent_guardrail.gateway import GatewaySettings, create_app
 from agent_guardrail.models import (
     ChatMessage,
     ChatRole,
@@ -716,67 +716,25 @@ async def test_allow_proxies_once_with_server_managed_auth() -> None:
 
 
 @pytest.mark.asyncio
-async def test_task_session_lifecycle_reuses_trace_and_rejects_deleted_token() -> None:
-    settings = gateway_settings().model_copy(update={"task_sessions_required": True})
+async def test_model_requests_use_isolated_traces() -> None:
     async with app_client(
         lambda request: httpx.Response(200, json=text_response()),
-        settings=settings,
     ) as (client, requests):
-        created = await client.post(
-            "/v1/guardrail/task-sessions",
-            headers=auth_headers(),
-        )
-        token = created.json()["session_token"]
-        task_headers = {**auth_headers(), TASK_SESSION_HEADER: token}
-
         first = await client.post(
             "/v1/openai/chat/completions",
-            headers=task_headers,
+            headers=auth_headers(),
             json=request_payload(),
         )
         second = await client.post(
             "/v1/openai/chat/completions",
-            headers=task_headers,
-            json=request_payload(),
-        )
-        deleted = await client.delete(
-            "/v1/guardrail/task-sessions",
-            headers=task_headers,
-        )
-        rejected = await client.post(
-            "/v1/openai/chat/completions",
-            headers=task_headers,
-            json=request_payload(),
-        )
-
-    assert created.status_code == 200
-    assert created.headers["cache-control"] == "no-store"
-    assert first.status_code == 200
-    assert second.status_code == 200
-    assert first.headers["x-guardrail-trace-id"] == created.json()["trace_id"]
-    assert second.headers["x-guardrail-trace-id"] == created.json()["trace_id"]
-    assert deleted.status_code == 204
-    assert rejected.status_code == 400
-    assert rejected.json()["error"]["code"] == "task_session_invalid"
-    assert len(requests) == 2
-
-
-@pytest.mark.asyncio
-async def test_required_task_session_fails_before_model_upstream() -> None:
-    settings = gateway_settings().model_copy(update={"task_sessions_required": True})
-    async with app_client(
-        lambda request: httpx.Response(200, json=text_response()),
-        settings=settings,
-    ) as (client, requests):
-        response = await client.post(
-            "/v1/openai/chat/completions",
             headers=auth_headers(),
             json=request_payload(),
         )
 
-    assert response.status_code == 400
-    assert response.json()["error"]["code"] == "task_session_required"
-    assert requests == []
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.headers["x-guardrail-trace-id"] != second.headers["x-guardrail-trace-id"]
+    assert len(requests) == 2
 
 
 @pytest.mark.asyncio

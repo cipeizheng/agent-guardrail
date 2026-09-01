@@ -1,104 +1,94 @@
 # 当前架构合同
 
-> 状态：日常实现的唯一架构合同，只描述当前事实、不可破坏约束和明确范围。架构历史只存在于 Git，不属于实现输入。
-> 最后核对：2026-09-01，版本 `0.1.0`。
+> 日常实现的唯一架构合同，描述当前事实、不可破坏约束和产品边界。版本为 `0.1.0`，最后核对日期为 2026-09-01。
 
-## 1. 当前生产链
+## 1. 规则执行流程
 
-唯一生产 Policy 链：
+系统先读取 YAML 规则并编译成可执行的检查计划。每次收到待检查的事件时，规则匹配阶段会找出命中的规则并生成分析报告；决策分析阶段再把报告转换为放行、记录或拦截的决定，最后由执行层负责调用模型、工具和其他业务操作。
+
+生产规则经过一条固定链路：
 
 ```text
-strict version: 3 YAML → AuthorPolicy → immutable MatchPlan
-→ capability linking → SnapshotMatcher → AnalysisReport
-→ MatchPolicyAnalyzer → Decision → EnforcementSession
+version-3 YAML
+  → PolicyDocument / AuthorPolicy（校验后的规则模型）
+  → MatchPlan（不可变的检查计划）
+  → 能力连接（capability linking：连接已注册的检测能力）
+  → SnapshotMatcher（执行规则匹配）
+  → AnalysisReport（命中项和分析错误）
+  → MatchPolicyAnalyzer（将报告转换为决定）
+  → Decision（放行、记录或拦截）
+  → EnforcementSession（提交事件、返回决定并记录结果）
 ```
 
-- 生产没有 Python Rule、Rule Registry、Structured RulePlan、mandatory anchor 或 v1/v2 fallback。
-- Core/Matcher 只产生 Finding/AnalysisReport；Analyzer 只投影 Decision；它们不执行 Agent、LLM 或 Tool。
-- Runtime 管理 Analyzer 生命周期；Provider 协议属于 Adapter/Gateway，副作用控制属于 Enforcement。
-- pending 分析使用完整 `committed past + whole pending batch`；batch 同 Trace、有界并原子提交。
-- `DetectorRunner` 是不经过 Policy/Decision 的直接事实接口；它与 MatchPlan 复用同一个 descriptor-enforced Detector 执行器，因此不构成第二套 Policy 解释器或第二个 Detector 执行语义。
+- 规则匹配阶段从事件快照中生成规则命中项和分析报告（代码对象为 `Finding` 和 `AnalysisReport`）；`MatchPolicyAnalyzer` 再把报告转换为 `Decision`。可信应用或 Gateway 在决定允许后执行模型、工具和业务副作用。
+- 待提交分析（`pending`）读取完整的已提交历史和本次整批待提交事件；同一任务记录（`Trace`）中的事件批次一次性提交。
+- `DetectorRunner` 与 `MatchPlan` 复用同一个受限检测器执行器。直接调用只返回检测事实；规则分析器才会生成放行、记录或拦截的 `Decision`。
 
-## 2. 当前接入与数据模型
+## 2. 接入方式与数据模型
 
-- 框架无关 `GuardrailRun` SDK 直接提交语义 Event 与显式 `EventRef` Relation；应用自行选择插入位置，不要求每个 Agent Framework 提供专用 Adapter。
-- 框架无关 `DetectorRunner` 可在任意应用位置直接运行一个或多个已发布 Detector；它不需要 YAML，返回脱敏 `Detection` fact，不返回 allow/log/block，也不执行 Agent 的 LLM/Tool/业务副作用。
-- Model Provider Adapter 只负责封闭 wire Schema 与 provider-neutral `ModelRequest/ModelResponse` 转换；可信部署代码可在 `/v1/providers/...` 注册固定相对上游路径，客户端不能选择 URL。
-- OpenAI Chat Completions、OpenAI Responses 与 Anthropic Messages API 均支持非流式和 SSE Streaming；内置路由同时提供带 Provider 名的形式与标准 SDK base URL alias。Anthropic 只接收可完整映射的文本、client `tools/tool_use/tool_result`，不开放服务端 MCP Connector、server tools、thinking、缓存、container 或多模态内容。
-- MCP `2026-07-28` 无状态 `POST /v1/mcp`：`server/discover`、`ping`、`tools/list`、`tools/call`；不建立 MCP 协议 Session。Model 与 `tools/call` 可选择携带 Gateway 自有的 opaque task-session header，共享同一 `EnforcementSession/Trace`。
-- Gateway 可选择进程内 Runtime，或通过版本化内部 HTTP 协议调用固定 Policy 的无状态 Core；两种模式复用同一 `PolicyAnalyzer.analyze_pending` 和唯一 v3 Policy 执行链。当前内部 Remote Core 协议版本为 v4。
-- Inline LLM/Tool Wrapper 是低层便利接入，并必须共享一个请求/任务级 `EnforcementSession` 与 `Trace`。
-- Gateway 提供单进程、内存、有界、滑动 TTL 的单用户 task-session Store。可信宿主显式创建/删除 task，Model 与 MCP 请求只能用 opaque token 选择已有 task；token 是相关性 capability，不是用户身份或授权。`task_sessions_required` 可要求所有受保护 Model/`tools/call` 请求携带 token；未启用时无 token 的请求仍使用独立请求级 Session。
-- 同一 task 中，Model 输出的 observed `TOOL_CALL_PROPOSAL` 可由可信宿主通过 provider `call_id` 在 MCP 请求专用 header 中引用。Gateway 必须验证 proposal 已提交且工具名/参数完全一致，才建立 `proposal → actual TOOL_CALL` 的 `influenced_by`；缺失、歧义、不匹配和重放均不得产生 Relation，显式非法引用在工具副作用前失败。后续显式 Model history 中同 `call_id + tool name` 的 ToolResult 输入边会重连到同 task 内 Gateway 实际观察到的 MCP `TOOL_RESULT`。
-- Canonical `Event.model_version` 为 4；一等 MatchPlan Event：`MESSAGE`、`MODEL_CALL`、`TOOL_CALL_PROPOSAL`、`TOOL_CALL`、`TOOL_RESULT`；payload 封闭且有 Schema 硬上限。Event、PendingTrace、Decision 和 YAML binding 不含 Enforcement Phase。`MODEL_CALL` 是轻量实际模型操作，不是完整请求快照；`TOOL_CALL_PROPOSAL` 是模型建议，`TOOL_CALL` 才表示即将发生真实副作用的调用。
-- 数据来源和可能影响只存在于类型化 `Event.relations`（边挂在后发生事件上、指回 source，读作被动语态）：`derived_from` 表示派生，`influenced_by` 表示可能受其影响；时间顺序不得冒充任一种 Relation。策略条件算子 `linked_by` 读作主动语态（source 经任意来源/影响关系边连到 target），查询的是这两类边。
-- `EventSecurityFacts` 只持久保存绑定到具体 Event payload 的 `trust_class + trust_authority`；它由可信 Session/SDK 接入显式提供，不能由普通 HTTP/Provider payload、metadata 或 EventOrigin 自我声明。
-- 外部 Event 默认 `client_asserted`；只有 Enforcement 可建立 `observed/derived`。
+- `GuardrailRun` 是与具体框架无关的 SDK。应用提交语义事件，并用返回的 `EventRef` 建立明确关系；应用决定把检查放在生命周期中的哪个位置。
+- `DetectorRunner` 可在任意应用位置运行已发布的检测器，返回脱敏 `Detection` 检测事实；应用决定如何处理该事实。
+- 模型服务适配器负责在外部 HTTP 格式与内部 `ModelRequest/ModelResponse` 之间转换。可信部署代码可在 `/v1/providers/...` 注册固定的上游路径。
+- OpenAI Chat Completions、OpenAI Responses 和 Anthropic Messages 支持非流式与 SSE 流式响应。Anthropic 路由覆盖文本和客户端工具调用；服务端 MCP、thinking、缓存、container 和多模态内容属于协议拒绝范围。
+- MCP `2026-07-28` 通过无状态 `POST /v1/mcp` 提供 `server/discover`、`tools/list` 和 `tools/call`。
+- Gateway 可以使用进程内 Runtime，也可以使用版本化的独立 Core；两者都调用 `PolicyAnalyzer.analyze_pending`。
+- Gateway 为每个模型请求和每个 MCP `tools/call` 分别创建请求级 `EnforcementSession` 与 `Trace`。模型请求中的完整对话历史会在本次请求内展开并检查；模型 Trace 与 MCP Trace 之间不建立自动关系。
+- 内部 `Event` 的 `model_version` 为 4。规则可以读取 `MESSAGE`、`MODEL_CALL`、`TOOL_CALL_PROPOSAL`、`TOOL_CALL` 和 `TOOL_RESULT`；执行层还会追加脱敏的 `GUARDRAIL_DECISION` 记录，但它不能作为规则输入或关系来源。
+- `derived_from` 表示派生，`influenced_by` 表示可能影响；关系挂在后发生事件上并指向来源。`precedes` 与 `immediately_precedes` 只表达先后顺序，`linked_by` 查询显式的来源/影响关系。
+- `EventSecurityFacts` 随具体事件内容保存 `trust_class + trust_authority`，由可信的 Session/SDK 接入显式提供。外部事件默认标记为 `client_asserted`；`observed/derived` 由执行层建立。
 
-## 3. 安全对象与上下文
+## 3. 安全对象与信任上下文
 
-- 规则可建模的对象包括用户数据、用户意图和用户资源；执行路径描述信息来自哪里、经过什么处理以及最终发送到哪里或触发什么操作。
-- `FlowSecurityContext` 的 trust/sensitivity/destination/authorization 只能经 Session/PendingTrace 专用通道注入，非 unknown 事实必须带允许的 authority。
-- `EventSecurityFacts` 与 `FlowSecurityContext` 不自动互相复制：前者描述一个 Event payload 的来源可信度并随 Event 提交，后者描述当前 pending flow 的 source→sink 判断语境。Policy 可通过 Event safe envelope 将历史 source trust 与显式 Relation 组合。
-- 普通 attributes、metadata、HTTP/Provider payload 和 SDK Event payload 不能写入保留的 `security_*` 参数或自我授权。
-- Detector 只产生事实；没有可信 source/sink/destination/authorization 语境时，不得宣称完成隐私、控制完整性或资源完整性保护。
-- 产品只支持单用户；公共 Schema、Policy 和运行时不建立 principal、tenant、数据 owner、跨用户授权或跨租户状态。Gateway/Core 服务凭据只保护部署边界，不代表终端用户身份。
-- Runtime 只完整中介经过 Wrapper/Gateway 的调用。任意 Shell、直接 socket/HTTP、宿主文件或进程访问、凭据读取、持久化、资源耗尽和隔离逃逸不因 Detector/Policy 存在而受控；需要独立 Sandbox、网络 egress、OS 权限和 Secret 隔离。Guardrail 应位于不可信 Agent Sandbox 外部的可信执行边界。
+- 规则建模对象包括用户数据、用户意图和用户资源；执行路径描述数据来源、处理过程、目的地和授权。
+- `FlowSecurityContext` 的 trust、sensitivity、destination、authorization 通过 Session/PendingTrace 的专用通道注入；非 `unknown` 值必须携带允许的 authority。
+- `EventSecurityFacts` 描述单个事件内容的来源可信度；`FlowSecurityContext` 描述当前待提交数据从来源到目的地的判断语境。两者都需要显式提供，规则可以通过事件安全外壳和关系组合它们。
+- Detector 只产生检测事实；规则需要把事实与可信来源、目的地或授权语境组合，才能形成相应的安全判断。
+- 产品服务单用户。公共 Schema、Policy 和 Runtime 使用部署服务凭据保护边界，不建立 principal、tenant、data owner 或跨用户授权模型。
+- Gateway 负责完整中介经过其模型和 MCP 路由的调用；使用 `GuardrailRun` 时，可信应用代码读取 `Decision` 后再执行模型、工具或其他副作用。Shell、直接 socket/HTTP、宿主文件或进程访问、凭据读取、持久化、资源耗尽和隔离逃逸由独立 Sandbox、网络 egress、OS 权限和 Secret 隔离控制。Guardrail 位于不可信 Agent Sandbox 外部的可信执行边界。
 
 ## 4. 不可破坏约束
 
-1. 不使用 `eval`/`exec`、动态 Python、callback、import 或代码生成执行外部策略。
-2. YAML 只能引用部署方显式注册、descriptor 约束的 Predicate/Detector；不能选择实现路径或 I/O 权限。
-3. Predicate 必须纯且无 I/O；Detector 调用、输入字节、deadline、结果和 evidence 必须有界并失败安全。
-4. Gateway 的 `before_model_call` 完成前不得请求上游模型；`before_tool_call` 完成前不得执行工具。
-5. 非流式输出完整通过 `before_model_output_release` 后才能释放；输出检查 block 不能撤回已经发生的上游调用。Streaming 每个文本窗口只在累计 Canonical 前缀通过 tentative Decision 后释放，Tool arguments 必须完整 JSON/Schema/Policy 检查后释放，终止时再原子提交完整输出；Gateway 只释放 Adapter 重新编码的封闭 SSE event，不透传原始 event；已释放窗口不能撤回。Anthropic 的不完整 `max_tokens/pause_turn/model_context_window_exceeded` turn 必须失败关闭；服务端 `mcp_servers` 不能绕过 MCP Gateway 的调用前检查。
-6. MCP `tools/call` 无 task token 时使用独立 Session；有效 Gateway task token 时复用该 task 的 Session。两种模式都完整经过 `before_tool_call` 与 `before_tool_output_release`；不得重新引入 MCP `initialize`、`Mcp-Session-Id`、GET stream 或 DELETE session。Gateway task-session 生命周期不是 MCP 协议生命周期。
-7. `block` 不提交原始 pending Event，只提交脱敏 Decision Event；任一 Event block 时整批不提交。
-8. Violation 必须绑定 pending Event；系统错误、超时和预算耗尽不能静默变成 no-match/allow。
-9. 日志、Error、Finding、Violation metadata 和 Audit 不得包含完整 Secret、原始 PII 或完整 prompt。
-10. Enforcement 来源参数只能引用同 Trace 中更早、已允许/记录的非 Decision Event。
-11. 生产模块不得导入 `agent_guardrail.testing`。
-12. 外部协议路由以 `gateway/app.py`、Gateway 环境变量以 `GatewaySettings` 为事实来源；远程分析路由以 `core_service/app.py`、Core 环境变量以 `CoreSettings` 为事实来源。
-13. 远程模式中 Core 启动时只读加载固定 Policy 与 Detector profile，请求不能上传 Policy、模型、规则、路径、命令或 endpoint；Core 只分析完整 PendingTrace，Gateway 持有 Trace、Audit、Provider Key 和全部副作用。
-14. Remote Core 只接受当前封闭协议 v4；其他版本、Core 不可达、认证/协议/超限错误、非法 Decision 或 Policy identity 变化必须失败关闭。Gateway 必须校验 trace、pending Event 与 Policy identity；破坏性 wire Schema 变化必须更换协议版本，不能静默复用现有版本号。
+1. 外部 Policy 使用封闭数据 Schema；执行路径不使用 `eval`、`exec`、动态 Python、callback、外部 import 或代码生成。
+2. YAML 只能引用部署方显式注册且受 descriptor 约束的 Predicate/Detector；实现路径和 I/O 权限由部署代码固定。
+3. Predicate 纯且无 I/O；Detector 的输入字节、deadline、结果数量、类型和 evidence 受 descriptor 与分析预算约束，并在异常、超时或非法返回时显式失败。
+4. Gateway 在 `before_model_call` 完成后请求上游模型，在 `before_tool_call` 完成后执行工具。应用内接入在 `Decision.blocked` 为 false 后执行对应操作。
+5. 非流式模型输出在 `before_model_output_release` 通过后释放。流式输出的每个文本窗口先检查累计的内部统一格式前缀，Tool arguments 先完成 JSON、Schema 和 Policy 检查；终止时原子提交完整输出。已释放窗口保持已发送状态。
+6. 每个 MCP `tools/call` 使用独立的请求级 Session，并经过 `before_tool_call` 和 `before_tool_output_release`。MCP Gateway 使用无状态协议交互。
+7. `block` 不提交原始 pending Event，只提交脱敏 Decision Event；一个 batch 中任一 Event block 时整批不提交。
+8. Violation 绑定 pending Event；系统错误、超时和预算耗尽进入显式失败路径。
+9. 日志、Error、Finding、Violation metadata 和 Audit 不包含完整 Secret、原始 PII 或完整 prompt。
+10. Enforcement 来源参数只引用同 Trace 中更早、已允许或记录的非 Decision Event。
+11. 生产模块不导入 `agent_guardrail.testing`。
+12. 外部路由与配置分别以 `gateway/app.py`、`GatewaySettings`、`core_service/app.py` 和 `CoreSettings` 为事实来源。
+13. Remote Core 启动时从只读部署文件加载固定 Policy 与检测配置（Detector profile）；Gateway 持有 Trace、Audit、Provider Key 和副作用顺序，Core 只分析完整 PendingTrace。
+14. Remote Core 只接受封闭协议 v4。协议、认证、超限、Policy identity 或 Decision 校验失败时 Gateway 失败关闭；破坏性对外协议 Schema 变化使用新协议版本。
 
-## 5. 当前 capability 事实
+## 5. 当前检测能力
 
-- 默认 Detector：`secrets`、`pii`、`prompt_injection`、`unicode_security`、`python_ast_ipython`、`hidden_content`。
-- 默认 Predicate：`number_in_range`、`length_in_range`、`url_host_allowed`、`fuzzy_contains`。
-- `prompt_injection_model`、`prompt_injection_judge`、带外部 backend 的 `pii`、`semgrep`、`yara_injection_signatures` 和 `is_similar` 只有部署代码显式注入后才发布。部署侧配置是逐组件的（环境变量 `..._DETECTOR_PII/_SEMGREP/_YARA/_PROMPT_MODEL` 自由组合）；内置 preset（如 `full_deberta` = presidio + semgrep + yara + 锁定提交的 DeBERTa，固定并离线加载）是组件组合的命名快捷方式，preset 与组件变量互斥。`is_similar` 的 `EmbeddingProfile` 由部署方选择 encoder model、identity 和资源上限，Policy 只能提供 data、target 和 threshold，不能选择 model、endpoint 或凭据。
-- 运行时实际发布名称以默认 Registry 为事实来源；交付验证状态、稳定 roadmap ID 和完成定义以[`capability-status.yaml`](capability-status.yaml) 为事实来源。
-- Policy 与直接 SDK 只能调用 Registry 中带 `DetectorPolicyDescriptor` 的 Detector；两条入口共享 encoding、输入字节、deadline、结果数量、类型与 evidence 校验。任一失败都显式返回/抛出脱敏错误，不能变成 no-hit。
+- 默认检测器：`secrets`、`pii`、`prompt_injection`、`unicode_security`、`python_ast_ipython`、`hidden_content`。
+- 默认条件判断：`number_in_range`、`length_in_range`、`url_host_allowed`、`fuzzy_contains`。
+- `prompt_injection_model`、带外部后端的 `pii`、`semgrep`、`yara_injection_signatures`、`is_similar` 和 `prompt_injection_judge` 由部署配置或可信 Registry 提供。
+- 实际发布名称、配置、入口、证据和状态以[`capability-status.yaml`](capability-status.yaml)为准。规则与直接 SDK 只调用带 descriptor 的已发布能力；两条入口共享输入编码、字节数、截止时间、结果类型和证据校验。
 
-## 6. 明确未交付
+## 6. 当前范围与后续规划
 
-Framework 自动 history cursor、CEL/Invariant DSL、Policy 热加载、持久化/分布式 Session Store、MCP subscriptions、特定 Framework 生命周期 Adapter、Sandbox、Event 级 sensitivity、自动 source trust 分类、destination Registry、授权凭证、Redaction TransformationPlan、SBOM/镜像签名/集群编排，以及状态矩阵中标为 `planned` 的能力。
+当前运行范围是单用户、Gateway 请求级 Trace、完整请求历史展开和每个累计流式前缀重新分析。Remote Core 是无状态分析服务；Compose 只加固 Core/Gateway 服务本身。
 
-多用户/多租户身份、数据所有权、跨用户共享与状态、按用户授权和租户控制面不属于未交付 roadmap，而是明确的产品范围外能力；不得在后续阶段逐字段恢复。
-
-当前 Responses Adapter 不接受隐藏服务端历史、内置远程 Tool、background、多模态或无法完整映射的 output；Streaming 尚未做增量 Matcher/cache，每个累计前缀会重新分析，长流性能优化属于 P4。
-
-当前 task-session Store 只在一个 Gateway 进程内存中存在，没有 CAS、跨进程共享或重启恢复；显式 Model history 仍按请求展开，只有可由 `call_id + tool name` 唯一匹配的 observed MCP ToolResult 输入边重连到历史 Event，不构成通用 history cursor。流式 proposal 只有 terminal 完整输出提交后才能作为 MCP Relation source。
-
-当前 Compose 的 Core/Gateway 容器加固只缩小服务自身权限，不构成 Agent Sandbox，也不提供 Agent 的 default-deny egress、宿主隔离或资源配额。
+后续规划见[`roadmap.md`](roadmap.md)，包括增量 Matcher/cache、Policy 热加载、TransformationPlan、目的地 Registry、一次性授权、Sandbox、内容审核/多模态能力、Framework 生命周期 recipe、SBOM、镜像签名、可观测性和集群编排。多用户/多租户身份、数据所有权、跨用户共享与按用户授权属于产品范围外。
 
 ## 7. 行为完成定义
 
-代码行为只有同时满足以下条件才能写成“已交付”：
+实现或文档只有在以下证据齐备时才写成“已交付”：
 
-- 实际实现或声明的真实后端运行，不以 mock/fake 代替算法有效性；
-- 正常、攻击、相邻边界、异常/timeout/预算和脱敏测试通过；
+- 真实算法或真实后端位于声明的运行路径；
+- 正常、违规、边界、异常/timeout/预算和脱敏测试通过；
 - 调用前 block 的受保护副作用为 0，输出释放前 block 不释放原始结果；
-- Registry descriptor、MatchPlan linking 和 Decision evidence 路径通过；
+- Registry descriptor、MatchPlan 的能力连接和 Decision evidence 路径通过；
 - README、专项文档、roadmap 和 capability 状态同步；
 - 项目质量门通过。
 
-验证证据按对象归属：分类指标描述指定检测组件与固定语料；规则与代理服务测试描述执行合同；具体规则集与真实 Agent 部署使用各自工作负载的安全和效用指标。
-
-外部模型/服务的 adapter 测试只证明接入合同；在真实后端 smoke/eval 完成前状态必须是 `adapter_only`。
+分类指标描述指定 Detector 与固定语料；规则、Gateway 和真实 Agent 部署分别使用其工作负载的安全与效用指标。适配器测试对应 `adapter_only`；真实后端仅在独立评测路径运行时对应 `experimental`；进入标准生产路径后按完成定义标记为 `baseline` 或 `verified`。
 
 ## 8. 文档治理
 
-- 当前合同、专项设计、roadmap 和 capability 状态只描述当前架构，不保存废弃方案、替代关系或迁移时间线。
-- 需要讨论的复杂跨层改动可以使用临时 `docs/proposals/<topic>.md`；接受后必须把结论合并到当前合同、专项设计、代码与测试，并删除 proposal。
-- Git commit、diff、tag 和发布记录承担历史追溯；活动文档不得建立第二套历史决策档案。
+当前合同、专项设计和 capability 状态表达当前实现与设计合同；roadmap 表达后续规划。历史追溯使用 Git commit、diff、tag 和发布记录，活动文档保持单一当前口径。

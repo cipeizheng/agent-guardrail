@@ -1,12 +1,11 @@
 # 开发与代码阅读指南
 
-> 适合谁：修改本仓库代码或进行安全 review 的开发者和 AI Agent。
-> 解决什么：阅读路径、代码地图、测试要求、review 和质量门。
-> 不包含什么：领域 Schema 的完整字段参考。
+> 本文说明如何阅读本仓库的代码、选择测试、进行安全 review，以及在提交修改前完成检查。
+> 相关参考：[文档导航](README.md)、[当前架构合同](current-architecture-contract.md)。
 
 ## 1. 开始任务
 
-事实优先级依次是：用户当前要求、`AGENTS.md`、[当前架构合同](current-architecture-contract.md)、专项设计、代码与测试。运行路由和配置以合同指定的代码源为准；Git 历史不作为当前实现规范。
+事实优先级依次是：用户当前要求、`AGENTS.md`、[当前架构合同](current-architecture-contract.md)、专项设计、代码与测试。运行路由和配置以合同指定的代码源为准；Git 历史用于追溯变更。
 
 1. 阅读 `AGENTS.md` 和当前合同。
 2. 通过[文档导航](README.md)只打开任务相关领域文档。
@@ -14,7 +13,9 @@
 4. 检查代码、测试和未提交修改，区分当前行为与规划。
 5. 写清范围、不做事项和可验证退出条件。
 
-## 2. 生产依赖图
+## 2. 生产代码关系
+
+下面的关系图展示一条请求从规则文件、分析器到 Gateway 和应用接入层的主要路径；箭头表示代码调用或数据提交方向。
 
 ```mermaid
 flowchart TD
@@ -32,14 +33,13 @@ flowchart TD
     Gateway --> Session[enforcement/session.py]
     Direct[detector_sdk.py DetectorRunner] --> DetectorExec[core/detector_executor.py]
     SDK[sdk.py GuardrailRun] --> Session
-    Inline[inline_llm.py + inline_tools.py] --> Session
     Session --> Runtime
     Session --> Remote
     Session --> Security[FlowSecurityContext + EventSecurityFacts]
     Matcher --> DetectorExec
 ```
 
-## 3. 代码阅读顺序
+## 3. 按问题查找代码
 
 | 任务 | 入口 |
 | --- | --- |
@@ -59,7 +59,7 @@ flowchart TD
 | Provider/Streaming/MCP | `gateway/app.py`、`gateway/upstream.py`、`gateway/mcp.py`、`adapters/` |
 | 远程 Core/双容器 | `core_service/`、`runtime/remote.py`、`compose.yaml`、`docker/` |
 
-调试意外 allow/block：`Matcher Report → Decision Analyzer → Session commit`。关系未命中先看 `Event.relations` 和 Relation 建立点，不根据 sequence 猜来源。副作用顺序从 Gateway/Wrapper 的 `before_*_call` Decision 开始检查。
+调试意外 allow/block：`Matcher Report → Decision Analyzer → Session commit`。关系未命中先看 `Event.relations` 和 Relation 建立点，不根据 sequence 猜来源。Gateway 路径从 `before_*_call` Decision 检查副作用顺序；SDK 路径检查应用是否在 `Decision.blocked` 时停止操作。
 
 ## 4. 实现边界
 
@@ -71,11 +71,13 @@ flowchart TD
 - 不记录完整 Secret、原始 PII、prompt 或 ToolResult。
 - 新 capability 必须经过 descriptor、预算、timeout 和 evidence 合同；YAML 不获得实现权限。
 
-## 5. 测试地图
+## 5. 测试目录
+
+测试文件名和代码标识保留英文，因为它们可以直接用于定位源码；下面的说明只解释每组测试验证的行为。
 
 - `test_match_plan.py`：IR、引用、Schema 和成本；
 - `test_match_authoring.py`：作者 YAML/Python 与 predicate 内联；
-- `test_matcher.py`：I01–I14 结构语义、whole-pending 和 Monitor；
+- `test_matcher.py`：I01–I14 结构语义、完整待提交批次和事件快照求值；
 - `test_match_capabilities.py`：linking、cache、timeout、预算和 evidence；
 - `test_analysis_models.py`：Finding identity 与 Report；
 - `test_models.py`：Event、Relation、PendingTrace 和安全上下文；
@@ -87,36 +89,36 @@ flowchart TD
 - `test_security_detectors.py` / `test_priority_detectors.py`：既有 Detector 算法边界；
 - `test_secret_detector_parity.py` / `test_pii_detector.py` / `test_prompt_detector_parity.py`：Secret、PII、Prompt/模型适配边界；
 - `test_code_detector_parity.py`：Python/IPython、hidden content、Semgrep 和 YARA 边界；
-- `test_real_detector_backends.py`：本地真实 backend（Presidio、Semgrep、YARA、Prompt 模型）与部署 profile/组件组合的装配边界；
-- `test_llm_judge_detector.py`：`prompt_injection_judge` 的 judge profile、threshold、descriptor 与脱敏；
+- `test_real_detector_backends.py`：本地真实检测后端（Presidio、Semgrep、YARA、Prompt 模型）与部署配置/组件组合的装配边界；
+- `test_llm_judge_detector.py`：`prompt_injection_judge` 的评审配置、threshold、descriptor 与脱敏；
 - `test_builtin_predicates.py` / `test_similarity_predicates.py`：基础与 fuzzy Predicate 边界；
-- `test_similarity_detector.py`：Invariant `is_similar`、profile model、backend、timeout、脱敏和 Enforcement；
+- `test_similarity_detector.py`：Invariant `is_similar`、配置中的模型、检测后端、timeout、脱敏和 Enforcement；
 - `test_alignment_registries.py` / `test_invariant_detector_alignment.py`：默认/可选 Registry、MatchPlan→Decision→Enforcement 对齐路径；
 - `test_builtin_capabilities.py`：Registry→Decision→Enforcement 副作用；
-- Gateway/Inline/MCP integration：真实接入顺序、Chat/Responses streaming 窗口与上游调用计数；
+- Gateway 和 MCP 集成测试：真实接入顺序、Chat/Responses 流式窗口与上游调用计数；
 - `test_external_agent_base_url.py` / `test_remote_core_gateway.py`：官方 OpenAI SDK、真实 HTTP 首块释放/取消，以及 remote Core streaming 链路。
 
-## 6. 新行为测试要求
+## 6. 新行为的测试要求
 
 至少覆盖：安全输入、明确违规、不适用 Event/语境、缺失/畸形字段、相邻边界、预算/timeout/异常、失败动作、脱敏、调用前 block 副作用为零和输出释放前 block 不释放结果。
 
-Detector 算法有效性不能用 mock 证明；外部 backend fake 只能证明 adapter 合同。Gateway 测试使用 MockTransport/Fake Upstream，不访问真实模型 API。
+检测算法的有效性需要真实算法或独立评估，不能用 mock 证明；外部后端的模拟实现只能证明适配器接口符合约定。Gateway 测试使用 `MockTransport` 返回预设的上游响应，不访问真实模型 API。
 
-## 7. Review 检查
+## 7. Review 检查项
 
 - 副作用是否只发生在调用前 allow 后？
 - block/error 是否保持 pending batch 原子性并绑定正确 Event ID？
 - sequence 是否被错误当作 provenance？客户端是否能提升 origin/security fact？
 - 新节点是否有静态类型、成本、失败代码、脱敏和相邻超限测试？
 - capability 是否显式 linking，cache identity 是否绑定实现版本、输入和 Event 上下文？
-- tentative pending 是否错误推进 Monitor dedupe？
+- tentative pending 是否错误推进 Finding 去重？
 - Streaming event 是否全部进入 Canonical 累计输出？当前未通过窗口是否可能提前释放？
 - 流式文档是否明确承认已释放窗口不能撤回，而没有冒充非流式原子保证？
 - Detector fact 是否与 T01–T10 的可信 source/sink 语境组合？
 - 文档是否把 planned、adapter_only、fake 或目标场景写成已交付？
 - 文档是否把未来决策写成了既定结论，或在状态/评测叙述里混入未附数据的比较性断言？
 
-## 8. 完成与提交
+## 8. 完成检查与提交
 
 ```bash
 uv sync --frozen --extra gateway --dev

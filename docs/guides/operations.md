@@ -1,21 +1,20 @@
 # Gateway 与 Core 运行指南
 
-> 适合谁：启动和运维 embedded Gateway 或 Core/Gateway 双容器的人。
-> 解决什么：安装、容器、环境变量、Secret、Audit 和健康检查。
-> 不包含什么：集群编排、Policy 热加载或跨进程/持久化 Session Store。
+> 本文说明如何启动 Gateway、选择检测能力、配置凭据、运行审计记录，以及如何部署 Core/Gateway 双容器。
+> 相关参考：[当前架构合同](../current-architecture-contract.md)、[Gateway 协议](../reference/gateway-protocol.md)。
 
-## 1. Embedded 启动
+## 1. 单进程启动
 
 ```bash
 uv sync --frozen --extra gateway --no-dev
 uv run python -m agent_guardrail.gateway
 ```
 
-进程内包含 FastAPI Gateway、一个 GuardrailRuntime、固定 Model Provider/MCP 上游客户端和可选 JSONL AuditSink。该 embedded 模式不依赖数据库或远程 Core。可选 task-session Store 只保存在本 Gateway 进程内存中，进程退出即丢失。
+该进程包含 HTTP Gateway、一个 `GuardrailRuntime`、固定的模型服务/MCP 上游客户端和可选的 JSONL 审计记录写入器。单进程模式不依赖数据库或远程 Core；每个受保护请求只在处理期间维护自己的 Trace。
 
-### 完整本地 Detector profile
+### 完整本地检测配置
 
-默认 `local` profile 不加载可选模型。启用已真实验证的 `full_deberta`：
+默认 `local` 配置使用本地确定性检测。需要完整的 `full_deberta` 配置时：
 
 ```bash
 uv sync --frozen --extra gateway --extra detectors --no-dev
@@ -29,11 +28,11 @@ uv run python -m agent_guardrail.gateway
 
 有可用 CUDA 设备时可把最后一个设备值改为 `cuda`。Presidio/spaCy 继续运行在 CPU；CUDA 只用于固定的提示注入模型。Semgrep 独立安装是有意的：Semgrep 1.170.0 锁定 MCP 1.x，而 Gateway 使用 MCP 2.x，隔离工具环境避免依赖冲突。
 
-资产预取固定模型 repository、commit、文件集合、字节数和 SHA-256；写入只在单个文件完整校验后原子完成。Runtime 构造 profile 时再次逐项校验，且强制 Transformers 离线读取该目录。运行时不下载模型，也不从 Policy 接受模型、规则、路径、命令或 device。缺失或不匹配会阻止启动。
+资产预取固定模型仓库（repository）、commit、文件集合、字节数和 SHA-256；写入只在单个文件完整校验后原子完成。Runtime 构造检测配置（profile）时再次逐项校验，且强制 Transformers 离线读取该目录。运行时不下载模型，也不从 Policy 接受模型、规则、路径、命令或 device。缺失或不匹配会阻止启动。
 
-### PromptGuard 2 候选 profile（可选，非默认）
+### PromptGuard 2 检测配置
 
-`full_promptguard2` 与 `full_deberta` 栈相同（Presidio/spaCy、Semgrep、YARA），仅把 DeBERTa PI 分类器换成 Meta PromptGuard 2 86M（评分路径对齐 LlamaFirewall：全空白剥离后重分词、截断 512、MALICIOUS 类概率）；`promptguard2` 只装载本地启发式栈 + PromptGuard 2，不加载 Presidio/Semgrep/YARA，适合隔离评估分类器贡献。两者部署默认阈值 0.9（LlamaFirewall 拦截阈值，实测 operating point）。
+`full_promptguard2` 与 `full_deberta` 使用相同的 Presidio/spaCy、Semgrep 和 YARA 检测配置，只把 DeBERTa 提示注入分类器换成 Meta PromptGuard 2 86M；`promptguard2` 只加载本地启发式检测和 PromptGuard 2，适合单独评估分类器。两者的部署默认阈值都是 0.9。
 
 ```bash
 export AGENT_GUARDRAIL_DETECTOR_ASSETS_DIR=/var/lib/agent-guardrail/detectors
@@ -41,15 +40,15 @@ uv run agent-guardrail-prefetch-promptguard2
 export AGENT_GUARDRAIL_DETECTOR_PROFILE=full_promptguard2
 ```
 
-**License 注意**：PromptGuard 2 权重采用 Llama 4 Community License（非 MIT；含月活 7 亿上限条款，再分发需遵守协议并附 "Built with Llama" 署名）。因此这两个 profile 是显式 opt-in 的候选 profile，绝不作为默认部署；`full_deberta`（MIT 栈 + Apache-2.0/Protect AI DeBERTa）保持默认。原始权重位于人工审批 gate 的 `meta-llama/Llama-Prompt-Guard-2-86M`，本项目 pin 未 gate 的 `gravitee-io` 镜像中字节一致的 `model.safetensors`（镜像声明 base_model 与 llama4 license），provenance 记录在 `config/deployment.py` 的 pin 常量注释中。资产校验与 `full_deberta` 相同（逐文件 size + SHA-256）。
+**许可证说明**：PromptGuard 2 权重适用 Llama 4 Community License（含月活 7 亿上限条款，再分发需遵守协议并附 "Built with Llama" 署名），因此两个配置需要显式启用；`full_deberta`（MIT 栈 + Apache-2.0/Protect AI DeBERTa）是默认完整配置。原始权重位于人工审批 gate 的 `meta-llama/Llama-Prompt-Guard-2-86M`，本项目 pin `gravitee-io` 镜像中字节一致的 `model.safetensors`，来源记录在 `config/deployment.py` 的 pin 常量注释中。资产校验与 `full_deberta` 相同（逐文件 size + SHA-256）。
 
-### 逐组件 Detector 配置（自由组合）
+### 按组件配置检测能力
 
 preset 之外，可以按组件逐个开关（与 `AGENT_GUARDRAIL_DETECTOR_PROFILE` 互斥，非 `local` preset 与任一组件变量同时设置会拒绝启动）：
 
 | 环境变量 | 取值 | 说明 |
 |---|---|---|
-| `AGENT_GUARDRAIL_DETECTOR_PII` | `none`/`presidio` | Presidio/spaCy NER backend |
+| `AGENT_GUARDRAIL_DETECTOR_PII` | `none`/`presidio` | Presidio/spaCy NER 检测后端 |
 | `AGENT_GUARDRAIL_DETECTOR_SEMGREP` | `none`/`python_rules` | 外部 Semgrep CLI + 包内 ruleset |
 | `AGENT_GUARDRAIL_DETECTOR_YARA` | `none`/`injection_rules` | yara-python + 包内 ruleset |
 | `AGENT_GUARDRAIL_DETECTOR_PROMPT_MODEL` | `none`/`deberta_v2`/`promptguard2` | PI 分类器（单槽位，二选一）|
@@ -61,9 +60,9 @@ export AGENT_GUARDRAIL_DETECTOR_PII=presidio
 export AGENT_GUARDRAIL_DETECTOR_PROMPT_MODEL=promptguard2
 ```
 
-**自由组合的边界**：每个组件各自通过单元与集成验证，校验规则（模型组件要求 assets_dir、Semgrep 要求 CLI 严格 1.170.0、CUDA 可用性、资产哈希）逐项 fail-closed；但组件**组合本身** 可能未经端到端一致性验证，风险由部署方评估。已验证姿态仍以 preset 名字标注 （`full_deberta` 为 verified 全栈）；组件组合是它的子集/超集自由拼写，不是新的保证。Core 侧使用 `AGENT_GUARDRAIL_CORE_` 前缀的同名变量。
+**按组件组合时的边界**：每个组件分别通过单元与集成验证；模型组件、Semgrep 版本、CUDA 可用性和资产哈希中任一项不符合要求时，服务会阻止启动。`full_deberta` 是标准完整配置；其他组合只继承各组件的验证范围，组合级安全与效用由部署方评估。Core 侧使用 `AGENT_GUARDRAIL_CORE_` 前缀的同名变量。
 
-真实 profile 评估命令：
+真实检测配置的评估命令：
 
 ```bash
 AGENT_GUARDRAIL_RUN_REAL_DETECTOR_EVAL=1 \
@@ -73,9 +72,9 @@ uv run --extra detectors pytest -vv tests/integration/test_full_local_detector_p
 
 该命令复用 `AGENT_GUARDRAIL_DETECTOR_ASSETS_DIR`，并要求 `semgrep` 在 `PATH` 中且版本严格匹配。
 
-### 可选 `is_similar` encoder profile
+### 可选的相似度检测
 
-`is_similar` 不在默认 profile 中隐式联网。需要该能力时，可信启动代码构造 embedding client，并把 backend 与 profile 一起注入 Registry：
+`is_similar` 不会在默认配置中自动连接网络。需要该能力时，可信启动代码构造 embedding client，并把外部实现和配置一起注入 Registry：
 
 ```python
 from agent_guardrail.config import create_deployment_detector_registry
@@ -98,13 +97,17 @@ detectors = create_deployment_detector_registry(
 )
 ```
 
-`openai_compatible_client` 必须提供异步 `embeddings.create`；其 endpoint/凭据由部署启动层创建，不进入 Policy、Trace、Finding 或 Audit。backend 与 profile 必须同时提供；模型、profile identity 或资源上限变化会改变 Detector version。当前 CLI 没有 embedding 凭据环境变量，使用该可选 adapter 的部署应在组合根显式注入上述 Registry。真实服务尚未纳入仓库可重复评测，因此能力矩阵保持 `adapter_only`。
+`openai_compatible_client` 必须提供异步 `embeddings.create`；它的地址和凭据由部署启动层创建，不进入 Policy、Trace、Finding 或 Audit。外部实现和配置必须同时提供；模型、配置身份或资源上限变化会改变检测器版本。当前 CLI 的 embedding 凭据由组合根负责注入 Registry；能力矩阵将该可选适配器标记为 `adapter_only`，真实服务评测由部署方按工作负载执行。
 
-启用远程 backend 会把参与比较的 `data` 和 `target` 发送到该固定 endpoint；它不是本地零泄露能力。部署方必须把该 endpoint 作为获准的数据接收方并配置传输、保留和数据隔离边界，或者注入本地 `EmbeddingBackend`。Policy 不能借此改写 endpoint/model/凭据，但这一限制不能替代部署侧的数据授权。
+启用远程实现会把参与比较的 `data` 和 `target` 发送到固定地址；部署方必须把该地址作为获准的数据接收方，并配置传输、保留和数据隔离边界；也可以注入本地 `EmbeddingBackend`。Policy 不能改写地址、模型或凭据，数据授权仍由部署侧负责。
 
-## 2. 双容器启动
+### 实验性的模型评审检测
 
-仓库只定义两个运行服务：`core` 持有 Policy、完整 Detector 资产和分析 Runtime；`gateway` 持有 Provider/ MCP 配置、请求级/任务级 Trace、Audit 和副作用顺序。CPU/CUDA 是 Core 的运行配置，不会创建第三个服务。
+`prompt_injection_judge` 使用通用大模型对输入文本给出提示注入风险分数。当前接入方式是可信应用代码构造自定义 Registry，DeepSeek 的真实后端实现位于 `evals/prompt_injection/judge.py`。能力矩阵将其标记为 `experimental`；后续标准部署配置需要固定模型服务、独立凭据、Prompt 身份、超时与失败关闭、规则执行、受保护副作用断言和发送给 Judge 的数据目的地授权。
+
+## 2. 双容器部署
+
+仓库定义两个运行服务：`core` 保存 Policy、检测资产和分析 Runtime；`gateway` 保存模型服务/MCP 配置和审计记录，在请求期间维护 Trace 并控制副作用顺序。CPU/CUDA 是 Core 的运行配置，不会创建第三个服务。
 
 ```bash
 cp .env.example .env
@@ -128,9 +131,9 @@ docker compose down
 
 命名 Audit volume 会保留；上述命令不删除它。只有明确希望删除 Audit 时才另行执行带 `--volumes` 的清理。
 
-## 3. Agent Sandbox 与不可绕过部署边界
+## 3. Agent 隔离与部署边界
 
-本仓库的 Compose 只运行可信的 Core 和 Gateway，**没有启动或隔离 Agent**。容器的 non-root、只读 root filesystem、drop capabilities 和 Core 私网用于加固 Guardrail 服务本身，不能证明 Agent 的 Shell、原生函数、文件系统或网络请求都经过 Gateway。
+本仓库的 Compose 只运行可信的 Core 和 Gateway，不启动或隔离 Agent。容器的非 root 用户、只读根文件系统、权限削减和 Core 私网用于加固 Guardrail 服务本身，不能证明 Agent 的 Shell、原生函数、文件系统或网络请求都经过 Gateway。
 
 如果 Agent 可以执行代码或 Shell，生产部署应把它放入独立的不可信 Sandbox，并把 Guardrail、真实 Tool Broker 和凭据留在 Sandbox 外。最低部署合同是：
 
@@ -139,11 +142,11 @@ docker compose down
 - 不使用 privileged、host network/PID/IPC，不挂载 Docker/container runtime socket、宿主敏感目录或多余设备；
 - 文件系统默认只读或按任务临时创建，只挂载完成任务所需的最小目录，不允许后台进程跨任务存活；
 - 设置 CPU、内存、PID、磁盘、文件描述符和 wall-clock 上限，并能在超限时终止整个 Sandbox；
-- Sandbox 内的 Agent 不能修改 Policy、Gateway/Core 配置、Detector 资产或 Audit；内部 Wrapper/探针失效不能扩大 Sandbox 的网络或主机权限。
+- Sandbox 内的 Agent 不能修改 Policy、Gateway/Core 配置、Detector 资产或 Audit；应用内检查代码失效也不能扩大 Sandbox 的网络或主机权限。
 
 仅把代码/Shell 工具放进 Sandbox 也可以：此时 Agent 与 Guardrail 位于外部，`before_tool_call` allow 后才调用 Sandbox Executor，`before_tool_output_release` allow 后才释放结果。该 Executor 仍应无生产凭据、无任意公网 egress，并按任务销毁。
 
-`url_host_allowed`、命令/代码 Detector 或 Provider/MCP host allowlist 都是已中介流量上的策略或纵深防御，不能代替上述 OS/网络强制。完整的责任矩阵见[安全模型](../security-model.md#8-guardrail-无法替代的-sandbox-控制)。
+`url_host_allowed`、命令/代码 Detector 或 Provider/MCP host allowlist 都是已中介流量上的策略或纵深防御；OS/网络强制由部署侧负责。完整的责任矩阵见[安全模型](../security-model.md#8-guardrail-与沙箱的责任边界)。
 
 ## 4. 环境变量
 
@@ -173,10 +176,6 @@ docker compose down
 | `AGENT_GUARDRAIL_MAX_REQUEST_BYTES` | `1048576` | 请求体上限 |
 | `AGENT_GUARDRAIL_MAX_UPSTREAM_RESPONSE_BYTES` | `4194304` | 非流式响应或完整 SSE 流字节上限 |
 | `AGENT_GUARDRAIL_MAX_TRACE_EVENTS` | `16` | 请求级 Trace Event 上限 |
-| `AGENT_GUARDRAIL_TASK_SESSIONS_REQUIRED` | `false` | 要求 Model 与 MCP `tools/call` 使用任务 Session |
-| `AGENT_GUARDRAIL_TASK_SESSION_MAX_SESSIONS` | `128` | 单进程同时保留的任务 Session 上限 |
-| `AGENT_GUARDRAIL_TASK_SESSION_TTL_SECONDS` | `1800` | 任务 Session 滑动 TTL |
-| `AGENT_GUARDRAIL_TASK_SESSION_MAX_TRACE_EVENTS` | `256` | 每个任务级 Trace Event 上限 |
 | `AGENT_GUARDRAIL_UPSTREAM_TIMEOUT_SECONDS` | `60` | 非流式网络 timeout；完整 SSE 流 wall-clock 上限 |
 | `AGENT_GUARDRAIL_DETECTOR_PROFILE` | `local` | `local/full_deberta/full_promptguard2/promptguard2` 部署 preset（与组件变量互斥）|
 | `AGENT_GUARDRAIL_DETECTOR_PII` | 空 | 逐组件配置：`none/presidio`（见"逐组件 Detector 配置"）|
@@ -196,18 +195,9 @@ docker compose down
 
 至少配置通用/OpenAI、Anthropic 或 MCP 三类上游之一。固定 URL 不能含凭据、query 或 fragment；配置非空 host allowlist 时 hostname 必须匹配。Anthropic 当前只有 server-managed 模式，Gateway 固定使用 `x-api-key` 与稳定 API version header；入站 SDK Key 不能当成上游 Key 转发。
 
-创建任务级 Trace：
-
-```bash
-curl -sS -X POST http://127.0.0.1:8080/v1/guardrail/task-sessions \
-  -H "Authorization: Bearer $GATEWAY_CLIENT_KEY"
-```
-
-响应中的 `session_token` 应只由可信 Agent Host 保存在控制通道；后续 Model 与 MCP `tools/call` 请求通过 `X-Agent-Guardrail-Session` header 携带。执行模型产生的工具建议时，Host 还应把 provider 返回的 `call_id` 放入 `X-Agent-Guardrail-Proposal-Id`；Gateway 会校验工具名和参数后建立 proposal→实际 ToolCall Relation。任务结束后用同一 session header 请求 `DELETE /v1/guardrail/task-sessions`。token 不代表用户身份或业务授权，不得写入 prompt、Audit 或应用日志。生产要依赖跨边界关系时应设置 `AGENT_GUARDRAIL_TASK_SESSIONS_REQUIRED=true`，并让 Agent 只能访问受控 Gateway 上游。
-
 Core 使用独立前缀：`AGENT_GUARDRAIL_CORE_POLICY_FILE` 与 `AGENT_GUARDRAIL_CORE_API_KEY` 必填；`AGENT_GUARDRAIL_CORE_DETECTOR_PROFILE` 默认 `local`，双容器镜像默认覆盖为 `full_deberta`；另有 `..._DETECTOR_ASSETS_DIR`、`..._PROMPT_MODEL_DEVICE`、`..._MAX_REQUEST_BYTES`、`..._HOST`、`..._PORT` 和 `..._LOG_LEVEL`。事实来源是 `CoreSettings`。
 
-## 5. Secret
+## 5. 凭据
 
 - 示例只写变量名，不含真实值。
 - 开发可使用已 gitignore 的 `.env`；生产使用部署平台 Secret。
@@ -215,18 +205,16 @@ Core 使用独立前缀：`AGENT_GUARDRAIL_CORE_POLICY_FILE` 与 `AGENT_GUARDRAI
 - `server_managed` 使用服务端 Key；`pass_through` 才转发客户端 Authorization。
 - Gateway→Core Key 必须与 Provider、MCP 和 Gateway Client Key 分离；Core 不配置任何上游 Key。
 
-## 6. Audit
+## 6. 审计记录
 
-设置 `AGENT_GUARDRAIL_AUDIT_PATH` 后，append-only JSONL 只保存含 Violation 的 Decision 摘要；普通 allow 不逐条持久化。它不接收 Event payload、完整 prompt、Tool arguments 或 Detector 原文。
+设置 `AGENT_GUARDRAIL_AUDIT_PATH` 后，只追加写入的 JSONL 文件保存含 Violation 的脱敏 Decision 摘要；普通 allow 不逐条持久化。Audit 不接收 Event payload、完整 prompt、Tool arguments 或 Detector 原文。若增加内容取证模式，需要在架构合同中定义访问权限、脱敏和保留期。
 
-当前没有内容取证模式。保存原始敏感内容必须先改变架构合同并定义访问权限、脱敏和保留期。
-
-## 7. Health 与可观测性
+## 7. 健康检查与可观测性
 
 - `GET /health/live`：进程和事件循环存活。
 - Gateway `GET /health/ready`：embedded 报告本地 Runtime；remote 同时验证 Core readiness 与启动时固定的 Policy identity。
 - Core `GET /health/ready`：报告固定 Policy、Registry、模型 warm-up 和 Runtime ready。
 
-Policy 编译、capability linking、Settings 和可选 Detector profile 在应用构造阶段失败会阻止启动。`full_deberta` 构造会验证固定资产与 Semgrep 版本，并对模型做一次本地 warm-up。Readiness 不探测 Provider/MCP 上游网络，也不验证 Audit 路径可写性。
+Policy 编译、检测能力连接、Settings 和可选检测配置在应用构造阶段失败会阻止启动。`full_deberta` 构造会验证固定资产与 Semgrep 版本，并对模型做一次本地 warm-up。Readiness 不探测模型服务/MCP 上游网络，也不验证审计路径是否可写。
 
-当前只有 Uvicorn 日志级别和可选 JSONL Audit，没有结构化应用日志、Metrics、OpenTelemetry、SBOM、镜像签名、热加载或集群编排；这些仍在[roadmap](../roadmap.md)安排。
+当前可观测性包括 Uvicorn 日志级别和可选 JSONL Audit；结构化应用日志、Metrics、OpenTelemetry、SBOM、镜像签名、热加载和集群编排列在[roadmap](../roadmap.md)。

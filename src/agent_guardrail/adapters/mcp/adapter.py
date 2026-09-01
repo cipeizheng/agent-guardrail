@@ -16,14 +16,13 @@ from agent_guardrail.adapters.mcp.models import (
     JSONRPCRequest,
     JSONRPCResponse,
     ListToolsParams,
-    PingParams,
     UnknownParams,
 )
 from agent_guardrail.models import ToolCall, ToolResult
 
 MCP_PROTOCOL_VERSION = "2026-07-28"
 MCP_SUPPORTED_PROTOCOL_VERSIONS = (MCP_PROTOCOL_VERSION,)
-MCP_SUPPORTED_METHODS = frozenset({"server/discover", "ping", "tools/list", "tools/call"})
+MCP_SUPPORTED_METHODS = frozenset({"server/discover", "tools/list", "tools/call"})
 
 HEADER_MISMATCH = -32020
 UNSUPPORTED_PROTOCOL_VERSION = -32022
@@ -65,7 +64,7 @@ class MCPAdapterError(ValueError):
 @dataclass(frozen=True, slots=True)
 class ParsedMCPRequest:
     envelope: JSONRPCRequest
-    params: DiscoverParams | PingParams | ListToolsParams | CallToolParams | UnknownParams
+    params: DiscoverParams | ListToolsParams | CallToolParams | UnknownParams
 
     @property
     def protocol_version(self) -> str:
@@ -103,7 +102,6 @@ class MCPAdapter:
 
         model = {
             "server/discover": DiscoverParams,
-            "ping": PingParams,
             "tools/list": ListToolsParams,
             "tools/call": CallToolParams,
         }.get(envelope.method, UnknownParams)

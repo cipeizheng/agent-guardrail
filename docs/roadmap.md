@@ -1,93 +1,44 @@
 # 开发路线图
 
-> 当前实现边界见[当前架构合同](current-architecture-contract.md)。检测和条件判断组件的范围、固定名称与状态以[`capability-status.yaml`](capability-status.yaml) 为准。本文件记录产品阶段和未来工作顺序。
+> 本页只记录后续工作顺序和产品范围。当前实现以[当前架构合同](current-architecture-contract.md)为准，能力名称与交付状态以[能力状态矩阵](capability-status.yaml)为准。
 
-## 产品阶段
+## 当前版本已具备的能力
 
-| 阶段 | 目标 | 当前状态 |
-| --- | --- | --- |
-| P0 | 程序化内容检测接口 | 已交付 |
-| P1 | OpenAI、Anthropic 与其他模型服务的统一接入 | 已交付 |
-| P2 | 流式输出检查与释放 | 已交付 |
-| P3 | 跨步骤执行记录与规则执行基础设施 | 已交付 |
-| P4 | 长任务记录与性能优化 | 部分交付 |
-| P5 | 部署工程：热加载、发布、SBOM 和可观测性 | 规划 |
+- version-3 YAML 规则会由 `AuthorPolicy` 编译为不可变的 `MatchPlan`，再由 `SnapshotMatcher` 和 `MatchPolicyAnalyzer` 生成决定。
+- `GuardrailRun`、OpenAI/Anthropic Gateway 和 MCP Gateway 共用 Event、Trace 与 Enforcement 合同；`DetectorRunner` 与规则匹配器共用 Registry 和检测器执行合同。
+- Gateway 为每个模型请求和 MCP `tools/call` 建立独立的请求级 Trace，并限制每条 Trace 的事件数量。
+- 流式输出按累计的内部统一格式前缀逐窗口检查；Remote Core 使用版本化 v4 分析协议。
 
-“已交付”的语义范围是当前合同与测试覆盖。T01–T10 路径与各项组件的完成度由状态矩阵中的 `verified`、`baseline`、`adapter_only` 和 `planned` 表达。
+## 后续工作顺序
 
-### P0：程序化内容检测接口
+### P4：长任务与性能
 
-应用可以直接提交文本、结构化 JSON 或一批输入，选择已注册的检测组件并获得脱敏结果。输入大小、执行时间、结果数量和错误信息均有明确上限。该接口与安全规则使用同一套检测组件执行机制；操作方式由调用方决定。
+- 增加历史索引、增量 Matcher 和可安全复用的分析结果，降低长任务与流式输出的重复扫描。
+- 为长会话和长流建立固定内存、延迟、吞吐和失败边界目标。
+- 优化完整请求历史的规范化与重复检测，同时保持 Gateway 请求之间相互隔离。
 
-### P1：统一接入模型服务
+### P5：部署工程
 
-- 所有模型服务接入层都把请求、普通响应和流式响应转换成统一且字段封闭的内部格式；
-- OpenAI Chat Completions、OpenAI Responses 与 Anthropic Messages 共用相同的规则检查和执行记录；
-- Anthropic 接入覆盖文本、客户端工具调用和工具结果，服务端代执行的工具请求由 MCP 工具代理处理；
-- OpenAI Responses 接入当前覆盖文本、instructions、自定义函数和函数结果；
-- 部署者可以注册其他模型服务，注册信息固定上游路径，客户端请求选择已注册服务；
-- 一个最小测试协议验证统一接入机制适用于 OpenAI 格式之外的请求与流式响应。
-
-### P2：流式输出检查与释放
-
-- 支持 OpenAI Chat、OpenAI Responses 与 Anthropic Messages 的服务器推送流式格式；
-- 每段文本按“从开头到当前段”的累计内容检查，检查通过后释放当前段；
-- 工具参数完成 JSON 解析、字段格式检查和安全规则检查后释放；
-- 流结束时再次检查完整输出，并保存一条完整的最终记录；
-- 当前段触发阻断或错误时，代理隐藏该段并发送脱敏错误；此前已经发送的内容保持已发送状态；
-- 代理重新编码允许的字段，校验工具参数片段、完成标志和最终响应之间的一致性；
-- 上游字节数、单条消息大小、消息数量和总耗时均有上限，未知或畸形内容按失败处理。
-
-当前实现会重复分析从流开头到当前位置的累计内容。P4 负责增量分析和结果复用。
-
-## P3：跨步骤执行记录与规则执行基础设施
-
-- 单进程代理可以为一个任务保存连续执行记录，并让模型调用与 MCP 工具调用共享这些记录。MCP 是 Agent 调用外部工具的标准协议。可信宿主使用模型服务生成的调用编号引用一次工具调用建议；代理核对工具名称和完整参数后，将建议记录与实际工具调用连接。后续模型请求中的工具结果也可以连接回代理实际观察到的结果。
-- 单元测试与生产路径集成测试覆盖跨步骤规则匹配、允许/记录/阻断结果、调用前检查、输出释放、工具参数一致性、重复调用拒绝、任务记录、故障关闭和受保护操作的执行次数。
-- `evals/prompt_injection` 记录第三方提示注入检测组件在锁定语料上的召回率、误报率和可用阈值。
-- 具体应用的规则集由部署方定义。安全与效用指标属于对应工作负载，并使用独立标注场景评估。
-- 真实 Agent 对照评测以未启用规则时存在成功攻击样本为准入条件；启用规则前后使用相同任务、攻击和模型。
-- 数据去向分类、工具风险分类和 T01–T04 默认规则属于独立规则集产品能力，其设计输入是明确产品需求和有代表性的失败样本。T01–T04 是安全模型中关于数据泄露和外部内容影响工具操作的四类威胁路径。
-- Agent 直接执行的 Shell、函数和网络请求需要框架钩子、进程隔离或网络代理提供控制。
-
-P3 服务单用户数据流规则。用户目录、租户登记、数据所有者规则和跨用户状态属于多用户产品能力。T09 描述同一用户环境中旧授权被用于另一数据去向的风险。
-
-## P4：长任务记录与性能
-
-- 为历史记录建立增量索引和可安全复用的分析结果，减少每个新操作和每段流式输出的重复扫描；
-- 使用真实长会话与长流固定内存和延迟目标；
-- 当前单进程内存存储提供随机任务令牌、滑动过期时间、容量上限和显式删除；下一步是在该存储上增加增量读取和去重；
-- 跨进程共享、重启恢复和集群路由属于后续设计，服务范围保持单个用户的连续任务。
-
-## P5：部署工程
-
-- Policy 热加载、原子版本切换和回滚；
-- SBOM、镜像签名、发布流水线和集群编排；
-- 脱敏 metrics/tracing、SLO、流终止原因和容量可观测性；
+- Policy 热加载、原子版本切换和回滚。
+- SBOM、镜像签名、发布流水线和集群编排。
+- 脱敏 metrics/tracing、SLO、流终止原因和容量可观测性。
 - Provider Adapter 的版本/兼容矩阵与真实上游 smoke。
 
-## Capability 维护
+### 安全能力扩展
 
-Detector 与 Predicate 的稳定 ID/状态由 `capability-status.yaml` 管理。锁定的 BIPIA/NotInject 公开评测记录 `P0-D04 prompt_injection_model`（DeBERTa）的低攻击召回与过度防御，以及 `P0-D05 prompt_injection_model_promptguard2` 在 BIPIA content_undetectable 载荷上的低排序能力，两者状态为 `baseline`。`P1-D04 is_similar` 的当前状态为 `adapter_only`；`P1-D05 prompt_injection_judge` 已完成一次真实模型特性评估，当前 FPR 与完整完成定义对应 `adapter_only` 状态。这些指标描述指定 capability 的依赖特性。
+- 目的地 Registry、一次性授权凭证、Tool approval 和完整 Sandbox 协同。
+- `TransformationPlan`：可审计的 redact/replace，绑定 Policy version、输入/输出 fingerprint 和变换 span。
+- content/compliance、moderation、copyright、多模态 Content、受控下载和 OCR/媒体 Detector。
+- 常见 Framework 的生命周期 recipe/hook，以及完整 Web UI 和分布式控制平面。
 
-## 可验证 Transformation（P3 之后）
+这些方向改变当前架构合同中的执行或信任边界时，需要先更新合同、专项设计和行为测试。
 
-- 设计独立 `TransformationPlan`，支持可审计 redact/replace；
-- Decision 绑定输入、变换 span、输出 fingerprint 和 Policy version；
-- 保持普通 `allow/log/block` Action 不承担 payload 修改；
-- 对调用前/输出释放前 checkpoint、重复变换、编码偏移和敏感数据泄漏建立测试。
+## 产品范围
 
-该阶段必须先更新当前架构合同，因为它改变“Analyzer 只判断、不修改 payload”的现行边界。
+当前服务面向单用户部署。Agent 的 Shell、代码执行、直接网络访问、宿主文件/进程访问、凭据隔离、资源配额和 Sandbox 逃逸防护由部署环境的 Sandbox、网络代理、OS 权限和 Secret 管理提供；服务加固配置见[运行指南](guides/operations.md)。
 
-## 明确后置
+多用户身份、租户隔离、数据所有权、跨用户共享和按用户授权属于独立产品范围，设计时需要单独建立身份与隔离合同。
 
-- 交互式 Tool `require_approval`、一次性授权凭证和完整 Sandbox；
-- Moderation、Copyright 等 content/compliance profile；
-- MCP subscriptions/listen；
-- 多模态 Content、受控下载和 OCR/媒体 Detector；
-- 常见 Framework 的可选生命周期 recipe/hook；
-- 完整 Web UI 和分布式控制平面。
+## 检测能力维护
 
-多用户/多租户身份、跨用户共享、按用户授权、租户隔离和租户控制面不是后置功能，而是明确不属于本产品。未来若改变这一边界，必须先明确改写当前架构合同，并重新设计完整身份与隔离模型，不能逐字段恢复。
-
-这些项目不能用文档或模拟测试写成已交付。任何改变当前架构合同的项目必须同步更新合同、专项设计和测试；需要讨论的 proposal 在结论合并后删除。
+稳定 ID、运行时名称（runtime name）、部署配置（profile）、入口、威胁路径、证据和状态集中维护在 `capability-status.yaml`。矩阵中的状态词表达实现成熟度和标准部署可达性；它们与 P4/P5 产品阶段相互独立。

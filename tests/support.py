@@ -14,6 +14,7 @@ from agent_guardrail.config import (
 )
 from agent_guardrail.core import MatchPolicyAnalyzer
 from agent_guardrail.models import (
+    Action,
     Event,
     EventKind,
     PendingTrace,
@@ -287,6 +288,41 @@ def empty_policy_yaml() -> str:
 
 def empty_analyzer() -> MatchPolicyAnalyzer:
     return analyzer_from_yaml(empty_policy_yaml())
+
+
+def event_kind_analyzer(
+    kind: EventKind,
+    *,
+    action: Action = Action.BLOCK,
+) -> MatchPolicyAnalyzer:
+    binding = "result" if kind is EventKind.TOOL_RESULT else "event"
+    where_clause = (
+        f"""    where:
+      all:
+        - {{present: [{binding}, payload]}}
+        - compare:
+            left: {{field: [{binding}, payload, role]}}
+            operator: equals
+            right: {{literal: assistant}}"""
+        if kind is EventKind.MESSAGE
+        else f"    where: {{present: [{binding}, payload]}}"
+    )
+    return analyzer_from_yaml(
+        f"""\
+version: 3
+scopes: [pending]
+rules:
+  - id: match-{kind.value}
+    action: {action.value}
+    events:
+      {binding}: {{kind: {kind.value}, domain: pending}}
+{where_clause}
+    finding:
+      code: test_block
+      message: The event kind matched for this deterministic test.
+      subjects: [{binding}]
+"""
+    )
 
 
 def analyzer_from_yaml(source: str) -> MatchPolicyAnalyzer:

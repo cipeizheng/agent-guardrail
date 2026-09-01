@@ -1,16 +1,6 @@
-"""Safe exceptions used to stop a guarded boundary."""
+"""Safe exceptions used when enforcement cannot complete."""
 
 from __future__ import annotations
-
-from agent_guardrail.models import Decision
-
-
-class GuardrailBlocked(RuntimeError):
-    """A policy decision blocked the current boundary."""
-
-    def __init__(self, decision: Decision) -> None:
-        self.decision = decision
-        super().__init__(f"guardrail blocked trace {decision.trace_id}")
 
 
 class GuardrailUnavailable(RuntimeError):

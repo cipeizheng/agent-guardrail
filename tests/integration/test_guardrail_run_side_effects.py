@@ -1,3 +1,5 @@
+"""Application-controlled side effects driven by GuardrailRun decisions."""
+
 from __future__ import annotations
 
 import pytest

@@ -1,12 +1,12 @@
 # Contributing to Agent Guardrail
 
-Agent Guardrail is a personal project. I started it because I wanted agent safety controls that were understandable, testable, and close to the point where an LLM call or tool side effect actually happens.
+Agent Guardrail is an open-source project for safety controls that are understandable, testable, and close to the point where an LLM call or tool side effect actually happens.
 
 You are very welcome to use it, open issues, share unusual agent workflows, suggest features, or question the design. If something feels confusing or unnecessarily complicated, that is useful feedback too. You do not need a finished solution or a formal security analysis before starting a conversation.
 
-## Design ideas behind the project
+## Design principles
 
-The project currently follows a few ideas that I hope are useful beyond this repository:
+The project currently follows a few ideas that may be useful beyond this repository:
 
 - A guardrail should be able to stop a protected action, not only label text after the fact.
 - Policies should be reviewable data rather than executable code with hidden I/O or imports.
@@ -14,9 +14,9 @@ The project currently follows a few ideas that I hope are useful beyond this rep
 - Events and their relationships should be explicit, so a decision can explain what matched and why.
 - Sensitive inputs should not be copied into findings, errors, logs, or audit records.
 
-These are design choices, not unquestionable rules. If one of them causes a real limitation, or you have found a cleaner model, please open an issue and explain the trade-off. Other projects are also welcome to reuse the ideas, documents, or implementation patterns that are helpful.
+These are the current design principles. If one causes a real limitation or you have found a cleaner model, please open an issue and explain the trade-off. Other projects are welcome to reuse the ideas, documents, or implementation patterns that are helpful.
 
-## Ways to help
+## Ways to contribute
 
 Contributions do not have to be code. For example, you can:
 
@@ -29,7 +29,7 @@ Contributions do not have to be code. For example, you can:
 
 For an issue, a short description of what you tried, what you expected, and what happened is enough to begin. Please remove prompts, credentials, personal data, and other sensitive material before posting logs or examples.
 
-## Trying the project locally
+## Local development
 
 Agent Guardrail requires Python 3.12 or later and [uv](https://docs.astral.sh/uv/).
 
@@ -40,7 +40,7 @@ uv sync --frozen --extra gateway --dev
 uv run python examples/secret_email_demo.py
 ```
 
-If you plan to change code, the [development guide](docs/contributing.md) explains the repository layout and the full checklist. The [current architecture contract](docs/current-architecture-contract.md) records what is implemented today and which safety properties existing changes rely on. Those documents are there to preserve context, especially for AI-assisted contributions—not to prevent new ideas. A proposal can disagree with them; it should simply say why.
+If you plan to change code, the [development guide](docs/contributing.md) explains the repository layout and the full checklist. The [current architecture contract](docs/current-architecture-contract.md) records what is implemented today and which safety properties existing changes rely on. A proposal that changes the contract should explain the new safety boundary and update the affected tests and documents.
 
 Before sending a pull request, please run the checks that apply to your change. The complete set is:
 

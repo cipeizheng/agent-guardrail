@@ -62,7 +62,7 @@ class ToolDefinition(ChatModel):
 
 
 class ModelRequest(ChatModel):
-    """The normalized request passed through an LLMClient."""
+    """A provider-neutral request used by protocol adapters."""
 
     model: str | None = None
     messages: tuple[ChatMessage, ...] = Field(min_length=1)

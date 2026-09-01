@@ -28,9 +28,6 @@ from agent_guardrail.detector_sdk import (
 )
 from agent_guardrail.enforcement import (
     EnforcementSession,
-    GuardedLLMClient,
-    GuardedToolExecutor,
-    GuardrailBlocked,
     GuardrailUnavailable,
 )
 from agent_guardrail.models import (
@@ -81,9 +78,6 @@ __all__ = [
     "FlowSecurityContext",
     "ModelProviderAdapter",
     "MatchPolicyAnalyzer",
-    "GuardedLLMClient",
-    "GuardedToolExecutor",
-    "GuardrailBlocked",
     "GuardrailRuntime",
     "GuardrailRun",
     "GuardrailUnavailable",

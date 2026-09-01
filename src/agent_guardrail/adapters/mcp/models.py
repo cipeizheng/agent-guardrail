@@ -48,10 +48,6 @@ class DiscoverParams(MetaParams):
     pass
 
 
-class PingParams(MetaParams):
-    pass
-
-
 class ListToolsParams(MetaParams):
     cursor: str | None = None
 
