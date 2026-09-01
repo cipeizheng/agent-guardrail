@@ -36,6 +36,8 @@ services:
       core:
         condition: service_healthy
     environment:
+      # The external Responses state owner (vLLM Agentic API) runs as a separate
+      # service in the Responses integration topology.
       AGENT_GUARDRAIL_DECISION_BACKEND: remote
       AGENT_GUARDRAIL_CORE_URL: http://core:8090
       AGENT_GUARDRAIL_CORE_API_KEY: ${AGENT_GUARDRAIL_CORE_API_KEY:?set in .env}

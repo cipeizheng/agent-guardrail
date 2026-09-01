@@ -1,6 +1,6 @@
 # 当前架构合同
 
-> 日常实现的唯一架构合同，描述当前事实、不可破坏约束和产品边界。版本为 `0.1.0`，最后核对日期为 2026-09-01。
+> 日常实现的唯一架构合同，描述当前事实、不可破坏约束和产品边界。版本为 `0.1.0`，最后核对日期为 2026-09-02。
 
 ## 1. 规则执行流程
 
@@ -33,6 +33,8 @@ version-3 YAML
 - MCP `2026-07-28` 通过无状态 `POST /v1/mcp` 提供 `server/discover`、`tools/list` 和 `tools/call`。
 - Gateway 可以使用进程内 Runtime，也可以使用版本化的独立 Core；两者都调用 `PolicyAnalyzer.analyze_pending`。
 - Gateway 为每个模型请求和每个 MCP `tools/call` 分别创建请求级 `EnforcementSession` 与 `Trace`。模型请求中的完整对话历史会在本次请求内展开并检查；模型 Trace 与 MCP Trace 之间不建立自动关系。
+- Gateway 直接接收的 Responses 请求，只有在可信部署注入 `ResponsesStateStore` 时才使用 `previous_response_id`；Gateway 先恢复有界的前序 input/output history，再创建本次请求的 canonical 快照并执行 Guardrail。当前 `InMemoryResponsesStateStore` 在进程内保存状态；Chat Completions 不使用该状态层。
+- 外部 Responses 拓扑使用 Agentic API fork 作为 state owner，单实例配置使用 SQLite；Agentic API 恢复并展开前序 items 后，将完整 input 发送到 Gateway，Gateway 不读取 Agentic API 数据库。当前集成模式为 `client_only`，客户端 function call/output 经过 Agentic API、Gateway 和 Provider。
 - 内部 `Event` 的 `model_version` 为 4。规则可以读取 `MESSAGE`、`MODEL_CALL`、`TOOL_CALL_PROPOSAL`、`TOOL_CALL` 和 `TOOL_RESULT`；执行层还会追加脱敏的 `GUARDRAIL_DECISION` 记录，但它不能作为规则输入或关系来源。
 - `derived_from` 表示派生，`influenced_by` 表示可能影响；关系挂在后发生事件上并指向来源。`precedes` 与 `immediately_precedes` 只表达先后顺序，`linked_by` 查询显式的来源/影响关系。
 - `EventSecurityFacts` 随具体事件内容保存 `trust_class + trust_authority`，由可信的 Session/SDK 接入显式提供。外部事件默认标记为 `client_asserted`；`observed/derived` 由执行层建立。
@@ -72,9 +74,9 @@ version-3 YAML
 
 ## 6. 当前范围与后续规划
 
-当前运行范围是单用户、Gateway 请求级 Trace、完整请求历史展开和每个累计流式前缀重新分析。Remote Core 是无状态分析服务；Compose 只加固 Core/Gateway 服务本身。
+当前运行范围是单用户、Gateway 请求级 Trace、完整请求历史展开和每个累计流式前缀重新分析。Gateway 内置 Responses 状态层是显式注入的进程内状态接口；外部 Responses 状态由独立 Agentic API 进程使用 SQLite 保存；Remote Core 是无状态分析服务；Compose 不启动外部 Agentic API。
 
-后续规划见[`roadmap.md`](roadmap.md)，包括增量 Matcher/cache、Policy 热加载、TransformationPlan、目的地 Registry、一次性授权、Sandbox、内容审核/多模态能力、Framework 生命周期 recipe、SBOM、镜像签名、可观测性和集群编排。多用户/多租户身份、数据所有权、跨用户共享与按用户授权属于产品范围外。
+后续规划见[`roadmap.md`](roadmap.md)，包括增量 Matcher/cache、Policy 热加载、TransformationPlan、目的地 Registry、一次性授权、Sandbox、内容审核/多模态能力、Framework 生命周期 recipe、SBOM、镜像签名、可观测性和集群编排。产品范围固定为单用户部署。
 
 ## 7. 行为完成定义
 

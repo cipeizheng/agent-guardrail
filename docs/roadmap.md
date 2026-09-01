@@ -16,6 +16,7 @@
 - 增加历史索引、增量 Matcher 和可安全复用的分析结果，降低长任务与流式输出的重复扫描。
 - 为长会话和长流建立固定内存、延迟、吞吐和失败边界目标。
 - 优化完整请求历史的规范化与重复检测，同时保持 Gateway 请求之间相互隔离。
+- 扩展 [vLLM Agentic API](https://github.com/vllm-project/agentic-api) 作为 Responses 外部 state owner 的集成测试：当前已有 `Agentic API → Guardrail Gateway → Provider` 的本地跨进程 harness，覆盖 SQLite 重启恢复、完整历史送入 Gateway、function call 续接、SSE 终态续接和 Provider 错误映射；后续测试包括具体 Provider wire compatibility 和容器网络。
 
 ### P5：部署工程
 

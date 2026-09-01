@@ -18,6 +18,7 @@ from starlette.responses import Response
 
 from agent_guardrail.adapters.anthropic import AnthropicAdapter
 from agent_guardrail.adapters.openai import OpenAIAdapter, OpenAIResponsesAdapter
+from agent_guardrail.adapters.openai.responses_models import ResponsesRequest, ResponsesResponse
 from agent_guardrail.adapters.protocols import (
     ModelProviderAdapter,
     ProviderAdapterError,
@@ -44,6 +45,10 @@ from agent_guardrail.gateway.http import RequestReadError, read_json_body
 from agent_guardrail.gateway.mcp import MCPGateway
 from agent_guardrail.gateway.mcp_upstream import MCPUpstream
 from agent_guardrail.gateway.request_session import create_request_session
+from agent_guardrail.gateway.responses_state import (
+    ResponsesStateError,
+    ResponsesStateStore,
+)
 from agent_guardrail.gateway.upstream import (
     AnthropicUpstream,
     ModelUpstream,
@@ -66,6 +71,7 @@ class GatewayServices:
     runtime: DecisionRuntime
     chat_adapter: OpenAIAdapter
     responses_adapter: OpenAIResponsesAdapter
+    responses_state_store: ResponsesStateStore | None
     anthropic_adapter: AnthropicAdapter
     normalizer: InputNormalizer
     upstream: ModelUpstream | None
@@ -83,6 +89,7 @@ def create_app(
     core_http_client: httpx.AsyncClient | None = None,
     audit: AuditSink | None = None,
     model_routes: Mapping[str, ModelProviderAdapter[Any, Any]] | None = None,
+    responses_state_store: ResponsesStateStore | None = None,
 ) -> FastAPI:
     """Create an app with explicit injectable process-scoped dependencies."""
 
@@ -162,6 +169,7 @@ def create_app(
         runtime=active_runtime,
         chat_adapter=OpenAIAdapter(),
         responses_adapter=OpenAIResponsesAdapter(),
+        responses_state_store=responses_state_store,
         anthropic_adapter=AnthropicAdapter(),
         normalizer=InputNormalizer(max_candidates=settings.max_trace_events),
         upstream=model_upstream,
@@ -330,7 +338,29 @@ async def _handle_model_request(
             services.settings.max_request_bytes,
         )
         provider_request = adapter.parse_request(raw_request)
-        canonical_request = adapter.request_to_canonical(provider_request)
+        canonical_request_for_guardrail = provider_request
+        responses_state_request: ResponsesRequest | None = None
+        if isinstance(provider_request, ResponsesRequest):
+            responses_state_request = provider_request
+            if provider_request.previous_response_id is not None:
+                if services.responses_state_store is None:
+                    raise ProviderAdapterError(
+                        "responses_state_unconfigured",
+                        "Responses state support is not configured for previous_response_id.",
+                    )
+                try:
+                    canonical_request_for_guardrail = (
+                        await services.responses_state_store.resolve_request(provider_request)
+                    )
+                    responses_state_request = canonical_request_for_guardrail
+                except ResponsesStateError as exc:
+                    raise ProviderAdapterError(exc.code, str(exc)) from None
+                except Exception:
+                    raise ProviderAdapterError(
+                        "responses_state_unavailable",
+                        "Responses state could not be resolved.",
+                    ) from None
+        canonical_request = adapter.request_to_canonical(canonical_request_for_guardrail)
         normalized_request = services.normalizer.normalize_model_call(canonical_request)
         upstream_payload = adapter.request_payload(provider_request)
         if not isinstance(upstream_payload, dict):
@@ -367,12 +397,18 @@ async def _handle_model_request(
             trace_id=trace_id,
         )
     except ProviderAdapterError as exc:
+        state_unavailable = exc.code == "responses_state_unavailable"
         return _error_response(
-            400,
-            error_type="invalid_request_error",
+            503 if state_unavailable else 400,
+            error_type="guardrail_unavailable" if state_unavailable else "invalid_request_error",
             code=exc.code,
             message=str(exc),
             trace_id=trace_id,
+            checkpoint=(
+                EnforcementCheckpoint.BEFORE_MODEL_CALL.value
+                if state_unavailable
+                else None
+            ),
         )
     except InputNormalizationError as exc:
         return _error_response(
@@ -443,6 +479,8 @@ async def _handle_model_request(
                 services=services,
                 session=session,
                 model_call_event_id=pre_decision.event_id,
+                responses_state_store=services.responses_state_store,
+                responses_state_request=responses_state_request,
             ),
             media_type="text/event-stream",
             headers={
@@ -460,6 +498,14 @@ async def _handle_model_request(
             client_authorization=client_authorization_or_error,
         )
         provider_response = adapter.parse_response(raw_response)
+        if (
+            isinstance(provider_response, ResponsesResponse)
+            and provider_response.previous_response_id is None
+            and isinstance(provider_request, ResponsesRequest)
+        ):
+            provider_response = provider_response.model_copy(
+                update={"previous_response_id": provider_request.previous_response_id}
+            )
         canonical_response = adapter.response_to_canonical(
             provider_response,
             request=provider_request,
@@ -521,6 +567,23 @@ async def _handle_model_request(
             EnforcementCheckpoint.BEFORE_MODEL_OUTPUT_RELEASE,
         )
 
+    if responses_state_request is not None and services.responses_state_store is not None:
+        try:
+            await _save_responses_state(
+                store=services.responses_state_store,
+                request=responses_state_request,
+                response=provider_response,
+            )
+        except ResponsesStateError:
+            return _error_response(
+                503,
+                error_type="guardrail_unavailable",
+                code="responses_state_unavailable",
+                message="Responses state could not be persisted.",
+                trace_id=trace_id,
+                checkpoint=EnforcementCheckpoint.BEFORE_MODEL_OUTPUT_RELEASE.value,
+            )
+
     return JSONResponse(
         adapter.response_payload(provider_response),
         headers={"x-guardrail-trace-id": trace_id},
@@ -534,6 +597,8 @@ async def _guarded_model_stream(
     services: GatewayServices,
     session: EnforcementSession,
     model_call_event_id: str,
+    responses_state_store: ResponsesStateStore | None,
+    responses_state_request: ResponsesRequest | None,
 ) -> AsyncIterator[bytes]:
     """Release only Adapter-recognized SSE whose cumulative output passed Policy."""
 
@@ -588,6 +653,22 @@ async def _guarded_model_stream(
                             message="The model stream was blocked by guardrail policy.",
                         ).encode()
                         return
+                    if update.release is StreamRelease.FINAL:
+                        if (
+                            responses_state_store is not None
+                            and responses_state_request is not None
+                        ):
+                            terminal_response = getattr(decoder, "terminal_response", None)
+                            if not isinstance(terminal_response, ResponsesResponse):
+                                raise ResponsesStateError(
+                                    "responses_state_unavailable",
+                                    "The Responses stream had no validated terminal response.",
+                                )
+                            await _save_responses_state(
+                                store=responses_state_store,
+                                request=responses_state_request,
+                                response=terminal_response,
+                            )
                     yield b"".join(held)
                     held.clear()
             parser.finish()
@@ -607,6 +688,11 @@ async def _guarded_model_stream(
             code="stream_terminated",
             message="The model stream was terminated before further output could be released.",
         ).encode()
+    except ResponsesStateError:
+        yield decoder.error_event(
+            code="responses_state_unavailable",
+            message="Responses state could not be persisted.",
+        ).encode()
     except (httpx.TimeoutException, httpx.HTTPError):
         yield decoder.error_event(
             code="upstream_stream_failed",
@@ -624,6 +710,25 @@ async def _guarded_model_stream(
         ).encode()
     finally:
         await upstream_response.aclose()
+
+
+async def _save_responses_state(
+    *,
+    store: ResponsesStateStore,
+    request: ResponsesRequest,
+    response: ResponsesResponse,
+) -> None:
+    """Normalize state-owner write failures before any output is released."""
+
+    try:
+        await store.save_response(request=request, response=response)
+    except ResponsesStateError:
+        raise
+    except Exception:
+        raise ResponsesStateError(
+            "responses_state_unavailable",
+            "Responses state could not be persisted.",
+        ) from None
 
 
 def _authenticate(services: GatewayServices, request: Request) -> JSONResponse | None:

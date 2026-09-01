@@ -11,6 +11,7 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
+from agent_guardrail.adapters.openai.responses_models import ResponsesRequest, ResponsesResponse
 from agent_guardrail.adapters.protocols import ProviderAdapterError
 from agent_guardrail.adapters.streaming import (
     ProviderStreamUpdate,
@@ -19,7 +20,12 @@ from agent_guardrail.adapters.streaming import (
 )
 from agent_guardrail.core import MatchPolicyAnalyzer
 from agent_guardrail.enforcement import InMemoryAuditSink
-from agent_guardrail.gateway import GatewaySettings, create_app
+from agent_guardrail.gateway import (
+    GatewaySettings,
+    InMemoryResponsesStateStore,
+    ResponsesStateStore,
+    create_app,
+)
 from agent_guardrail.models import (
     ChatMessage,
     ChatRole,
@@ -334,9 +340,13 @@ def chat_tool_stream(body: str) -> bytes:
     )
 
 
-def response_api_payload(content: str = "Safe response") -> dict[str, object]:
+def response_api_payload(
+    content: str = "Safe response",
+    *,
+    response_id: str = "resp_1",
+) -> dict[str, object]:
     return {
-        "id": "resp_1",
+        "id": response_id,
         "object": "response",
         "created_at": 1.0,
         "model": "test-model",
@@ -356,8 +366,12 @@ def response_api_payload(content: str = "Safe response") -> dict[str, object]:
     }
 
 
-def response_api_tool_payload(body: str) -> dict[str, object]:
-    response = response_api_payload()
+def response_api_tool_payload(
+    body: str,
+    *,
+    response_id: str = "resp_1",
+) -> dict[str, object]:
+    response = response_api_payload(response_id=response_id)
     response["output"] = [
         {
             "type": "function_call",
@@ -371,21 +385,25 @@ def response_api_tool_payload(body: str) -> dict[str, object]:
     return response
 
 
-def response_api_lifecycle_payload() -> dict[str, object]:
-    response = response_api_payload()
+def response_api_lifecycle_payload(*, response_id: str = "resp_1") -> dict[str, object]:
+    response = response_api_payload(response_id=response_id)
     response["status"] = "in_progress"
     response["output"] = []
     return response
 
 
-def responses_stream(content: str = "Safe response") -> bytes:
+def responses_stream(
+    content: str = "Safe response",
+    *,
+    response_id: str = "resp_1",
+) -> bytes:
     events = [
         (
             "response.created",
             {
                 "type": "response.created",
                 "sequence_number": 0,
-                "response": response_api_lifecycle_payload(),
+                "response": response_api_lifecycle_payload(response_id=response_id),
             },
         ),
         (
@@ -405,7 +423,7 @@ def responses_stream(content: str = "Safe response") -> bytes:
             {
                 "type": "response.completed",
                 "sequence_number": 2,
-                "response": response_api_payload(content),
+                "response": response_api_payload(content, response_id=response_id),
             },
         ),
     ]
@@ -659,6 +677,19 @@ class _DelayedStream(httpx.AsyncByteStream):
         yield chat_stream("raw-sensitive-late-output")
 
 
+class _FailingResponsesStateStore:
+    async def resolve_request(self, request: ResponsesRequest) -> ResponsesRequest:
+        raise RuntimeError("state database unavailable")
+
+    async def save_response(
+        self,
+        *,
+        request: ResponsesRequest,
+        response: ResponsesResponse,
+    ) -> None:
+        raise RuntimeError("state database unavailable")
+
+
 @asynccontextmanager
 async def app_client(
     handler: Callable[[httpx.Request], httpx.Response],
@@ -667,6 +698,7 @@ async def app_client(
     audit: InMemoryAuditSink | None = None,
     settings: GatewaySettings | None = None,
     model_routes: Mapping[str, Any] | None = None,
+    responses_state_store: ResponsesStateStore | None = None,
 ) -> AsyncIterator[tuple[httpx.AsyncClient, list[httpx.Request]]]:
     requests: list[httpx.Request] = []
 
@@ -681,6 +713,7 @@ async def app_client(
         upstream_http_client=upstream_client,
         audit=audit,
         model_routes=model_routes,
+        responses_state_store=responses_state_store,
     )
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(
@@ -762,6 +795,291 @@ async def test_standard_openai_route_aliases_use_their_provider_adapters() -> No
     assert responses.status_code == 200
     assert responses.json()["output"][0]["content"][0]["text"] == "Safe response"
     assert len(requests) == 2
+
+
+@pytest.mark.asyncio
+async def test_responses_previous_id_restores_history_before_guardrail() -> None:
+    analyzer = RecordingAnalyzer()
+    store = InMemoryResponsesStateStore()
+    upstream_payloads: list[dict[str, object]] = []
+
+    def upstream(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        upstream_payloads.append(payload)
+        response_id = "resp_1" if len(upstream_payloads) == 1 else "resp_2"
+        return httpx.Response(
+            200,
+            json=response_api_payload(
+                "remembered" if response_id == "resp_1" else "continued",
+                response_id=response_id,
+            ),
+        )
+
+    async with app_client(
+        upstream,
+        runtime=GuardrailRuntime(analyzer),
+        responses_state_store=store,
+    ) as (client, requests):
+        first = await client.post(
+            "/v1/responses",
+            headers=auth_headers(),
+            json={"model": "test-model", "input": "remember this"},
+        )
+        second = await client.post(
+            "/v1/responses",
+            headers=auth_headers(),
+            json={
+                "model": "test-model",
+                "input": "continue",
+                "previous_response_id": "resp_1",
+            },
+        )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert len(requests) == 2
+    assert second.json()["previous_response_id"] == "resp_1"
+    assert upstream_payloads[1]["previous_response_id"] == "resp_1"
+    assert upstream_payloads[1]["input"] == "continue"
+    second_messages = [
+        payload
+        for kind, payload in analyzer.batches[-2]
+        if kind is EventKind.MESSAGE
+    ]
+    assert second_messages == [
+        {"role": "user", "content": {"type": "text", "text": "remember this"}},
+        {"role": "assistant", "content": {"type": "text", "text": "remembered"}},
+        {"role": "user", "content": {"type": "text", "text": "continue"}},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_responses_previous_id_restores_function_call_history() -> None:
+    analyzer = RecordingAnalyzer()
+    store = InMemoryResponsesStateStore()
+    upstream_payloads: list[dict[str, object]] = []
+    tools = responses_tool_request()["tools"]
+
+    def upstream(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        upstream_payloads.append(payload)
+        if len(upstream_payloads) == 1:
+            return httpx.Response(
+                200,
+                json=response_api_tool_payload("safe", response_id="resp_call"),
+            )
+        return httpx.Response(
+            200,
+            json=response_api_payload("tool result accepted", response_id="resp_done"),
+        )
+
+    async with app_client(
+        upstream,
+        runtime=GuardrailRuntime(analyzer),
+        responses_state_store=store,
+    ) as (client, requests):
+        first = await client.post(
+            "/v1/responses",
+            headers=auth_headers(),
+            json={"model": "test-model", "input": "Email it", "tools": tools},
+        )
+        second = await client.post(
+            "/v1/responses",
+            headers=auth_headers(),
+            json={
+                "model": "test-model",
+                "input": [
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call-1",
+                        "output": "sent",
+                    }
+                ],
+                "previous_response_id": "resp_call",
+                "tools": tools,
+            },
+        )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert len(requests) == 2
+    assert upstream_payloads[1]["input"] == [
+        {
+            "type": "function_call_output",
+            "call_id": "call-1",
+            "output": "sent",
+        }
+    ]
+    second_kinds = [kind for kind, _ in analyzer.batches[2]]
+    assert EventKind.TOOL_CALL_PROPOSAL in second_kinds
+    assert EventKind.TOOL_RESULT in second_kinds
+
+
+@pytest.mark.asyncio
+async def test_responses_previous_id_fails_closed_without_state_owner() -> None:
+    async with app_client(lambda request: httpx.Response(200, json=response_api_payload())) as (
+        client,
+        requests,
+    ):
+        response = await client.post(
+            "/v1/responses",
+            headers=auth_headers(),
+            json={
+                "model": "test-model",
+                "input": "continue",
+                "previous_response_id": "resp_missing",
+            },
+        )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "responses_state_unconfigured"
+    assert "resp_missing" not in response.text
+    assert requests == []
+
+
+@pytest.mark.asyncio
+async def test_responses_state_persistence_failure_does_not_release_output() -> None:
+    store = InMemoryResponsesStateStore(max_history_items=1)
+    async with app_client(
+        lambda request: httpx.Response(200, json=response_api_payload("not released")),
+        responses_state_store=store,
+    ) as (client, requests):
+        response = await client.post(
+            "/v1/responses",
+            headers=auth_headers(),
+            json={"model": "test-model", "input": "remember this"},
+        )
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "responses_state_unavailable"
+    assert "not released" not in response.text
+    assert len(requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_responses_state_owner_read_failure_is_unavailable_and_precedes_upstream() -> None:
+    async with app_client(
+        lambda request: httpx.Response(200, json=response_api_payload("must not run")),
+        responses_state_store=_FailingResponsesStateStore(),
+    ) as (client, requests):
+        response = await client.post(
+            "/v1/responses",
+            headers=auth_headers(),
+            json={
+                "model": "test-model",
+                "input": "continue",
+                "previous_response_id": "resp_prior",
+            },
+        )
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "responses_state_unavailable"
+    assert "state database" not in response.text
+    assert requests == []
+
+
+@pytest.mark.asyncio
+async def test_responses_state_owner_write_failure_does_not_release_output() -> None:
+    async with app_client(
+        lambda request: httpx.Response(200, json=response_api_payload("not released")),
+        responses_state_store=_FailingResponsesStateStore(),
+    ) as (client, requests):
+        response = await client.post(
+            "/v1/responses",
+            headers=auth_headers(),
+            json={"model": "test-model", "input": "remember this"},
+        )
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "responses_state_unavailable"
+    assert "not released" not in response.text
+    assert len(requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_blocked_responses_output_is_not_saved_for_follow_up() -> None:
+    store = InMemoryResponsesStateStore()
+    async with app_client(
+        lambda request: httpx.Response(200, json=response_api_payload(FAKE_SECRET)),
+        runtime=GuardrailRuntime(streaming_message_analyzer()),
+        responses_state_store=store,
+    ) as (client, requests):
+        blocked = await client.post(
+            "/v1/responses",
+            headers=auth_headers(),
+            json={"model": "test-model", "input": "remember this"},
+        )
+        follow_up = await client.post(
+            "/v1/responses",
+            headers=auth_headers(),
+            json={
+                "model": "test-model",
+                "input": "continue",
+                "previous_response_id": "resp_1",
+            },
+        )
+
+    assert blocked.status_code == 400
+    assert blocked.json()["error"]["code"] == "guardrail_blocked"
+    assert FAKE_SECRET not in blocked.text
+    assert follow_up.status_code == 400
+    assert follow_up.json()["error"]["code"] == "invalid_previous_response_id"
+    assert requests and len(requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_responses_stream_persists_terminal_state_for_follow_up() -> None:
+    analyzer = RecordingAnalyzer()
+    store = InMemoryResponsesStateStore()
+    upstream_payloads: list[dict[str, object]] = []
+
+    def upstream(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        upstream_payloads.append(payload)
+        if payload.get("stream") is True:
+            return httpx.Response(
+                200,
+                content=responses_stream("streamed remembered", response_id="resp_stream"),
+                headers={"content-type": "text/event-stream"},
+            )
+        return httpx.Response(
+            200,
+            json=response_api_payload("continued", response_id="resp_after_stream"),
+        )
+
+    async with app_client(
+        upstream,
+        runtime=GuardrailRuntime(analyzer),
+        responses_state_store=store,
+    ) as (client, requests):
+        first = await client.post(
+            "/v1/responses",
+            headers=auth_headers(),
+            json={"model": "test-model", "input": "remember this", "stream": True},
+        )
+        second = await client.post(
+            "/v1/responses",
+            headers=auth_headers(),
+            json={
+                "model": "test-model",
+                "input": "continue",
+                "previous_response_id": "resp_stream",
+            },
+        )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert len(requests) == 2
+    assert upstream_payloads[1]["input"] == "continue"
+    second_messages = [
+        payload
+        for kind, payload in analyzer.batches[-2]
+        if kind is EventKind.MESSAGE
+    ]
+    assert second_messages[1]["content"] == {
+        "type": "text",
+        "text": "streamed remembered",
+    }
 
 
 @pytest.mark.asyncio
@@ -960,10 +1278,12 @@ class RecordingAnalyzer(MatchPolicyAnalyzer):
     def __init__(self) -> None:
         super().__init__(empty_analyzer().policy)
         self.events: list[tuple[EventKind, EventOrigin, str, tuple[str, ...]]] = []
+        self.batches: list[list[tuple[EventKind, dict[str, Any]]]] = []
         self.security_destinations: list[SecurityDestination] = []
 
     async def analyze_pending(self, pending: PendingTrace):
         self.security_destinations.append(pending.security_context.destination)
+        self.batches.append([(event.kind, dict(event.payload)) for event in pending.events])
         self.events.extend(
             (
                 event.kind,

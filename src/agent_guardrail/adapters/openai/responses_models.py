@@ -11,10 +11,22 @@ class ResponsesModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
+class ResponsesInputTextContent(ResponsesModel):
+    """Text content parts emitted by Responses state owners during replay."""
+
+    type: Literal["input_text", "output_text"]
+    text: str
+
+
 class ResponsesInputMessage(ResponsesModel):
     type: Literal["message"] = "message"
     role: Literal["user", "assistant", "system", "developer"]
-    content: str
+    content: str | tuple[ResponsesInputTextContent, ...]
+    # State owners may replay their stored assistant item with these
+    # bookkeeping fields. They are accepted for protocol interoperation but
+    # are not used as security identity by the Gateway.
+    id: str | None = None
+    status: Literal["in_progress", "completed", "incomplete"] | None = None
 
 
 class ResponsesFunctionCallInput(ResponsesModel):
@@ -60,6 +72,7 @@ class ResponsesStreamOptions(ResponsesModel):
 class ResponsesRequest(ResponsesModel):
     model: str = Field(min_length=1)
     input: str | tuple[ResponsesInputItem, ...]
+    previous_response_id: str | None = Field(default=None, min_length=1)
     instructions: str | None = None
     tools: tuple[ResponsesFunctionTool, ...] = ()
     tool_choice: Literal["none", "auto", "required"] | ResponsesNamedToolChoice | None = None

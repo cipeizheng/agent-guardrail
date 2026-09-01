@@ -72,7 +72,7 @@ class OpenAIResponsesAdapter:
                     messages.append(
                         ChatMessage(
                             role=self._role(item.role),
-                            content=item.content,
+                            content=self._message_content(item),
                         )
                     )
                 elif isinstance(item, ResponsesFunctionCallInput):
@@ -239,6 +239,8 @@ class OpenAIResponsesAdapter:
         }
         if response.status is not None:
             payload["status"] = response.status
+        if response.previous_response_id is not None:
+            payload["previous_response_id"] = response.previous_response_id
         return payload
 
     @staticmethod
@@ -246,6 +248,12 @@ class OpenAIResponsesAdapter:
         if role in {"system", "developer"}:
             return ChatRole.SYSTEM
         return ChatRole(role)
+
+    @staticmethod
+    def _message_content(message: ResponsesInputMessage) -> str:
+        if isinstance(message.content, str):
+            return message.content
+        return "".join(part.text for part in message.content)
 
     @staticmethod
     def _canonical_call(*, call_id: str, name: str, arguments: str) -> ToolCall:
@@ -349,6 +357,13 @@ class OpenAIResponsesStreamDecoder:
         self._function_calls: dict[int, _PartialResponseFunctionCall] = {}
         self._last_sequence = -1
         self._terminal = False
+        self._validated_terminal_response: ResponsesResponse | None = None
+
+    @property
+    def terminal_response(self) -> ResponsesResponse | None:
+        """Return the validated terminal response for an optional state owner."""
+
+        return self._validated_terminal_response
 
     def consume(self, event: ServerSentEvent) -> ProviderStreamUpdate:
         if self._terminal:
@@ -427,9 +442,17 @@ class OpenAIResponsesStreamDecoder:
         if event_type == "response.completed":
             self._require_keys(payload, {"type", "sequence_number", "response"})
             response = self._terminal_response(payload)
+            if (
+                response.previous_response_id is None
+                and self._request.previous_response_id is not None
+            ):
+                response = response.model_copy(
+                    update={"previous_response_id": self._request.previous_response_id}
+                )
             output = self._adapter.response_to_canonical(response, request=self._request)
             self._validate_terminal_response(response, output)
             self._terminal = True
+            self._validated_terminal_response = response
             safe_payload = {
                 "type": event_type,
                 "sequence_number": sequence_number,

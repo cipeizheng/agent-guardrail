@@ -10,7 +10,21 @@ uv sync --frozen --extra gateway --no-dev
 uv run python -m agent_guardrail.gateway
 ```
 
-该进程包含 HTTP Gateway、一个 `GuardrailRuntime`、固定的模型服务/MCP 上游客户端和可选的 JSONL 审计记录写入器。单进程模式不依赖数据库或远程 Core；每个受保护请求只在处理期间维护自己的 Trace。
+该进程包含 HTTP Gateway、一个 `GuardrailRuntime`、固定的模型服务/MCP 上游客户端和可选的 JSONL 审计记录写入器。单进程模式不依赖数据库或远程 Core；默认每个受保护请求只在处理期间维护自己的 Trace。Gateway 内置 Responses 状态层通过 `create_app(responses_state_store=...)` 注入，Compose 和 `python -m agent_guardrail.gateway` 不启用它。外部 Responses 拓扑使用 vLLM Agentic API 作为前端 state owner，并将其上游指向当前 Gateway。
+
+### 外部 Responses state owner 的跨进程验证
+
+仓库提供跨进程 E2E harness，启动本项目 Gateway、Agentic API fork 和一个确定性的假 Provider。它验证 Agentic API 重启后用 SQLite 恢复 `previous_response_id`，Gateway 在 Provider 调用前看到完整历史，client-owned function call/output 的续接关系，SSE 终态续接，以及 Provider HTTP/协议错误的错误映射。
+
+```bash
+# 在相邻目录构建本地 Agentic API fork
+(cd ../agentic-api-guardrail && cargo build --bin agentic-server)
+
+# 启用测试；默认跳过，避免普通 Python 质量门隐式启动外部进程
+AGENTIC_API_E2E=1 uv run pytest tests/e2e/test_agentic_api_responses.py
+```
+
+也可以通过 `AGENTIC_API_BINARY=/absolute/path/to/agentic-server` 指定 fork 二进制。该拓扑使用 `AGENTIC_RESPONSES_TOOL_EXECUTION_MODE=client_only`；`gateway` 模式用于由 Agentic API 执行工具的部署。
 
 ### 完整本地检测配置
 

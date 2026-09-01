@@ -12,7 +12,7 @@ Agent Guardrail 会在模型请求、模型输出、工具调用和工具结果�
 
 ## 项目状态
 
-当前版本为 v0.1.0 alpha。项目提供应用内接入和 HTTP Gateway 接入，支持 OpenAI、Anthropic 和 MCP，并支持将规则分析服务单独部署。当前部署面向单个用户；沙箱、身份管理、持久化和资源隔离由宿主环境负责。
+当前版本为 v0.1.0 alpha。项目提供应用内接入和 HTTP Gateway 接入，支持 OpenAI、Anthropic 和 MCP，并支持将规则分析服务单独部署。Responses 的 `previous_response_id` 可通过 Gateway 显式注入的进程内状态存储，或外部 Agentic API 拓扑使用。当前外部集成使用一个 Agentic API 实例和 SQLite；部署面向单个用户，沙箱、身份管理、持久化和资源隔离由宿主环境负责。
 
 ## 快速开始
 
@@ -87,7 +87,7 @@ rules:
 
 Guardrail 检查通过 SDK 提交的事件和经过 Gateway 的请求。使用 SDK 时，应用在执行操作前读取返回的决定；Gateway 则按固定顺序检查模型和 MCP 请求。能够执行 Shell、任意代码、直接网络请求或宿主操作的 Agent 还需要独立沙箱，并设置默认拒绝的网络访问、最小化的临时存储和资源上限。Provider 或 Tool 凭据、审计存储应位于沙箱之外。[安全模型](docs/security-model.md)和[运行指南](docs/guides/operations.md)说明双方责任。
 
-当前部署面向单个用户，任务状态保存在一个 Gateway 进程中。后续工作见[路线图](docs/roadmap.md)；当前行为以[当前架构合同](docs/current-architecture-contract.md)为准。
+当前部署面向单个用户，默认 Compose 只启动 Gateway。[Responses 状态层设计](docs/design/responses-state-layer.md)说明了 Gateway 状态接口，以及使用 vLLM Agentic API 和 SQLite 作为外部状态所有者的接入拓扑。后续工作见[路线图](docs/roadmap.md)；当前行为以[当前架构合同](docs/current-architecture-contract.md)为准。
 
 ## 文档
 
@@ -99,6 +99,7 @@ Guardrail 检查通过 SDK 提交的事件和经过 Gateway 的请求。使用 S
 | [接入指南](docs/guides/integration.md) | 接入应用代码、模型客户端和 MCP |
 | [能力参考](docs/reference/capabilities.md) | 检测器和条件判断的使用边界 |
 | [Gateway 协议参考](docs/reference/gateway-protocol.md) | HTTP、流式响应和 MCP 行为 |
+| [Responses 状态层设计](docs/design/responses-state-layer.md) | `previous_response_id` 状态接口与外部状态所有者边界 |
 | [运行指南](docs/guides/operations.md) | 配置、环境变量、Docker、审计和健康检查 |
 | [安全模型](docs/security-model.md) | 资产、信任边界和 T01–T10 |
 | [独立分析服务设计](docs/design/remote-core-deployment.md) | 部署独立的规则分析服务 |

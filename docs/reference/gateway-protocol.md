@@ -38,7 +38,7 @@ Gateway 的 HTTP 路由负责请求外壳、认证、大小限制和错误返回
 
 ## 3. 模型服务接口范围
 
-Chat Completions 支持文本消息、function/tool calls、工具声明，以及根据请求中声明的 JSON Schema 校验工具参数。Responses 支持 text/instructions、custom function、function output，以及对应的非流式和 SSE 输出。当前协议只接收可以完整转换为内部格式的文本和工具字段；收到服务端历史、内置远程工具、background 或多模态内容时直接返回错误。
+Chat Completions 支持文本消息、function/tool calls、工具声明，以及根据请求中声明的 JSON Schema 校验工具参数。Responses 支持 text/instructions、文本 content parts、custom function、function output，以及对应的非流式和 SSE 输出。Gateway 直接接收时，`previous_response_id` 通过注入的 `ResponsesStateStore` 使用：state owner 先恢复前序 input/output items，Gateway 再检查恢复后的完整 canonical history；未注入 state owner 时直接返回错误。当前内置 store 在进程内保存有界状态。外部 Responses 拓扑由 Agentic API 恢复并展开前序 items，再把完整 input 发送给 Gateway。除这些状态入口外，协议只接收可以完整转换为内部格式的文本和工具字段；收到服务端历史、内置远程工具、background、reasoning 或多模态内容时直接返回错误。
 
 `ModelProviderAdapter` 只在接入非内置模型协议时使用。它位于 Gateway 中，把 Gateway 的统一模型请求转换为特定上游服务的 HTTP 格式，再把响应转换回来。OpenAI 和 Anthropic 的内置路由不需要实现它；部署方确实要接入其他协议时，才在创建 Gateway 时通过 `create_app(model_routes=...)` 注册 `/v1/providers/...` 路由。该路由使用代码固定的相对 `upstream_path`，请求不能自行指定上游地址。仓内 Toy Provider 只是黑盒测试用的示例适配器，用 `{prompt} → {answer}` 和 `token/done` 命名 SSE 验证普通与流式流程；正式 Provider 集成以部署配置和对应状态为准。
 
@@ -47,7 +47,7 @@ Anthropic Messages 支持顶层/system message 文本、user/assistant 文本、
 模型请求按以下方式建立检查上下文：
 
 - 每个 HTTP 请求创建独立的 Session 和 Trace；
-- 完整 messages 作为本次客户端声明的 `client_asserted` 快照，因此普通多轮对话由客户端随请求提交的历史覆盖；
+- 完整 messages 作为本次客户端声明的 `client_asserted` 快照，因此 Chat Completions 普通多轮对话由客户端随请求提交的历史覆盖；启用 Responses state owner 时，`previous_response_id` 恢复的 input/output items 与本轮 input 一起形成本次检查快照；
 - request 历史、`MODEL_CALL` 和 observed response 各形成一个原子 batch；
 - Trace、Policy、origin、Relation 和安全事实由 Gateway 控制；
 - 模型请求与 MCP 请求使用不同 Trace，不根据时间、调用 ID 或参数内容建立跨协议 Relation。

@@ -12,7 +12,7 @@ It preserves relationships among messages, model calls, and tool calls, and prod
 
 ## Project status
 
-The current version is v0.1.0 alpha. The project provides in-process and HTTP Gateway integration, supports OpenAI, Anthropic, and MCP, and supports separate deployment of policy analysis. The current deployment serves one user; the host environment supplies sandboxing, identity, durable storage, and resource isolation.
+The current version is v0.1.0 alpha. The project provides in-process and HTTP Gateway integration, supports OpenAI, Anthropic, and MCP, and supports separate deployment of policy analysis. Responses `previous_response_id` is available through the Gateway's injected in-process state store or the external Agentic API topology. The current external integration uses one Agentic API instance with SQLite; the deployment serves one user, and the host environment supplies sandboxing, identity, durable storage, and resource isolation.
 
 ## Quick start
 
@@ -87,7 +87,7 @@ Detection results are signals. Rules should also use the data source, destinatio
 
 Guardrail checks events submitted through its SDK and requests handled by its Gateway. With the SDK, application code reads the returned decision before performing the operation; the Gateway enforces that ordering for model and MCP requests. Agent code that can run shell commands, arbitrary code, direct network calls, or host operations still requires a separate sandbox with default-deny egress, minimal temporary storage, and resource limits. Keep provider or tool credentials and audit storage outside that sandbox. The [security model](docs/security-model.md) and [operations guide](docs/guides/operations.md) define the responsibility split.
 
-The current deployment serves one user and keeps task state in one Gateway process. Future work is listed in the [roadmap](docs/roadmap.md); the [current architecture contract](docs/current-architecture-contract.md) defines current behavior.
+The current deployment serves one user and the default Compose starts the Gateway only. The [Responses state-layer design](docs/design/responses-state-layer.md) describes the Gateway state interface and the selected external state-owner topology using vLLM Agentic API with SQLite. Future work is listed in the [roadmap](docs/roadmap.md); the [current architecture contract](docs/current-architecture-contract.md) defines current behavior.
 
 ## Documentation
 
@@ -99,6 +99,7 @@ The current deployment serves one user and keeps task state in one Gateway proce
 | [Integration guide](docs/guides/integration.md) | Connecting application code, model clients, and MCP |
 | [Capability reference](docs/reference/capabilities.md) | Detector and Predicate contracts |
 | [Gateway protocol](docs/reference/gateway-protocol.md) | HTTP, streaming, and MCP wire behavior |
+| [Responses state-layer design](docs/design/responses-state-layer.md) | `previous_response_id` state interface and external state-owner boundary |
 | [Operations guide](docs/guides/operations.md) | Profiles, environment variables, Docker, audit, and health |
 | [Security model](docs/security-model.md) | Assets, trust boundaries, and T01–T10 |
 | [Separate analysis service design](docs/design/remote-core-deployment.md) | Deploying policy analysis separately |

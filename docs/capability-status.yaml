@@ -1,7 +1,7 @@
 schema_version: 2
 last_reviewed: "2026-09-01"
 
-scope: 本矩阵记录规则可引用的检测与条件判断能力，并分别记录标准部署可达性、真实实现证据和规则执行证据。威胁路径编号来自 security-model.md。
+scope: 本矩阵记录规则可引用的检测与条件判断能力，并分别记录标准部署可达性、真实实现证据和规则执行证据。Responses 协议状态层不属于本矩阵的能力条目，当前 POC 与后续 state owner 合同见 design/responses-state-layer.md。威胁路径编号来自 security-model.md。
 
 status_vocabulary:
   verified: 真实算法或固定后端位于标准生产路径，正常、违规、边界、失败、脱敏、规则执行和受保护副作用断言满足当前能力的完成定义。

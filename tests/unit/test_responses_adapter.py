@@ -135,6 +135,59 @@ def test_responses_instructions_and_developer_input_map_to_system_messages() -> 
     assert adapter.request_payload(request)["instructions"] == "Follow policy"
 
 
+def test_responses_accepts_text_content_parts_from_state_owner_replay() -> None:
+    adapter = OpenAIResponsesAdapter()
+    payload = request_payload()
+    payload["input"] = [
+        {
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": "remember this"}],
+        },
+        {
+            "type": "message",
+            "role": "assistant",
+            "id": "msg_state_owner",
+            "status": "completed",
+            "content": [{"type": "output_text", "text": "remembered"}],
+        },
+        {
+            "type": "message",
+            "role": "user",
+            "content": [
+                {"type": "input_text", "text": "continue "},
+                {"type": "input_text", "text": "the task"},
+            ],
+        },
+    ]
+
+    canonical = adapter.request_to_canonical(adapter.parse_request(payload))
+
+    assert [message.content for message in canonical.messages] == [
+        "remember this",
+        "remembered",
+        "continue the task",
+    ]
+
+
+def test_responses_rejects_non_text_content_parts_without_echoing_them() -> None:
+    adapter = OpenAIResponsesAdapter()
+    payload = request_payload()
+    payload["input"] = [
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "input_image", "image_url": "raw-sensitive"}],
+        }
+    ]
+
+    with pytest.raises(OpenAIResponsesAdapterError) as caught:
+        adapter.parse_request(payload)
+
+    assert caught.value.code == "invalid_request"
+    assert "raw-sensitive" not in str(caught.value)
+
+
 def test_responses_rejects_invalid_tool_schema_without_echoing_it() -> None:
     adapter = OpenAIResponsesAdapter()
     payload = request_payload()
@@ -306,13 +359,12 @@ def test_responses_rejects_inconsistent_function_history(
     assert caught.value.code == "invalid_request_history"
 
 
-def test_responses_rejects_hidden_history_builtins_and_invalid_calls() -> None:
+def test_responses_parses_state_reference_and_rejects_builtins_and_invalid_calls() -> None:
     adapter = OpenAIResponsesAdapter()
 
-    with pytest.raises(OpenAIResponsesAdapterError) as hidden:
-        adapter.parse_request(
-            {"model": "test-model", "input": "hello", "previous_response_id": "r"}
-        )
+    hidden = adapter.parse_request(
+        {"model": "test-model", "input": "hello", "previous_response_id": "r"}
+    )
     with pytest.raises(OpenAIResponsesAdapterError) as builtin:
         adapter.parse_request(
             {
@@ -330,7 +382,7 @@ def test_responses_rejects_hidden_history_builtins_and_invalid_calls() -> None:
             ),
         )
 
-    assert hidden.value.code == "invalid_request"
+    assert hidden.previous_response_id == "r"
     assert builtin.value.code == "invalid_request"
     assert arguments.value.code == "undeclared_tool_call"
 

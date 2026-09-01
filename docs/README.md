@@ -34,6 +34,7 @@
 - [Gateway 协议参考](reference/gateway-protocol.md)：模型服务和 MCP 工具的 HTTP 接口、请求流程和错误。
 - [Gateway 运行指南](guides/operations.md)：启动服务、配置检测能力、管理凭据和部署安全边界。
 - [Core 与 Gateway 独立部署设计](design/remote-core-deployment.md)：分析服务和 Gateway 的职责、协议与失败处理。
+- [Responses 状态层设计](design/responses-state-layer.md)：`previous_response_id` 状态接口、state owner 边界和开源项目接入方式。
 - [提示注入检测效果评估](../evals/prompt_injection/README.md)：固定语料上的检测指标和阈值评估。
 - [第三方语料生成环境](../evals/corpus/README.md)：固定 AgentDojo 版本并生成提示注入攻击载荷。
 
