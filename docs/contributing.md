@@ -6,8 +6,7 @@
 
 ## 1. 开始任务
 
-事实优先级依次是：用户当前要求、`AGENTS.md`、[当前架构合同](current-architecture-contract.md)、专项设计、
-代码与测试。运行路由和配置以合同指定的代码源为准；Git 历史不作为当前实现规范。
+事实优先级依次是：用户当前要求、`AGENTS.md`、[当前架构合同](current-architecture-contract.md)、专项设计、代码与测试。运行路由和配置以合同指定的代码源为准；Git 历史不作为当前实现规范。
 
 1. 阅读 `AGENTS.md` 和当前合同。
 2. 通过[文档导航](README.md)只打开任务相关领域文档。
@@ -60,9 +59,7 @@ flowchart TD
 | Provider/Streaming/MCP | `gateway/app.py`、`gateway/upstream.py`、`gateway/mcp.py`、`adapters/` |
 | 远程 Core/双容器 | `core_service/`、`runtime/remote.py`、`compose.yaml`、`docker/` |
 
-调试意外 allow/block：`Matcher Report → Decision Analyzer → Session commit`。关系未命中先看
-`Event.relations` 和 Relation 建立点，不根据 sequence 猜来源。副作用顺序从 Gateway/Wrapper 的
-`before_*_call` Decision 开始检查。
+调试意外 allow/block：`Matcher Report → Decision Analyzer → Session commit`。关系未命中先看 `Event.relations` 和 Relation 建立点，不根据 sequence 猜来源。副作用顺序从 Gateway/Wrapper 的 `before_*_call` Decision 开始检查。
 
 ## 4. 实现边界
 
@@ -85,32 +82,25 @@ flowchart TD
 - `test_session.py`：batch 原子性、block、异常和可信来源；
 - `test_sdk.py`：编程式 EventRef、显式关系和跨 run 防伪；
 - `test_detector_sdk.py`：直接 Detector 的枚举、text/JSON/batch、timeout、失败与脱敏；
-- `test_openai_stream_adapter.py` / `test_responses_adapter.py` / `test_streaming_adapter.py`：Chat 与
-  Responses canonical 映射、SSE 状态机、限制与失败；
+- `test_openai_stream_adapter.py` / `test_responses_adapter.py` / `test_streaming_adapter.py`：Chat 与 Responses canonical 映射、SSE 状态机、限制与失败；
 - `test_model_upstream.py`：固定上游 URL、鉴权、限长、timeout/transport 和 SSE Content-Type；
 - `test_security_detectors.py` / `test_priority_detectors.py`：既有 Detector 算法边界；
-- `test_secret_detector_parity.py` / `test_pii_detector.py` / `test_prompt_detector_parity.py`：
-  Secret、PII、Prompt/模型适配边界；
+- `test_secret_detector_parity.py` / `test_pii_detector.py` / `test_prompt_detector_parity.py`：Secret、PII、Prompt/模型适配边界；
 - `test_code_detector_parity.py`：Python/IPython、hidden content、Semgrep 和 YARA 边界；
-- `test_real_detector_backends.py`：本地真实 backend（Presidio、Semgrep、YARA、Prompt 模型）与
-  部署 profile/组件组合的装配边界；
+- `test_real_detector_backends.py`：本地真实 backend（Presidio、Semgrep、YARA、Prompt 模型）与部署 profile/组件组合的装配边界；
 - `test_llm_judge_detector.py`：`prompt_injection_judge` 的 judge profile、threshold、descriptor 与脱敏；
 - `test_builtin_predicates.py` / `test_similarity_predicates.py`：基础与 fuzzy Predicate 边界；
 - `test_similarity_detector.py`：Invariant `is_similar`、profile model、backend、timeout、脱敏和 Enforcement；
-- `test_alignment_registries.py` / `test_invariant_detector_alignment.py`：默认/可选 Registry、
-  MatchPlan→Decision→Enforcement 对齐路径；
+- `test_alignment_registries.py` / `test_invariant_detector_alignment.py`：默认/可选 Registry、MatchPlan→Decision→Enforcement 对齐路径；
 - `test_builtin_capabilities.py`：Registry→Decision→Enforcement 副作用；
 - Gateway/Inline/MCP integration：真实接入顺序、Chat/Responses streaming 窗口与上游调用计数；
-- `test_external_agent_base_url.py` / `test_remote_core_gateway.py`：官方 OpenAI SDK、真实 HTTP
-  首块释放/取消，以及 remote Core streaming 链路。
+- `test_external_agent_base_url.py` / `test_remote_core_gateway.py`：官方 OpenAI SDK、真实 HTTP 首块释放/取消，以及 remote Core streaming 链路。
 
 ## 6. 新行为测试要求
 
-至少覆盖：安全输入、明确违规、不适用 Event/语境、缺失/畸形字段、相邻边界、预算/timeout/异常、失败动作、
-脱敏、调用前 block 副作用为零和输出释放前 block 不释放结果。
+至少覆盖：安全输入、明确违规、不适用 Event/语境、缺失/畸形字段、相邻边界、预算/timeout/异常、失败动作、脱敏、调用前 block 副作用为零和输出释放前 block 不释放结果。
 
-Detector 算法有效性不能用 mock 证明；外部 backend fake 只能证明 adapter 合同。Gateway 测试使用
-MockTransport/Fake Upstream，不访问真实模型 API。
+Detector 算法有效性不能用 mock 证明；外部 backend fake 只能证明 adapter 合同。Gateway 测试使用 MockTransport/Fake Upstream，不访问真实模型 API。
 
 ## 7. Review 检查
 
@@ -139,7 +129,4 @@ git diff --check
 
 还要检查暂存文件和凭据泄漏，不提交环境文件、缓存、构建产物、Audit 或真实 Secret。
 
-新增 Action、改变 Policy/MatchPlan 链、Canonical Event/Relation、pre/post 承诺、持久状态、远程 Core、
-新信任边界、原始敏感内容保留、payload Transformation 或破坏性协议升级时，必须在同一变更中更新当前
-架构合同、专项设计和安全测试。需要先讨论时可创建临时 `docs/proposals/<topic>.md`；结论接受并合并后删除，
-历史由 Git 保存。
+新增 Action、改变 Policy/MatchPlan 链、Canonical Event/Relation、pre/post 承诺、持久状态、远程 Core、新信任边界、原始敏感内容保留、payload Transformation 或破坏性协议升级时，必须在同一变更中更新当前架构合同、专项设计和安全测试。需要先讨论时可创建临时 `docs/proposals/<topic>.md`；结论接受并合并后删除，历史由 Git 保存。

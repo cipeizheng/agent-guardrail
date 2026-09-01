@@ -4,32 +4,21 @@
 
 [English](README.md) | 简体中文
 
-[![Version](https://img.shields.io/badge/version-0.1.0-3b82f6)](pyproject.toml)
-[![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)](pyproject.toml)
-[![Status](https://img.shields.io/badge/status-alpha-f59e0b)](docs/roadmap.md)
-[![License](https://img.shields.io/badge/license-MIT-22c55e)](LICENSE)
+[![Version](https://img.shields.io/badge/version-0.1.0-3b82f6)](pyproject.toml) [![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)](pyproject.toml) [![Status](https://img.shields.io/badge/status-alpha-f59e0b)](docs/roadmap.md) [![License](https://img.shields.io/badge/license-MIT-22c55e)](LICENSE)
 
-部署者接入内容检测组件并编写安全规则。Agent Guardrail 读取 Agent 运行过程中的消息、模型调用、工具调用和
-工具结果，根据规则给出允许、记录或阻断结果，并在模型或工具真正执行前以及输出交给 Agent 前落实结果。
+部署者接入内容检测组件并编写安全规则。Agent Guardrail 读取 Agent 运行过程中的消息、模型调用、工具调用和工具结果，根据规则给出允许、记录或阻断结果，并在模型或工具真正执行前以及输出交给 Agent 前落实结果。
 
-框架保证规则按照固定方式加载和执行，并保证调用前阻断能够停止受保护的操作。内容检测的准确度取决于所选
-检测组件；实际安全效果取决于应用采用的具体规则和真实工作负载。
+框架保证规则按照固定方式加载和执行，并保证调用前阻断能够停止受保护的操作。内容检测的准确度取决于所选检测组件；实际安全效果取决于应用采用的具体规则和真实工作负载。
 
-> **项目状态 — v0.1.0 alpha。** 程序化内容检测接口、规则接口、模型调用代理、基于 MCP 标准协议的工具调用
-> 代理、流式输出检查、单个任务的内存执行记录，以及独立部署的规则分析服务已经实现并通过测试。MCP 用于
-> Agent 调用外部工具。当前部署模型服务一个用户；宿主基础设施提供进程隔离、持久化状态、身份和资源限制。
+> **项目状态 — v0.1.0 alpha。** 程序化内容检测接口、规则接口、模型调用代理、基于 MCP 标准协议的工具调用代理、流式输出检查、单个任务的内存执行记录，以及独立部署的规则分析服务已经实现并通过测试。MCP 用于 Agent 调用外部工具。当前部署模型服务一个用户；宿主基础设施提供进程隔离、持久化状态、身份和资源限制。
 
 ## Agent Guardrail 提供什么？
 
 - **分析与执行边界。** 应用可以自行调用规则分析；代理服务可以在模型或工具调用前以及输出释放前实施阻断。
-- **统一的规则执行路径。** 严格的 YAML 配置会生成一份不可变的内部执行计划，所有允许、记录和阻断结果都由
-  同一路径产生。
-- **纯数据规则配置。** YAML 只能选择部署者预先注册的检测和判断能力；实现代码、文件、进程、网络地址和
-  访问权限始终由部署代码持有。
-- **结构化执行记录。** 消息、模型调用、模型建议的工具调用、实际工具调用和工具结果都保存为不可变记录；
-  显式连接描述某条早期记录如何产生或影响后续操作，时间顺序只描述先后关系。
-- **部署者选择检测能力。** 模型、规则集、外部进程和凭据由部署者配置，安全规则只能使用已注册的名称和
-  有界参数。
+- **统一的规则执行路径。** 严格的 YAML 配置会生成一份不可变的内部执行计划，所有允许、记录和阻断结果都由同一路径产生。
+- **纯数据规则配置。** YAML 只能选择部署者预先注册的检测和判断能力；实现代码、文件、进程、网络地址和访问权限始终由部署代码持有。
+- **结构化执行记录。** 消息、模型调用、模型建议的工具调用、实际工具调用和工具结果都保存为不可变记录；显式连接描述某条早期记录如何产生或影响后续操作，时间顺序只描述先后关系。
+- **部署者选择检测能力。** 模型、规则集、外部进程和凭据由部署者配置，安全规则只能使用已注册的名称和有界参数。
 - **脱敏证据。** 命中结果、违规记录、错误和审计记录保存结构化遮罩信息。
 
 ## 架构
@@ -47,22 +36,16 @@ flowchart LR
     H --> E
 ```
 
-安全规则读取结构化执行记录以及记录之间的明确联系。模型和工具代理把外部协议转换成统一记录，并在四个
-位置检查规则。下面四个英文名称是代码中的接入点，分别表示模型调用前、模型输出释放前、工具调用前和工具
-结果释放前：
+安全规则读取结构化执行记录以及记录之间的明确联系。模型和工具代理把外部协议转换成统一记录，并在四个位置检查规则。下面四个英文名称是代码中的接入点，分别表示模型调用前、模型输出释放前、工具调用前和工具结果释放前：
 
 ```text
 before_model_call → LLM → before_model_output_release
 before_tool_call  → Tool → before_tool_output_release
 ```
 
-每次分析都读取已经确认的执行历史和当前待检查的完整操作。允许和记录会一次性保存当前操作；阻断会保存
-脱敏结果，并丢弃当前操作中的原始内容。
+每次分析都读取已经确认的执行历史和当前待检查的完整操作。允许和记录会一次性保存当前操作；阻断会保存脱敏结果，并丢弃当前操作中的原始内容。
 
-技术文档和 API 使用以下名称：`Policy` 表示 YAML 安全规则，`Detector` 表示内容检测组件，`Event` 表示一条
-结构化执行记录，`Relation` 表示两条记录之间明确的产生或影响关系，`Decision` 表示允许、记录或阻断结果，
-`Trace` 表示一个任务的连续执行历史，`Gateway` 表示位于 Agent 与模型或工具服务之间的代理，`Core` 表示
-可以独立部署的规则分析服务，`capability` 表示规则可以引用的已注册检测或条件判断能力。
+技术文档和 API 使用以下名称：`Policy` 表示 YAML 安全规则，`Detector` 表示内容检测组件，`Event` 表示一条结构化执行记录，`Relation` 表示两条记录之间明确的产生或影响关系，`Decision` 表示允许、记录或阻断结果，`Trace` 表示一个任务的连续执行历史，`Gateway` 表示位于 Agent 与模型或工具服务之间的代理，`Core` 表示可以独立部署的规则分析服务，`capability` 表示规则可以引用的已注册检测或条件判断能力。
 
 ## 快速开始
 
@@ -121,9 +104,7 @@ rules:
       evidence: [{source: detector, id: secret_scan}]
 ```
 
-Runtime 激活前，Loader 会拒绝重复键、未知字段、宽松类型、YAML alias/tag、非法引用和不可用 capability。
-binding、relation、quantifier、派生值、Finding、预算和可信安全参数见
-[Policy 作者指南](docs/guides/policy-authoring.md)。
+Runtime 激活前，Loader 会拒绝重复键、未知字段、宽松类型、YAML alias/tag、非法引用和不可用 capability。binding、relation、quantifier、派生值、Finding、预算和可信安全参数见[Policy 作者指南](docs/guides/policy-authoring.md)。
 
 ## 接入方式
 
@@ -148,9 +129,7 @@ if result.detected:
     reject_untrusted_content()
 ```
 
-结果是脱敏 fact，不是 allow/block Decision。`detect_text`、`detect_json`、`detect_many` 与 YAML/MatchPlan 的
-Detector condition 共享完全相同的 descriptor、timeout、结果上限和脱敏执行边界；backend 异常会抛出脱敏
-`DetectorExecutionError`，不会静默变成“未命中”。
+结果是脱敏 fact，不是 allow/block Decision。`detect_text`、`detect_json`、`detect_many` 与 YAML/MatchPlan 的 Detector condition 共享完全相同的 descriptor、timeout、结果上限和脱敏执行边界；backend 异常会抛出脱敏 `DetectorExecutionError`，不会静默变成“未命中”。
 
 OpenAI Client 只需要修改 base URL：
 
@@ -163,10 +142,7 @@ client = OpenAI(
 )
 ```
 
-`client.chat.completions.create(...)` 与 `client.responses.create(...)` 都支持
-`stream=False/True`。Streaming 只释放已经检查的累计文本前缀与完整验证的 Tool arguments；后续 block
-不能撤回早先窗口。需要完整输出原子判断时使用 `stream=False`。可信部署可在 `/v1/providers/...` 注册非
-OpenAI wire Adapter，客户端仍不能选择上游 URL。
+`client.chat.completions.create(...)` 与 `client.responses.create(...)` 都支持 `stream=False/True`。Streaming 只释放已经检查的累计文本前缀与完整验证的 Tool arguments；后续 block 不能撤回早先窗口。需要完整输出原子判断时使用 `stream=False`。可信部署可在 `/v1/providers/...` 注册非 OpenAI wire Adapter，客户端仍不能选择上游 URL。
 
 Anthropic Client 使用 Gateway 根地址：
 
@@ -179,8 +155,7 @@ client = Anthropic(
 )
 ```
 
-当前覆盖 Messages 文本、client `tools/tool_use/tool_result` 及流式事件；`mcp_servers`、Anthropic server
-tools、thinking 和多模态会失败关闭，避免服务端工具执行绕过本项目的 MCP Enforcement。
+当前覆盖 Messages 文本、client `tools/tool_use/tool_result` 及流式事件；`mcp_servers`、Anthropic server tools、thinking 和多模态会失败关闭，避免服务端工具执行绕过本项目的 MCP Enforcement。
 
 MCP Python SDK v2：
 
@@ -191,16 +166,13 @@ async with Client("http://127.0.0.1:8080/v1/mcp", cache=None) as client:
     result = await client.call_tool("send_email", {"to": "outside@example.com"})
 ```
 
-生命周期和协议细节见[接入指南](docs/guides/integration.md)与
-[Gateway 协议参考](docs/reference/gateway-protocol.md)。
+生命周期和协议细节见[接入指南](docs/guides/integration.md)与[Gateway 协议参考](docs/reference/gateway-protocol.md)。
 
 ## 检测与条件判断能力
 
-本节中的“能力”表示部署者注册的检测组件或条件判断组件；表格中的名称是规则文件使用的固定标识。默认
-`local` 配置使用本地确定性组件：
+本节中的“能力”表示部署者注册的检测组件或条件判断组件；表格中的名称是规则文件使用的固定标识。默认 `local` 配置使用本地确定性组件：
 
-- Detector：`secrets`、`pii`、`prompt_injection`、`unicode_security`、
-  `python_ast_ipython`、`hidden_content`。
+- Detector：`secrets`、`pii`、`prompt_injection`、`unicode_security`、`python_ast_ipython`、`hidden_content`。
 - 纯 Predicate：`number_in_range`、`length_in_range`、`url_host_allowed`、`fuzzy_contains`。
 
 部署固定的可选能力与默认目录明确分离：
@@ -211,14 +183,11 @@ async with Client("http://127.0.0.1:8080/v1/mcp", cache=None) as client:
 | `full_deberta` | 增强 `pii` | 锁定 Presidio/spaCy 英文 NER，加本地 validator |
 | `full_deberta` | `semgrep` | 隔离且锁定版本的 CLI 与包内 Python ruleset |
 | `full_deberta` | `yara_injection_signatures` | 锁定 yara-python、包内 ruleset 与固定 rule-to-type 映射 |
-| `full_promptguard2` | `prompt_injection_model` | 全栈同 `full_deberta`，仅 DeBERTa 换成 PromptGuard 2 86M（候选 profile，Llama 4 license） |
+| `full_promptguard2` | `prompt_injection_model` | 全栈同 `full_deberta`，仅 DeBERTa 换成 PromptGuard 2 86M（候选 profile，Llama 4 license）|
 | `promptguard2` | `prompt_injection_model` | 仅 PromptGuard 2（无 presidio/semgrep/yara），用于 eval 隔离与轻量部署 |
-| 显式注入 | `is_similar` 与 `prompt_injection_judge` | 部署选择的 embedding / LLM judge backend（均为 `adapter_only`） |
+| 显式注入 | `is_similar` 与 `prompt_injection_judge` | 部署选择的 embedding / LLM judge backend（均为 `adapter_only`）|
 
-真实 `prompt_injection_model` backend 当前状态为 `baseline`。锁定的公开语料测量其检测特性，包括盲区和
-过度防御。`is_similar` 与 `prompt_injection_judge` 当前状态为 `adapter_only`，各项 capability 的交付状态与
-验证范围记录在[Capability 状态矩阵](docs/capability-status.yaml)中。可复现的第三方 Detector 特性评估位于
-[`evals/prompt_injection`](evals/prompt_injection/README.md)。
+真实 `prompt_injection_model` backend 当前状态为 `baseline`。锁定的公开语料测量其检测特性，包括盲区和过度防御。`is_similar` 与 `prompt_injection_judge` 当前状态为 `adapter_only`，各项 capability 的交付状态与验证范围记录在[Capability 状态矩阵](docs/capability-status.yaml)中。可复现的第三方 Detector 特性评估位于[`evals/prompt_injection`](evals/prompt_injection/README.md)。
 
 验证证据具有明确范围：
 
@@ -250,20 +219,13 @@ uv run agent-guardrail-prefetch-detectors
 export AGENT_GUARDRAIL_DETECTOR_PROFILE=full_deberta
 ```
 
-依赖、版本、checksum 或所选 CUDA 设备不符合 profile 时，Runtime 会拒绝启动。Policy YAML 仍不能替换
-这些选择。
+依赖、版本、checksum 或所选 CUDA 设备不符合 profile 时，Runtime 会拒绝启动。Policy YAML 仍不能替换这些选择。
 
 ### PromptGuard 2 候选 Profile（逐组件可自由组合）
 
-除闭式 preset 外，Detector 组件可逐项独立开关（`detector_pii` / `detector_semgrep` /
-`detector_yara` / `detector_prompt_model`，如 `pii=presidio, prompt_model=promptguard2,
-semgrep/yara=none`）。组件与 preset 互斥：设了非 `local` 的 preset 就不能再设组件变量；组件变量的合法
-组合全部放行，但组合本身可能未经端到端一致性验证，风险由部署方评估。
+除闭式 preset 外，Detector 组件可逐项独立开关（`detector_pii` / `detector_semgrep` / `detector_yara` / `detector_prompt_model`，如 `pii=presidio, prompt_model=promptguard2, semgrep/yara=none`）。组件与 preset 互斥：设了非 `local` 的 preset 就不能再设组件变量；组件变量的合法组合全部放行，但组合本身可能未经端到端一致性验证，风险由部署方评估。
 
-`full_promptguard2` 与 `promptguard2` 使用 Meta Llama-Prompt-Guard-2-86M 的 ONNX 镜像
-（gated 原仓库经未 gate 的 `gravitee-io` 镜像分发，权重哈希一致），默认阈值 0.9。它们**不是默认
-profile**：配套 Llama 4 Community License（非 MIT，含 700M MAU 条款，需 "Built with Llama" 署名），
-`full_deberta` 仍为 verified 默认。启动前用 `agent-guardrail-prefetch-promptguard2` 预取资产。
+`full_promptguard2` 与 `promptguard2` 使用 Meta Llama-Prompt-Guard-2-86M 的 ONNX 镜像 （gated 原仓库经未 gate 的 `gravitee-io` 镜像分发，权重哈希一致），默认阈值 0.9。它们**不是默认 profile**：配套 Llama 4 Community License（非 MIT，含 700M MAU 条款，需 "Built with Llama" 署名），`full_deberta` 仍为 verified 默认。启动前用 `agent-guardrail-prefetch-promptguard2` 预取资产。
 
 ### Docker Compose
 
@@ -275,8 +237,7 @@ docker compose up -d
 curl --fail http://127.0.0.1:8080/health/ready
 ```
 
-Core 镜像包含完整 Detector profile，因此体积较大。在本地环境之外部署前请先阅读
-[运行指南](docs/guides/operations.md)。
+Core 镜像包含完整 Detector profile，因此体积较大。在本地环境之外部署前请先阅读[运行指南](docs/guides/operations.md)。
 
 ## 当前边界
 
@@ -289,15 +250,9 @@ Agent Guardrail 只能中介实际经过 Wrapper 或 Gateway 的流量。当前�
 
 多用户身份、租户隔离、跨用户共享和按用户授权属于明确的产品范围外能力，而不是后置功能。
 
-如果 Agent 能执行 Shell 或任意代码，应将其部署在独立 Sandbox 中：网络 egress 默认拒绝、文件系统临时且
-最小化、资源有硬上限，并且不持有 Provider 或 Tool 凭据。Guardrail Gateway、Policy/Core、持有凭据的
-Tool Broker 和 Audit 应位于 Sandbox 外。模式、代码和 URL Detector 无法阻止未被观察到的 `curl`、socket、
-syscall、凭据读取、持久化、资源耗尽或 Sandbox 逃逸。详见[威胁边界矩阵](docs/security-model.md#8-guardrail-无法替代的-sandbox-控制)
-和[部署检查清单](docs/guides/operations.md#3-agent-sandbox-与不可绕过部署边界)。
+如果 Agent 能执行 Shell 或任意代码，应将其部署在独立 Sandbox 中：网络 egress 默认拒绝、文件系统临时且最小化、资源有硬上限，并且不持有 Provider 或 Tool 凭据。Guardrail Gateway、Policy/Core、持有凭据的 Tool Broker 和 Audit 应位于 Sandbox 外。模式、代码和 URL Detector 无法阻止未被观察到的 `curl`、socket、syscall、凭据读取、持久化、资源耗尽或 Sandbox 逃逸。详见[威胁边界矩阵](docs/security-model.md#8-guardrail-无法替代的-sandbox-控制)和[部署检查清单](docs/guides/operations.md#3-agent-sandbox-与不可绕过部署边界)。
 
-Detector 命中不能证明恶意意图或授权。生产 Rule 应当把 Detector fact 与可信 source/sink
-语境组合。权威边界以[当前架构合同](docs/current-architecture-contract.md)和
-[安全模型](docs/security-model.md)为准。
+Detector 命中不能证明恶意意图或授权。生产 Rule 应当把 Detector fact 与可信 source/sink 语境组合。权威边界以[当前架构合同](docs/current-architecture-contract.md)和[安全模型](docs/security-model.md)为准。
 
 ## 文档
 
@@ -327,5 +282,4 @@ git diff --check
 
 ## License
 
-Agent Guardrail 源码使用 [MIT License](LICENSE)。提示注入 Model Detector（PromptGuard 2 profiles）附带
-Llama 4 Community License（非 MIT），因此这些 profile 是 opt-in 候选而非默认。
+Agent Guardrail 源码使用 [MIT License](LICENSE)。提示注入 Model Detector（PromptGuard 2 profiles）附带 Llama 4 Community License（非 MIT），因此这些 profile 是 opt-in 候选而非默认。

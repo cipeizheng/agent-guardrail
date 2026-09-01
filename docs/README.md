@@ -1,7 +1,6 @@
 # 文档导航
 
-项目公开介绍：[English](../README.md) | [简体中文](../README.zh-CN.md)。贡献代码前请先阅读
-[公开贡献指南](../CONTRIBUTING.md)。
+项目公开介绍：[English](../README.md) | [简体中文](../README.zh-CN.md)。贡献代码前请先阅读[公开贡献指南](../CONTRIBUTING.md)。
 
 不要顺序阅读整个目录。先选一条路径，读到能完成当前任务就停止。
 
@@ -31,8 +30,7 @@ Policy 作者指南 → Capability 参考
 接入指南 → Gateway 协议 / 运行指南
 ```
 
-- [Agent 与 Enforcement 接入](guides/integration.md)：直接 Detector SDK、Event/Policy SDK、Runtime、Session、
-  Inline、Model Provider/Streaming 和 MCP。
+- [Agent 与 Enforcement 接入](guides/integration.md)：直接 Detector SDK、Event/Policy SDK、Runtime、Session、Inline、Model Provider/Streaming 和 MCP。
 - [Gateway 协议参考](reference/gateway-protocol.md)：端点、映射、生命周期和错误。
 - [Gateway 运行指南](guides/operations.md)：启动、Agent Sandbox 部署边界、环境变量、Secret、Audit 和 Health。
 - [Remote Core 双容器设计](design/remote-core-deployment.md)：Core/Gateway 责任、协议与失败边界。

@@ -6,10 +6,7 @@
 
 ## 1. 对齐基线与含义
 
-参考对象固定为 `../invariant` commit `2340fe2`；NeMo Guardrails 参考对象固定为同级 `../Guardrails`
-commit `891c13f64`。对齐指在本项目 Canonical Event、Registry、MatchPlan 和 Enforcement 边界内达到相邻
-的检测结果，不复制 IPL/Colang、Policy import、运行时依赖安装、允许 Policy 选择远程调用或返回原始内容的
-接口。
+参考对象固定为 `../invariant` commit `2340fe2`；NeMo Guardrails 参考对象固定为同级 `../Guardrails` commit `891c13f64`。对齐指在本项目 Canonical Event、Registry、MatchPlan 和 Enforcement 边界内达到相邻的检测结果，不复制 IPL/Colang、Policy import、运行时依赖安装、允许 Policy 选择远程调用或返回原始内容的接口。
 
 Detector 对齐必须同时保留：
 
@@ -33,31 +30,22 @@ Detector 对齐必须同时保留：
 | `semgrep` | `semgrep` | 固定 backend/profile；Policy 不提供语言或规则参数 |
 | HTML parser | `hidden_content` | 检测隐藏 HTML、注释、不可见样式和有限编码内容 |
 
-NeMo Guardrails 的 YARA injection 能力继续使用本项目的 `yara_injection_signatures` Detector 合同，不引入
-Colang、动态 `actions.py`、inline YARA 规则或 payload transformation。独立 `jailbreak` 与
-`dangerous_command` 不属于固定 Invariant 对齐范围，已从 capability 目录完整移除。
+NeMo Guardrails 的 YARA injection 能力继续使用本项目的 `yara_injection_signatures` Detector 合同，不引入 Colang、动态 `actions.py`、inline YARA 规则或 payload transformation。独立 `jailbreak` 与 `dangerous_command` 不属于固定 Invariant 对齐范围，已从 capability 目录完整移除。
 
-Invariant HTML parser 还提取 link 供后续规则消费；本轮 `hidden_content` 只报告 alt/meta 等结构事实及真正
-隐藏/编码内容。URL 仍由显式字段提取与 `url_host_allowed` 等能力处理，不把普通 link 自动标为 hidden fact。
+Invariant HTML parser 还提取 link 供后续规则消费；本轮 `hidden_content` 只报告 alt/meta 等结构事实及真正隐藏/编码内容。URL 仍由显式字段提取与 `url_host_allowed` 等能力处理，不把普通 link 自动标为 hidden fact。
 
 ## 3. 有意不对齐
 
 - `fuzzy_contains` 不在失败后调用 OpenAI 或其他 LLM，也不吞掉异常。
-- `is_similar` 允许 Policy 选择 data、target 和 threshold；encoder model、endpoint 与凭据只属于部署
-  `EmbeddingProfile`/backend。
+- `is_similar` 允许 Policy 选择 data、target 和 threshold；encoder model、endpoint 与凭据只属于部署 `EmbeddingProfile`/backend。
 - Python Detector 不向 Policy 暴露任意 module/function 字符串；只报告审查过的风险类别。
 - Semgrep/YARA 不接受 Policy 提供的语言、规则、文件路径、命令或进程参数。
 - PII 与 Secret 检测不返回命中原文，低熵内容不能通过 fingerprint 离线枚举。
 - 通用多语言 NER 不作为完成门槛；准确对齐对象是固定 Invariant commit 已实际公开的语言范围和算法行为。
-- Invariant 的 moderation、copyright 和 OCR 属于 content/compliance 或多模态后续阶段，不在本轮核心
-  T01–T09 安全 Detector 对齐范围内。
+- Invariant 的 moderation、copyright 和 OCR 属于 content/compliance 或多模态后续阶段，不在本轮核心 T01–T09 安全 Detector 对齐范围内。
 
-`is_similar` 的 MatchPlan 扩展映射 I09/I10/I12/I13：同一 snapshot 内确定性缓存、whole-pending Event
-绑定、显式 Registry linking，以及有界输入/timeout/脱敏 evidence；威胁用途映射 T03/T04。命中仍只是
-`semantic_similarity` fact，不会单独宣称已完成端到端意图或权限保护。
+`is_similar` 的 MatchPlan 扩展映射 I09/I10/I12/I13：同一 snapshot 内确定性缓存、whole-pending Event 绑定、显式 Registry linking，以及有界输入/timeout/脱敏 evidence；威胁用途映射 T03/T04。命中仍只是 `semantic_similarity` fact，不会单独宣称已完成端到端意图或权限保护。
 
 ## 4. 验证要求
 
-每个能力至少具有真实本地算法或明确的 `adapter_only` backend 状态，并覆盖安全输入、攻击输入、相邻误报、
-畸形输入、上限、timeout/异常、脱敏 evidence、Registry linking、MatchPlan/Decision 投影和适用 pre
-Enforcement Point 的零副作用断言。外部 backend 的 fake 只验证适配合同，不能把状态提升为 `verified`。
+每个能力至少具有真实本地算法或明确的 `adapter_only` backend 状态，并覆盖安全输入、攻击输入、相邻误报、畸形输入、上限、timeout/异常、脱敏 evidence、Registry linking、MatchPlan/Decision 投影和适用 pre Enforcement Point 的零副作用断言。外部 backend 的 fake 只验证适配合同，不能把状态提升为 `verified`。

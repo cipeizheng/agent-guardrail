@@ -1,9 +1,7 @@
 # 安全模型与威胁路径
 
 > 适合谁：定义资产、评审信任边界或把检测结果映射到实际威胁路径的人。
-> 解决什么：数据、意图、资源以及 T01–T10 数据流和执行路径的建模目标。
-> 检测与条件判断组件的完成状态见 [`capability-status.yaml`](capability-status.yaml)，未来实现排期见
-> [roadmap](roadmap.md)。
+> 解决什么：数据、意图、资源以及 T01–T10 数据流和执行路径的建模目标。检测与条件判断组件的完成状态见 [`capability-status.yaml`](capability-status.yaml)，未来实现排期见[roadmap](roadmap.md)。
 
 ## 1. 策略建模目标
 
@@ -13,13 +11,9 @@
 - **意图**：system/developer 控制、用户授权目标和 Agent 决策的完整性；
 - **资源**：文件、账户、网络、资金和外部系统的操作完整性。
 
-部署方组合检测结果、可信来源信息、数据去向和授权信息，为具体应用编写规则。规则中的路径描述信息或指令
-来自哪里、经过模型或工具怎样处理，以及最终发送到哪里或触发什么操作。审计数据的机密性与可追责性、分析
-服务的可用性和执行边界的完整中介是框架支撑属性。大语言模型在该模型中是可能受外部输入影响、生成内容或
-提出高权限操作的推理组件；模型提供商也是规则管理的数据目的地。
+部署方组合检测结果、可信来源信息、数据去向和授权信息，为具体应用编写规则。规则中的路径描述信息或指令来自哪里、经过模型或工具怎样处理，以及最终发送到哪里或触发什么操作。审计数据的机密性与可追责性、分析服务的可用性和执行边界的完整中介是框架支撑属性。大语言模型在该模型中是可能受外部输入影响、生成内容或提出高权限操作的推理组件；模型提供商也是规则管理的数据目的地。
 
-内容审核的建模对象是用户身心安全、产品使用政策和合规边界。当前 T01–T10 路径聚焦隐私、控制完整性和
-资源完整性；应用可以另外配置内容审核规则集。
+内容审核的建模对象是用户身心安全、产品使用政策和合规边界。当前 T01–T10 路径聚焦隐私、控制完整性和资源完整性；应用可以另外配置内容审核规则集。
 
 ## 2. 信任边界与假设
 
@@ -39,19 +33,13 @@
 - Provider payload 中自称的 origin、authorization 或 provenance；
 - Detector 对用户同意和目的地授权的猜测。
 
-用户输入可以表达业务意图，但不能因此覆盖 system/developer Policy；`observed` 模型响应只证明响应经过
-Enforcement Point，不证明内容正确、安全或已获授权。
+用户输入可以表达业务意图，但不能因此覆盖 system/developer Policy；`observed` 模型响应只证明响应经过 Enforcement Point，不证明内容正确、安全或已获授权。
 
-本产品只有一个用户，不建立 principal、tenant、数据所有者或跨用户共享模型。Gateway/Core Bearer key 是
-部署服务凭据，只保护调用边界，不代表终端用户身份。
+本产品只有一个用户，不建立 principal、tenant、数据所有者或跨用户共享模型。Gateway/Core Bearer key 是部署服务凭据，只保护调用边界，不代表终端用户身份。
 
-Gateway task token 只选择一个既有的单用户 Trace，是不可猜测的相关性 capability，不代表用户同意或业务
-授权。可信 Agent Host 必须在控制通道创建、携带和删除它，不得写入 prompt。显式 proposal header 只接受
-同 task 内已提交的 observed proposal，并校验工具名/参数；它不能提交 Event ID、Relation 或 security fact。
+Gateway task token 只选择一个既有的单用户 Trace，是不可猜测的相关性 capability，不代表用户同意或业务授权。可信 Agent Host 必须在控制通道创建、携带和删除它，不得写入 prompt。显式 proposal header 只接受同 task 内已提交的 observed proposal，并校验工具名/参数；它不能提交 Event ID、Relation 或 security fact。
 
-远程 Core 的内部网络不是低敏通道：`PendingTrace` 可能包含完整 prompt、PII 或 Tool arguments。部署必须
-限制 Core 端口只对 Gateway 可达，并保护链路与节点；Core/Gateway 均不得记录协议 body。Core 不持有
-Provider/MCP 凭据，Gateway 不持有 Policy/模型，以缩小单容器泄露后的权限集合。
+远程 Core 的内部网络不是低敏通道：`PendingTrace` 可能包含完整 prompt、PII 或 Tool arguments。部署必须限制 Core 端口只对 Gateway 可达，并保护链路与节点；Core/Gateway 均不得记录协议 body。Core 不持有 Provider/MCP 凭据，Gateway 不持有 Policy/模型，以缩小单容器泄露后的权限集合。
 
 ## 3. Source → Transform → Sink 模型
 
@@ -77,9 +65,7 @@ Source(trust, sensitivity)
                                       外部或高权限 Tool/资源
 ```
 
-一个 PII Detection 只有与 destination 和 authorization 组合后才可能成为隐私违规。例如，同一用户可以
-允许某类私有数据进入选定模型服务，却拒绝它进入外部 Tool 或 Audit；这不需要推断数据归属或收件人身份。
-Prompt Injection Detection 同样只是信号；核心控制目标是不可信内容不能在缺少独立授权时影响高权限动作。
+一个 PII Detection 只有与 destination 和 authorization 组合后才可能成为隐私违规。例如，同一用户可以允许某类私有数据进入选定模型服务，却拒绝它进入外部 Tool 或 Audit；这不需要推断数据归属或收件人身份。Prompt Injection Detection 同样只是信号；核心控制目标是不可信内容不能在缺少独立授权时影响高权限动作。
 
 目标规则形态是：
 
@@ -103,8 +89,7 @@ Finding + deployment action mapping = Decision
 - 目的地是否被授权；
 - ToolCall 是否符合用户意图。
 
-因此不能把 `observed` 当作 `trusted`，也不能把 `client_asserted` 自动当作恶意。安全事实命名不得复用
-三个 EventOrigin 值，避免实现混淆这两个维度。
+因此不能把 `observed` 当作 `trusted`，也不能把 `client_asserted` 自动当作恶意。安全事实命名不得复用三个 EventOrigin 值，避免实现混淆这两个维度。
 
 ## 5. 当前 FlowSecurityContext 与 Event Security Fact 合同
 
@@ -117,10 +102,7 @@ Finding + deployment action mapping = Decision
 | `destination` | LLM provider、Agent runtime、client、external Tool、Audit | deployment/Enforcement |
 | `authorization` | allowed、denied | deployment/独立 authorization service |
 
-每个维度默认 `unknown`。非 unknown 值必须携带 Schema 允许的 `SecurityFactAuthority`；unknown 不能
-伪装成已有 authority。Context 不携带身份、租户或敏感内容，作为 immutable 字段随 `PendingTrace` 进入
-Analyzer。生产 Policy 只有显式声明下面四个 optional string 参数，才能读取对应
-值，而且默认必须为 `unknown`：
+每个维度默认 `unknown`。非 unknown 值必须携带 Schema 允许的 `SecurityFactAuthority`；unknown 不能伪装成已有 authority。Context 不携带身份、租户或敏感内容，作为 immutable 字段随 `PendingTrace` 进入 Analyzer。生产 Policy 只有显式声明下面四个 optional string 参数，才能读取对应值，而且默认必须为 `unknown`：
 
 ```text
 security_trust_class
@@ -129,30 +111,15 @@ security_destination
 security_authorization
 ```
 
-普通 attributes/metadata 和 SDK Event payload 不能进入这个通道。OpenAI、MCP 和 Inline Enforcement
-当前会按执行 checkpoint 建立 destination；其他事实只有可信嵌入式宿主明确提供时才非 unknown。authority
-是信任边界内的类型化声明，不是加密凭证。非 unknown authorization 必须同时绑定已知 destination；
-Enforcement 切换 sink 时会清空旧 authorization，避免跨目的地复用授权。
+普通 attributes/metadata 和 SDK Event payload 不能进入这个通道。OpenAI、MCP 和 Inline Enforcement 当前会按执行 checkpoint 建立 destination；其他事实只有可信嵌入式宿主明确提供时才非 unknown。authority 是信任边界内的类型化声明，不是加密凭证。非 unknown authorization 必须同时绑定已知 destination；Enforcement 切换 sink 时会清空旧 authorization，避免跨目的地复用授权。
 
-当前 `EventSecurityFacts` 另外持久保存绑定到一个 Event payload 的 `trust_class` 和 `trust_authority`。
-可信 Session/SDK 接入必须把该事实显式绑定到具体 Candidate；allow/log 后它随 Event 进入 Trace，后续
-pending 分析可读取 `[source, security_facts, trust_class]`，再与 `source → target` 的显式
-`influenced_by/derived_from` 组合。默认值为 unknown；非 unknown authority 仍只允许 deployment、
-Enforcement 或 data source。
+当前 `EventSecurityFacts` 另外持久保存绑定到一个 Event payload 的 `trust_class` 和 `trust_authority`。可信 Session/SDK 接入必须把该事实显式绑定到具体 Candidate；allow/log 后它随 Event 进入 Trace，后续 pending 分析可读取 `[source, security_facts, trust_class]`，再与 `source → target` 的显式 `influenced_by/derived_from` 组合。默认值为 unknown；非 unknown authority 仍只允许 deployment、Enforcement 或 data source。
 
-Event trust 不从 `EventOrigin`、sequence、Tool 名或 Relation 自动推断，也不从一次
-`FlowSecurityContext` 自动复制。二者语义不同：Event fact 描述该 Event payload 自身的来源可信度；Flow
-context 描述当前 pending batch 的 source→sink 判断语境。普通 HTTP/Provider payload 和 metadata 不能设置
-Event fact；可信嵌入式宿主可以通过 `CandidateEvent.security_facts`、`EnforcementSession.submit` 或
-`GuardrailRun` typed helper 的专用参数提供。
+Event trust 不从 `EventOrigin`、sequence、Tool 名或 Relation 自动推断，也不从一次 `FlowSecurityContext` 自动复制。二者语义不同：Event fact 描述该 Event payload 自身的来源可信度；Flow context 描述当前 pending batch 的 source→sink 判断语境。普通 HTTP/Provider payload 和 metadata 不能设置 Event fact；可信嵌入式宿主可以通过 `CandidateEvent.security_facts`、`EnforcementSession.submit` 或 `GuardrailRun` typed helper 的专用参数提供。
 
-后续可以增加 Event 级 sensitivity、可信目的地 Registry 和 `tool_effect` descriptor；它们也不能由外部
-YAML 获得 I/O 或动态代码权限。principal、tenant、owner identity、跨用户状态和按用户授权明确不属于本
-产品，不能作为 roadmap capability 恢复。
+后续可以增加 Event 级 sensitivity、可信目的地 Registry 和 `tool_effect` descriptor；它们也不能由外部 YAML 获得 I/O 或动态代码权限。principal、tenant、owner identity、跨用户状态和按用户授权明确不属于本产品，不能作为 roadmap capability 恢复。
 
-`derived_from` 只用于可信 Adapter 掌握的精确来源；保守的控制影响使用 `influenced_by`。两者都不能由
-Detector 或 Policy 写回 Trace。内容级外泄判断仍需敏感数据 Detector，不能只凭先后关系证明相同数据被
-复制。
+`derived_from` 只用于可信 Adapter 掌握的精确来源；保守的控制影响使用 `influenced_by`。两者都不能由 Detector 或 Policy 写回 Trace。内容级外泄判断仍需敏感数据 Detector，不能只凭先后关系证明相同数据被复制。
 
 ## 6. Enforcement Point 的保护含义
 
@@ -164,13 +131,9 @@ Detector 或 Policy 写回 Trace。内容级外泄判断仍需敏感数据 Detec
 | `before_tool_output_release` | ToolResult 不进入后续 Agent/模型/用户 | 不能撤销已经执行的 Tool 副作用 |
 | Audit | 原始 Secret/PII 不进入诊断面 | 只接受脱敏 Decision；可信 producer 仍负责遮罩 |
 
-这些 checkpoint 是 Model Provider/MCP Gateway 的执行概念，不是 Event/Inline Wrapper 字段，也不能写入 YAML
-选择条件。
+这些 checkpoint 是 Model Provider/MCP Gateway 的执行概念，不是 Event/Inline Wrapper 字段，也不能写入 YAML 选择条件。
 
-LLM Gateway 只能中介经过它的模型请求和响应；MCP Gateway 只能中介经过固定 MCP Server 的
-`tools/call`。两者携带同一有效 task token 时可共享 Trace，并把经校验的 observed proposal 连接到实际
-ToolCall；没有 token 时仍是隔离的请求级 Trace。Agent 直接调用本地 Shell、函数或 HTTP 是 T10，需要
-Framework Hook、Sandbox 或网络代理。
+LLM Gateway 只能中介经过它的模型请求和响应；MCP Gateway 只能中介经过固定 MCP Server 的 `tools/call`。两者携带同一有效 task token 时可共享 Trace，并把经校验的 observed proposal 连接到实际 ToolCall；没有 token 时仍是隔离的请求级 Trace。Agent 直接调用本地 Shell、函数或 HTTP 是 T10，需要 Framework Hook、Sandbox 或网络代理。
 
 ## 7. T01–T10 威胁基线
 
@@ -187,17 +150,13 @@ Framework Hook、Sandbox 或网络代理。
 | T09 | 一个目的地的授权被复用于另一目的地 | 任一 sink checkpoint | 部分：destination 变化会清空 authorization；目的地 Registry/一次性授权凭证未实现 |
 | T10 | Agent 绕过 Wrapper/Gateway 直接副作用 | 无 | 明确边界外，需要 Hook/Sandbox/代理 |
 
-T01–T10 是本文中的威胁分类，不是第二套 Policy 解释器。生产覆盖由 Matcher/capability 单元测试以及
-Inline、OpenAI、MCP 的实际副作用集成测试证明；“部分”或“边界外”不能因文档场景而写成已交付。
+T01–T10 是本文中的威胁分类，不是第二套 Policy 解释器。生产覆盖由 Matcher/capability 单元测试以及 Inline、OpenAI、MCP 的实际副作用集成测试证明；“部分”或“边界外”不能因文档场景而写成已交付。
 
 ## 8. Guardrail 无法替代的 Sandbox 控制
 
-Guardrail 的强制保证始于一个调用进入 `EnforcementSession`。它可以拒绝已经观察到的 LLM/Tool Event，
-但不能证明不可信 Agent 没有从另一个未中介路径产生副作用。增加命令模式、代码或 URL Detector 只能改善
-已观察输入的判断，不能把可绕过的 Hook 变成完整中介。
+Guardrail 的强制保证始于一个调用进入 `EnforcementSession`。它可以拒绝已经观察到的 LLM/Tool Event，但不能证明不可信 Agent 没有从另一个未中介路径产生副作用。增加命令模式、代码或 URL Detector 只能改善已观察输入的判断，不能把可绕过的 Hook 变成完整中介。
 
-以下威胁不由本项目当前 Runtime/Gateway 解决，部署 Agent 具备 Shell、代码执行或本地函数能力时必须由
-Sandbox、网络与主机安全层处理：
+以下威胁不由本项目当前 Runtime/Gateway 解决，部署 Agent 具备 Shell、代码执行或本地函数能力时必须由 Sandbox、网络与主机安全层处理：
 
 | 边界外威胁 | Guardrail 无法解决的原因 | 所需强制控制 |
 | --- | --- | --- |
@@ -209,27 +168,16 @@ Sandbox、网络与主机安全层处理：
 | 资源耗尽 | Policy 无法撤销已经开始的 fork bomb、内存/磁盘填满或长时间计算 | CPU、内存、PID、磁盘、文件描述符和 wall-clock 配额，超限强制终止整个 Sandbox |
 | Sandbox 逃逸或内核/运行时漏洞 | 内容 Detector 不是 syscall、内核或虚拟化安全边界 | 独立 VM/强化容器运行时、seccomp/LSM、无 capabilities、及时修补；高风险场景使用更强隔离 |
 
-推荐把不可信 Agent 放在 Sandbox 内，把 Guardrail Gateway、Policy/Core、真实 Tool Broker 和凭据放在
-Sandbox 外。Sandbox 只允许访问 Gateway/Broker；可选的内部 Wrapper/探针只用于增加 Event 可见性，不能
-作为最终授权者。仅将代码/Shell Executor 沙箱化时，Agent 与 Guardrail 可在外部，但该 Executor 仍不得
-持有生产凭据或任意公网 egress。
+推荐把不可信 Agent 放在 Sandbox 内，把 Guardrail Gateway、Policy/Core、真实 Tool Broker 和凭据放在 Sandbox 外。Sandbox 只允许访问 Gateway/Broker；可选的内部 Wrapper/探针只用于增加 Event 可见性，不能作为最终授权者。仅将代码/Shell Executor 沙箱化时，Agent 与 Guardrail 可在外部，但该 Executor 仍不得持有生产凭据或任意公网 egress。
 
-Sandbox 同样不能替代 Guardrail。它通常不知道某个目的地或操作是否获准、ToolResult 是否包含 Prompt
-Injection、PII 是否可以发给当前模型提供商，或 Audit 是否已经脱敏。因此 T01–T09 的数据流、意图、部署
-授权和内容判断继续由 Guardrail 与参数化 Tool Broker 共同处理。
+Sandbox 同样不能替代 Guardrail。它通常不知道某个目的地或操作是否获准、ToolResult 是否包含 Prompt Injection、PII 是否可以发给当前模型提供商，或 Audit 是否已经脱敏。因此 T01–T09 的数据流、意图、部署授权和内容判断继续由 Guardrail 与参数化 Tool Broker 共同处理。
 
-当前仓库不交付 Agent Sandbox，也不验证任何 Sandbox 产品或集群网络策略。`docker compose` 中 Core/Gateway
-的只读文件系统、non-root 和私网是服务加固，不是 Agent 的隔离证明。部署清单见
-[运行指南](guides/operations.md#3-agent-sandbox-与不可绕过部署边界)。
+当前仓库不交付 Agent Sandbox，也不验证任何 Sandbox 产品或集群网络策略。`docker compose` 中 Core/Gateway 的只读文件系统、non-root 和私网是服务加固，不是 Agent 的隔离证明。部署清单见[运行指南](guides/operations.md#3-agent-sandbox-与不可绕过部署边界)。
 
 ## 9. Detector 与交付状态
 
-Detector 按 T01–T10 威胁覆盖排序，而不是按函数名数量排序。命中仍须与可信 source/sink/trust 语境
-组合，不能单独宣称解决了威胁路径。
+Detector 按 T01–T10 威胁覆盖排序，而不是按函数名数量排序。命中仍须与可信 source/sink/trust 语境组合，不能单独宣称解决了威胁路径。
 
-具体 capability 名称和验证状态只在[状态矩阵](capability-status.yaml)维护；实现顺序只在
-[roadmap](roadmap.md)维护。与 Invariant 的对齐只表示 I01–I14 行为与安全结果对齐，不复制
-IPL、Policy import、handler 权限或由 Policy 获得的 I/O 权限。
+具体 capability 名称和验证状态只在[状态矩阵](capability-status.yaml)维护；实现顺序只在[roadmap](roadmap.md)维护。与 Invariant 的对齐只表示 I01–I14 行为与安全结果对齐，不复制 IPL、Policy import、handler 权限或由 Policy 获得的 I/O 权限。
 
-当前生产边界和明确未交付项见[当前架构合同](current-architecture-contract.md)。T10 在出现 Framework
-Hook、Sandbox 或网络代理前始终属于边界外，不能用增加 Detector 数量解决。
+当前生产边界和明确未交付项见[当前架构合同](current-architecture-contract.md)。T10 在出现 Framework Hook、Sandbox 或网络代理前始终属于边界外，不能用增加 Detector 数量解决。

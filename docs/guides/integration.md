@@ -18,8 +18,7 @@ EnforcementSession
   → atomic commit / sanitized block event
 ```
 
-Runtime 管理一个已完整编译 Analyzer 的生命周期，不解析 Provider 协议、不执行 LLM/Tool，也不持有请求级
-Trace。Session 管理 Trace、安全上下文、pending 原子提交和 Audit。
+Runtime 管理一个已完整编译 Analyzer 的生命周期，不解析 Provider 协议、不执行 LLM/Tool，也不持有请求级 Trace。Session 管理 Trace、安全上下文、pending 原子提交和 Audit。
 
 ## 2. 无 YAML 的直接 Detector SDK
 
@@ -39,22 +38,13 @@ if result.detected:
     return reject_untrusted_content()
 ```
 
-`detect_text` 处理 UTF-8 text，`detect_json` 先产生确定性 canonical JSON，`detect_many` 对同一值按调用方顺序
-运行多个 Detector。`capabilities` 枚举名称、版本、encoding、公开 detection type、输入/timeout/结果上限。
-批量调用会在执行任何 Detector 前预校验全部 capability 与输入，但某个 backend 在执行期失败时整个调用仍以
-`DetectorExecutionError` 失败，不返回容易被误解为安全的部分结果。
+`detect_text` 处理 UTF-8 text，`detect_json` 先产生确定性 canonical JSON，`detect_many` 对同一值按调用方顺序运行多个 Detector。`capabilities` 枚举名称、版本、encoding、公开 detection type、输入/timeout/结果上限。批量调用会在执行任何 Detector 前预校验全部 capability 与输入，但某个 backend 在执行期失败时整个调用仍以 `DetectorExecutionError` 失败，不返回容易被误解为安全的部分结果。
 
-直接 SDK 与 MatchPlan 共享 Registry descriptor 和唯一 Detector 执行器，返回的 Detection 只有 type、
-confidence、可选 span、mask 与 fingerprint，不包含原始命中内容。它不返回 `Decision`，不能自动阻止 LLM、
-Tool、文件或网络副作用；应用必须根据 fact 明确采取动作。需要跨 Event/Relation 组合和统一失败动作时使用
-`GuardrailRun` + YAML，需要可信中介执行时使用 Gateway/Inline。
+直接 SDK 与 MatchPlan 共享 Registry descriptor 和唯一 Detector 执行器，返回的 Detection 只有 type、confidence、可选 span、mask 与 fingerprint，不包含原始命中内容。它不返回 `Decision`，不能自动阻止 LLM、Tool、文件或网络副作用；应用必须根据 fact 明确采取动作。需要跨 Event/Relation 组合和统一失败动作时使用 `GuardrailRun` + YAML，需要可信中介执行时使用 Gateway/Inline。
 
-backend 返回的自由形式 `Detection.path` 不进入直接结果；canonical JSON 的 span 只定位编码后的确定性文本，
-不能当作原对象字段坐标。
+backend 返回的自由形式 `Detection.path` 不进入直接结果；canonical JSON 的 span 只定位编码后的确定性文本，不能当作原对象字段坐标。
 
-默认会生成一次调用级 `DetectionContext`。需要把 fingerprint 稳定绑定到应用内已有对象时，可显式传入有界
-`DetectionContext(trace_id=..., event_id=...)`。Detector profile 仍由部署选择，内容或 YAML 不能选择模型、
-文件、进程、endpoint 或凭据。
+默认会生成一次调用级 `DetectionContext`。需要把 fingerprint 稳定绑定到应用内已有对象时，可显式传入有界 `DetectionContext(trace_id=..., event_id=...)`。Detector profile 仍由部署选择，内容或 YAML 不能选择模型、文件、进程、endpoint 或凭据。
 
 ## 3. Runtime
 
@@ -69,11 +59,9 @@ async with runtime:
     decision = await runtime.analyze_pending(pending)
 ```
 
-未注入 Registry 时使用默认 capability。Loader 依次完成 v3 Schema、MatchPlan 编译和 capability linking；
-任一步失败都不会创建 Runtime。生命周期是 `created → ready → closed`，closed 不能重启。
+未注入 Registry 时使用默认 capability。Loader 依次完成 v3 Schema、MatchPlan 编译和 capability linking；任一步失败都不会创建 Runtime。生命周期是 `created → ready → closed`，closed 不能重启。
 
-`analyze_pending(PendingTrace)` 是唯一 Analyzer 主路径；Runtime 不接受 Provider request/response，也不
-决定调用应插在 Agent 的哪个生命周期位置。
+`analyze_pending(PendingTrace)` 是唯一 Analyzer 主路径；Runtime 不接受 Provider request/response，也不决定调用应插在 Agent 的哪个生命周期位置。
 
 ## 4. Session 原子性
 
@@ -87,16 +75,13 @@ async with runtime:
 6. allow/log 原子提交全部 Event；block 丢弃原始 Event，只提交脱敏 Decision Event；
 7. 在锁外写脱敏 Audit。
 
-Trace 容量、Analyzer 异常、输入修改或 Decision identity 错误都变成 `GuardrailUnavailable`，候选原文不
-提交。锁不覆盖真实 LLM/Tool 副作用。
+Trace 容量、Analyzer 异常、输入修改或 Decision identity 错误都变成 `GuardrailUnavailable`，候选原文不提交。锁不覆盖真实 LLM/Tool 副作用。
 
-可信 `FlowSecurityContext` 只能经 Session 专用字段提交；普通 attributes 没有授权语义。Wrapper/Gateway
-只覆盖它实际掌握的 destination，并在 sink 改变时清空旧 authorization。
+可信 `FlowSecurityContext` 只能经 Session 专用字段提交；普通 attributes 没有授权语义。Wrapper/Gateway 只覆盖它实际掌握的 destination，并在 sink 改变时清空旧 authorization。
 
 ## 5. 框架无关 Event/Policy SDK
 
-`GuardrailRun` 不包装 Agent，也不要求 OpenAI Agents、LangGraph 或其他 Framework Adapter。应用在任何
-有安全意义的位置提交 Event，读取 Decision，并把同一 run 返回的 `EventRef` 用于显式 Relation：
+`GuardrailRun` 不包装 Agent，也不要求 OpenAI Agents、LangGraph 或其他 Framework Adapter。应用在任何有安全意义的位置提交 Event，读取 Decision，并把同一 run 返回的 `EventRef` 用于显式 Relation：
 
 ```python
 from agent_guardrail import GuardrailRun
@@ -120,8 +105,7 @@ result = await executor.execute(call)
 committed_result = await run.tool_result(result, call=checked.primary)
 ```
 
-如果该 ToolResult 被可信宿主确认为外部来源，首次提交时应改为把 `EventSecurityFacts` 绑定到这个确切
-Candidate/Event。它不会从 `FlowSecurityContext`、EventOrigin 或时间顺序自动复制：
+如果该 ToolResult 被可信宿主确认为外部来源，首次提交时应改为把 `EventSecurityFacts` 绑定到这个确切 Candidate/Event。它不会从 `FlowSecurityContext`、EventOrigin 或时间顺序自动复制：
 
 ```python
 from agent_guardrail.models import (
@@ -139,16 +123,11 @@ result_ref = (
 ).primary
 ```
 
-随后把 `result_ref` 作为 `model_call(inputs=...)` 或 `tool_call(influenced_by=...)` 的来源；存储结构由目标
-Event 向后引用 source，但关系语义始终是 source 影响 target。普通 HTTP/Provider payload 不能直接设置
-该字段。
+随后把 `result_ref` 作为 `model_call(inputs=...)` 或 `tool_call(influenced_by=...)` 的来源；存储结构由目标 Event 向后引用 source，但关系语义始终是 source 影响 target。普通 HTTP/Provider payload 不能直接设置该字段。
 
-上述 helper 覆盖 `message/model_call/tool_call_proposal/tool_call/tool_result`。高级调用方也可用
-`submit/submit_batch` 提交 `CandidateEvent`。SDK 只返回分析结果，不可能自动控制它未持有的副作用；因此
-调用方必须把 `blocked` 检查放在实际模型、Tool、消息发送、文件写入等操作之前。
+上述 helper 覆盖 `message/model_call/tool_call_proposal/tool_call/tool_result`。高级调用方也可用 `submit/submit_batch` 提交 `CandidateEvent`。SDK 只返回分析结果，不可能自动控制它未持有的副作用；因此调用方必须把 `blocked` 检查放在实际模型、Tool、消息发送、文件写入等操作之前。
 
-YAML 与 SDK 编排不重合：代码决定“何时产生哪些 Event、是否执行副作用”，YAML 决定“Event/Relation
-满足什么安全条件时产生 Finding 与 Decision”。
+YAML 与 SDK 编排不重合：代码决定“何时产生哪些 Event、是否执行副作用”，YAML 决定“Event/Relation 满足什么安全条件时产生 Finding 与 Decision”。
 
 ## 6. 选择接入方式
 
@@ -191,9 +170,7 @@ new input Events + MODEL_CALL allow → inner.complete
 → observed output Events allow → return
 ```
 
-Wrapper 维护请求历史 cursor，只接受上次历史的精确扩展，并把本轮新增历史与 `MODEL_CALL` 组成 batch。
-observed response Event 显式 `derived_from` 该轮 `MODEL_CALL`。复杂 Framework 状态仍推荐直接使用
-`GuardrailRun`，由调用方持有 EventRef，而不是依赖 Wrapper 猜测身份。
+Wrapper 维护请求历史 cursor，只接受上次历史的精确扩展，并把本轮新增历史与 `MODEL_CALL` 组成 batch。observed response Event 显式 `derived_from` 该轮 `MODEL_CALL`。复杂 Framework 状态仍推荐直接使用 `GuardrailRun`，由调用方持有 EventRef，而不是依赖 Wrapper 猜测身份。
 
 Inline Tool：
 
@@ -202,8 +179,7 @@ observed TOOL_CALL allow → inner.execute
 → observed TOOL_RESULT allow → return
 ```
 
-Wrapper 不按 payload 相等自动推断 proposal 来源；ToolResult 只引用实际 ToolCall。需要 proposal→实际调用
-关系时应使用 `GuardrailRun.tool_call(..., proposal=...)` 显式提交。
+Wrapper 不按 payload 相等自动推断 proposal 来源；ToolResult 只引用实际 ToolCall。需要 proposal→实际调用关系时应使用 `GuardrailRun.tool_call(..., proposal=...)` 显式提交。
 
 - 调用前 block：底层调用次数为零；
 - 输出释放前 block：底层副作用已发生，但原结果不返回、不提交。
@@ -219,33 +195,20 @@ client = OpenAI(
 )
 ```
 
-同一个 base URL 支持 `client.chat.completions.create(...)` 和 `client.responses.create(...)`；也可把 base
-URL 设为 `/v1` 使用标准 `/v1/chat/completions`、`/v1/responses` alias。Responses 当前只支持可完整映射的
-文本、instructions、custom function 与 function output。
+同一个 base URL 支持 `client.chat.completions.create(...)` 和 `client.responses.create(...)`；也可把 base URL 设为 `/v1` 使用标准 `/v1/chat/completions`、`/v1/responses` alias。Responses 当前只支持可完整映射的文本、instructions、custom function 与 function output。
 
-默认每个请求创建独立 Session。可信 Host 可先创建 Gateway task session，再通过 OpenAI Client 的
-`default_headers={"X-Agent-Guardrail-Session": token}` 让多次 Model 请求与 MCP `tools/call` 共享同一 Trace。
-规范化历史 Event 与 `MODEL_CALL` 在固定上游前于 `before_model_call` 检查；
-非流式响应完整通过输出 Decision 后才释放。`stream=True` 时，Chat data-only SSE 和 Responses named SSE
-都由 Adapter 转为累计 Canonical output：
+默认每个请求创建独立 Session。可信 Host 可先创建 Gateway task session，再通过 OpenAI Client 的 `default_headers={"X-Agent-Guardrail-Session": token}` 让多次 Model 请求与 MCP `tools/call` 共享同一 Trace。规范化历史 Event 与 `MODEL_CALL` 在固定上游前于 `before_model_call` 检查；非流式响应完整通过输出 Decision 后才释放。`stream=True` 时，Chat data-only SSE 和 Responses named SSE 都由 Adapter 转为累计 Canonical output：
 
 - 文本 delta 对累计前缀做 tentative 检查，allow 后释放当前窗口；
 - Tool arguments 在完整 JSON、声明、Schema 和 Policy 检查前不释放；
 - terminal event 对完整输出再次检查并提交一个最终 Event；
 - block/error 发送脱敏 SSE error，当前未通过窗口不释放；此前窗口已经发送，不能撤回。
 
-响应头 `x-guardrail-streaming: prefix-guarded-non-retractable` 明示这一弱于完整缓冲的保证。需要完整输出
-原子判断时使用 `stream=False`。task 模式只持久保存一个进程内的有界 Trace；完整请求历史仍会展开，只有
-显式匹配的 MCP ToolResult 输入边重连到 observed Event，不是通用 history cursor。
+响应头 `x-guardrail-streaming: prefix-guarded-non-retractable` 明示这一弱于完整缓冲的保证。需要完整输出原子判断时使用 `stream=False`。task 模式只持久保存一个进程内的有界 Trace；完整请求历史仍会展开，只有显式匹配的 MCP ToolResult 输入边重连到 observed Event，不是通用 history cursor。
 
-非 OpenAI wire format 可由可信部署代码实现 `ModelProviderAdapter`，并在
-`create_app(model_routes={"/v1/providers/name": adapter})` 注册。路由和相对上游路径在启动时固定；请求不能
-携带动态 URL。仓内 Toy Adapter 用非流式与自定义 `token/done` SSE 证明扩展合同，不是发布的生产 Provider。
+非 OpenAI wire format 可由可信部署代码实现 `ModelProviderAdapter`，并在 `create_app(model_routes={"/v1/providers/name": adapter})` 注册。路由和相对上游路径在启动时固定；请求不能携带动态 URL。仓内 Toy Adapter 用非流式与自定义 `token/done` SSE 证明扩展合同，不是发布的生产 Provider。
 
-Adapter 合同分三组方法：`parse_request/request_to_canonical/request_payload`，
-`parse_response/response_to_canonical/response_payload`，以及 `is_streaming/stream_decoder`；另有部署固定的
-`upstream_path`。流 decoder 只能返回 `HOLD/GUARD/FINAL` 与累计 `ModelResponse`，不能执行 Policy 或创建
-可信安全事实。公共类型从 `agent_guardrail` 导出，HTTP 组合仍由 gateway extra 的 `create_app` 完成。
+Adapter 合同分三组方法：`parse_request/request_to_canonical/request_payload`，`parse_response/response_to_canonical/response_payload`，以及 `is_streaming/stream_decoder`；另有部署固定的 `upstream_path`。流 decoder 只能返回 `HOLD/GUARD/FINAL` 与累计 `ModelResponse`，不能执行 Policy 或创建可信安全事实。公共类型从 `agent_guardrail` 导出，HTTP 组合仍由 gateway extra 的 `create_app` 完成。
 
 Anthropic Client 使用 Gateway 根地址，SDK 会调用标准 `/v1/messages`：
 
@@ -258,9 +221,7 @@ client = Anthropic(
 )
 ```
 
-Messages 的文本与 client `tool_use/tool_result` 进入相同 Canonical/Session/Runtime 管线；`tool_use.id` 可作为
-后续 MCP proposal header。不要向该路由传 `mcp_servers` 或 Anthropic server tools：当前会在调用模型上游前
-拒绝，因为让 Anthropic 服务端直接执行 MCP/Tool 会绕过本项目的 `before_tool_call`。
+Messages 的文本与 client `tool_use/tool_result` 进入相同 Canonical/Session/Runtime 管线；`tool_use.id` 可作为后续 MCP proposal header。不要向该路由传 `mcp_servers` 或 Anthropic server tools：当前会在调用模型上游前拒绝，因为让 Anthropic 服务端直接执行 MCP/Tool 会绕过本项目的 `before_tool_call`。
 
 ## 9. MCP Gateway
 
@@ -269,24 +230,14 @@ async with Client("http://127.0.0.1:8080/v1/mcp", cache=None) as client:
     result = await client.call_tool("send_email", arguments)
 ```
 
-当前支持 MCP `2026-07-28` 的 `server/discover`、`ping`、`tools/list`、`tools/call`。只有 `tools/call`
-使用 Session 并经过 `before_tool_call/before_tool_output_release`；其他方法不伪造 Tool Event。没有 task
-header 时每次调用独立；携带与 Model 请求相同的 `X-Agent-Guardrail-Session` 时复用任务 Trace。
+当前支持 MCP `2026-07-28` 的 `server/discover`、`ping`、`tools/list`、`tools/call`。只有 `tools/call` 使用 Session 并经过 `before_tool_call/before_tool_output_release`；其他方法不伪造 Tool Event。没有 task header 时每次调用独立；携带与 Model 请求相同的 `X-Agent-Guardrail-Session` 时复用任务 Trace。
 
-执行模型返回的 ToolCallProposal 时，可信 Host 应同时发送
-`X-Agent-Guardrail-Proposal-Id: <provider call_id>`。Gateway 只在该 proposal 已由本 Gateway observed、已经
-提交且工具名/参数完全一致时，建立 proposal→实际 ToolCall Relation；不匹配、歧义、重放和未提交的流式
-proposal 都在工具执行前失败。没有 proposal 的宿主直接 MCP 调用仍可检查，但不会获得这条因果 Relation。
-task 创建、TTL、删除和强制模式见[运行指南](operations.md#4-环境变量)。
+执行模型返回的 ToolCallProposal 时，可信 Host 应同时发送 `X-Agent-Guardrail-Proposal-Id: <provider call_id>`。Gateway 只在该 proposal 已由本 Gateway observed、已经提交且工具名/参数完全一致时，建立 proposal→实际 ToolCall Relation；不匹配、歧义、重放和未提交的流式 proposal 都在工具执行前失败。没有 proposal 的宿主直接 MCP 调用仍可检查，但不会获得这条因果 Relation。task 创建、TTL、删除和强制模式见[运行指南](operations.md#4-环境变量)。
 
 ## 10. Audit 与测试组件
 
-AuditSink 只接收 Decision，不接收 Event payload。JSONL 摘要包含时间、trace、event、action、Rule/code、
-Policy version/hash。
+AuditSink 只接收 Decision，不接收 Event payload。JSONL 摘要包含时间、trace、event、action、Rule/code、Policy version/hash。
 
-`agent_guardrail.testing` 的 ScriptedLLM、FakeToolExecutor 和 SimulatedAgent 用于确定性验证 allow/log/block
-和副作用计数，不证明 Detector 算法准确率；生产模块不得导入 testing。真实 HTTP 黑盒测试还验证外部
-OpenAI/Anthropic/MCP Agent 只改变 URL，调用前 block 时固定上游调用次数为零。
+`agent_guardrail.testing` 的 ScriptedLLM、FakeToolExecutor 和 SimulatedAgent 用于确定性验证 allow/log/block 和副作用计数，不证明 Detector 算法准确率；生产模块不得导入 testing。真实 HTTP 黑盒测试还验证外部 OpenAI/Anthropic/MCP Agent 只改变 URL，调用前 block 时固定上游调用次数为零。
 
-精确 HTTP/MCP 合同见[Gateway 协议参考](../reference/gateway-protocol.md)，进程配置见
-[运行指南](operations.md)。
+精确 HTTP/MCP 合同见[Gateway 协议参考](../reference/gateway-protocol.md)，进程配置见[运行指南](operations.md)。
