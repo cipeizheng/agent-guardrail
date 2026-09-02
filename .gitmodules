@@ -1,0 +1,4 @@
+[submodule "vendor/agentic-api"]
+	path = vendor/agentic-api
+	url = https://github.com/cipeizheng/agentic-api.git
+	branch = agent-guardrail/client-only-tools

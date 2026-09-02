@@ -1,7 +1,7 @@
 """Cross-process checks for the external Responses state-owner topology.
 
 These tests are opt-in because they start the local ``agentic-server`` binary
-from the sibling Agentic API fork.  They intentionally use a deterministic
+from the Agentic API submodule.  They intentionally use a deterministic
 HTTP provider instead of a real model service.
 """
 
@@ -28,7 +28,7 @@ from fastapi.responses import JSONResponse, Response
 pytestmark = pytest.mark.e2e
 
 _REPO_ROOT = Path(__file__).parents[2]
-_DEFAULT_AGENTIC_BINARY = _REPO_ROOT.parent / "agentic-api-guardrail/target/debug/agentic-server"
+_DEFAULT_AGENTIC_BINARY = _REPO_ROOT / "vendor/agentic-api/target/debug/agentic-server"
 _GATEWAY_API_KEY = "e2e-gateway-key"
 _UPSTREAM_API_KEY = "e2e-upstream-key"
 _WEATHER_TOOL = {
@@ -54,7 +54,7 @@ def _agentic_binary() -> Path:
     path = Path(configured) if configured else _DEFAULT_AGENTIC_BINARY
     if not path.is_file():
         pytest.skip(
-            "build the Agentic API fork first or set AGENTIC_API_BINARY; "
+            "initialize and build the Agentic API submodule first or set AGENTIC_API_BINARY; "
             "run with AGENTIC_API_E2E=1"
         )
     return path

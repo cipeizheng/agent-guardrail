@@ -31,8 +31,9 @@ Chat Completions 不使用该状态接口，客户端通过 `messages` 提交完
 
 ## 外部 Responses state owner
 
-当前外部拓扑使用 [vLLM Agentic API](https://github.com/vllm-project/agentic-api) fork 作为 Responses
-state owner：
+当前外部拓扑使用仓内 `vendor/agentic-api` submodule 中的
+[cipeizheng/agentic-api](https://github.com/cipeizheng/agentic-api) fork 作为 Responses state owner。
+当前 fork revision 为 `e677afd`，基于 upstream `f20cd2b`：
 
 ```text
 Responses client
@@ -81,7 +82,7 @@ Agentic API 的 Responses 执行器支持 server-side tools，例如 web search 
 运行方式：
 
 ```bash
-(cd ../agentic-api-guardrail && cargo build --bin agentic-server)
+(cd vendor/agentic-api && cargo build --bin agentic-server)
 AGENTIC_API_E2E=1 uv run pytest tests/e2e/test_agentic_api_responses.py
 ```
 

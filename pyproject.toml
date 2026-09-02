@@ -84,6 +84,9 @@ packages = ["src/agent_guardrail"]
 # evals/corpus environment. Published wheels stay unaffected.
 dev-mode-dirs = [".", "src"]
 
+[tool.hatch.build.targets.sdist]
+exclude = ["/vendor/agentic-api/target"]
+
 [tool.hatch.metadata]
 allow-direct-references = true
 
@@ -99,6 +102,7 @@ markers = ["e2e: starts the external Agentic API state owner and Gateway process
 [tool.ruff]
 target-version = "py312"
 line-length = 100
+extend-exclude = ["vendor/agentic-api"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "ASYNC"]
@@ -112,4 +116,4 @@ show_missing = true
 fail_under = 80
 
 [tool.pyright]
-exclude = ["evals/corpus"]
+exclude = ["evals/corpus", "vendor/agentic-api"]

@@ -17,8 +17,11 @@ uv run python -m agent_guardrail.gateway
 仓库提供跨进程 E2E harness，启动本项目 Gateway、Agentic API fork 和一个确定性的假 Provider。它验证 Agentic API 重启后用 SQLite 恢复 `previous_response_id`，Gateway 在 Provider 调用前看到完整历史，client-owned function call/output 的续接关系，SSE 终态续接，以及 Provider HTTP/协议错误的错误映射。
 
 ```bash
-# 在相邻目录构建本地 Agentic API fork
-(cd ../agentic-api-guardrail && cargo build --bin agentic-server)
+# 初始化 Agentic API submodule
+git submodule update --init --recursive
+
+# 构建仓内 Agentic API fork
+(cd vendor/agentic-api && cargo build --bin agentic-server)
 
 # 启用测试；默认跳过，避免普通 Python 质量门隐式启动外部进程
 AGENTIC_API_E2E=1 uv run pytest tests/e2e/test_agentic_api_responses.py

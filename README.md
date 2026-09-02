@@ -12,7 +12,7 @@ It preserves relationships among messages, model calls, and tool calls, and prod
 
 ## Project status
 
-The current version is v0.1.0 alpha. The project provides in-process and HTTP Gateway integration, supports OpenAI, Anthropic, and MCP, and supports separate deployment of policy analysis. Responses `previous_response_id` is available through the Gateway's injected in-process state store or the external Agentic API topology. The current external integration uses one Agentic API instance with SQLite; the deployment serves one user, and the host environment supplies sandboxing, identity, durable storage, and resource isolation.
+The current version is v0.1.0 alpha. The project provides in-process and HTTP Gateway integration, supports OpenAI, Anthropic, and MCP, and supports separate deployment of policy analysis.
 
 ## Quick start
 
@@ -87,7 +87,7 @@ Detection results are signals. Rules should also use the data source, destinatio
 
 Guardrail checks events submitted through its SDK and requests handled by its Gateway. With the SDK, application code reads the returned decision before performing the operation; the Gateway enforces that ordering for model and MCP requests. Agent code that can run shell commands, arbitrary code, direct network calls, or host operations still requires a separate sandbox with default-deny egress, minimal temporary storage, and resource limits. Keep provider or tool credentials and audit storage outside that sandbox. The [security model](docs/security-model.md) and [operations guide](docs/guides/operations.md) define the responsibility split.
 
-The current deployment serves one user and the default Compose starts the Gateway only. The [Responses state-layer design](docs/design/responses-state-layer.md) describes the Gateway state interface and the selected external state-owner topology using vLLM Agentic API with SQLite. Future work is listed in the [roadmap](docs/roadmap.md); the [current architecture contract](docs/current-architecture-contract.md) defines current behavior.
+Deployment details and responsibility boundaries are described in the [operations guide](docs/guides/operations.md) and [security model](docs/security-model.md). Future work is listed in the [roadmap](docs/roadmap.md); the [current architecture contract](docs/current-architecture-contract.md) defines current behavior.
 
 ## Documentation
 

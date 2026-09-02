@@ -34,7 +34,7 @@ version-3 YAML
 - Gateway 可以使用进程内 Runtime，也可以使用版本化的独立 Core；两者都调用 `PolicyAnalyzer.analyze_pending`。
 - Gateway 为每个模型请求和每个 MCP `tools/call` 分别创建请求级 `EnforcementSession` 与 `Trace`。模型请求中的完整对话历史会在本次请求内展开并检查；模型 Trace 与 MCP Trace 之间不建立自动关系。
 - Gateway 直接接收的 Responses 请求，只有在可信部署注入 `ResponsesStateStore` 时才使用 `previous_response_id`；Gateway 先恢复有界的前序 input/output history，再创建本次请求的 canonical 快照并执行 Guardrail。当前 `InMemoryResponsesStateStore` 在进程内保存状态；Chat Completions 不使用该状态层。
-- 外部 Responses 拓扑使用 Agentic API fork 作为 state owner，单实例配置使用 SQLite；Agentic API 恢复并展开前序 items 后，将完整 input 发送到 Gateway，Gateway 不读取 Agentic API 数据库。当前集成模式为 `client_only`，客户端 function call/output 经过 Agentic API、Gateway 和 Provider。
+- 外部 Responses 拓扑使用 `vendor/agentic-api` submodule 中的 Agentic API fork 作为 state owner，单实例配置使用 SQLite；Agentic API 恢复并展开前序 items 后，将完整 input 发送到 Gateway，Gateway 不读取 Agentic API 数据库。当前集成模式为 `client_only`，客户端 function call/output 经过 Agentic API、Gateway 和 Provider。
 - 内部 `Event` 的 `model_version` 为 4。规则可以读取 `MESSAGE`、`MODEL_CALL`、`TOOL_CALL_PROPOSAL`、`TOOL_CALL` 和 `TOOL_RESULT`；执行层还会追加脱敏的 `GUARDRAIL_DECISION` 记录，但它不能作为规则输入或关系来源。
 - `derived_from` 表示派生，`influenced_by` 表示可能影响；关系挂在后发生事件上并指向来源。`precedes` 与 `immediately_precedes` 只表达先后顺序，`linked_by` 查询显式的来源/影响关系。
 - `EventSecurityFacts` 随具体事件内容保存 `trust_class + trust_authority`，由可信的 Session/SDK 接入显式提供。外部事件默认标记为 `client_asserted`；`observed/derived` 由执行层建立。

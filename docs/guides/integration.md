@@ -171,7 +171,7 @@ from agent_guardrail.gateway import InMemoryResponsesStateStore, create_app
 app = create_app(settings, responses_state_store=InMemoryResponsesStateStore())
 ```
 
-该实现验证状态恢复发生在 `before_model_call` 之前。它在进程内保存有界状态。外部接入采用 [vLLM Agentic API](https://github.com/vllm-project/agentic-api) → 当前 Gateway → Provider：Agentic API 在前端恢复并展开 history，当前 Gateway 接收完整 input 后执行 Guardrail。外部拓扑的单实例状态存储使用 SQLite；直接访问当前 Gateway 的 `previous_response_id` 使用显式注入的本地 state owner。Chat Completions 仍由调用方提交完整 history。
+该实现验证状态恢复发生在 `before_model_call` 之前。它在进程内保存有界状态。外部接入采用 [Agentic API downstream fork](https://github.com/cipeizheng/agentic-api) → 当前 Gateway → Provider：Agentic API 在前端恢复并展开 history，当前 Gateway 接收完整 input 后执行 Guardrail。外部拓扑的单实例状态存储使用 SQLite；直接访问当前 Gateway 的 `previous_response_id` 使用显式注入的本地 state owner。Chat Completions 仍由调用方提交完整 history。
 
 每个模型请求创建独立 Session。Gateway 将客户端提交的完整对话历史展开成内部 Event，并与本次 `MODEL_CALL` 一起在调用固定上游前检查。普通多轮对话继续使用模型客户端现有的 history/messages 参数。非流式响应完整通过输出 Decision 后才释放。`stream=True` 时，Chat data-only SSE 和 Responses named SSE 都由 Adapter 转为累计 Canonical output：
 
